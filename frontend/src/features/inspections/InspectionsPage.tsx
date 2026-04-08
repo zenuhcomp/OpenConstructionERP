@@ -15,6 +15,15 @@ import {
   AlertTriangle,
   Download,
   Loader2,
+  Columns3,
+  Zap,
+  Droplets,
+  Flame,
+  Box,
+  Droplet,
+  Eye,
+  MapPin,
+  Calendar,
 } from 'lucide-react';
 import { Button, Card, Badge, EmptyState, Breadcrumb, ConfirmDialog, SkeletonTable } from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
@@ -89,6 +98,16 @@ const INSPECTION_TYPES: InspectionType[] = [
   'general',
 ];
 
+const TYPE_CARD_CONFIG: Record<InspectionType, { icon: React.ElementType; color: string }> = {
+  concrete: { icon: Box, color: 'text-blue-600 bg-blue-50 border-blue-200 dark:text-blue-400 dark:bg-blue-950/30 dark:border-blue-800' },
+  waterproofing: { icon: Droplet, color: 'text-cyan-600 bg-cyan-50 border-cyan-200 dark:text-cyan-400 dark:bg-cyan-950/30 dark:border-cyan-800' },
+  electrical: { icon: Zap, color: 'text-amber-600 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/30 dark:border-amber-800' },
+  plumbing: { icon: Droplets, color: 'text-indigo-600 bg-indigo-50 border-indigo-200 dark:text-indigo-400 dark:bg-indigo-950/30 dark:border-indigo-800' },
+  fire_safety: { icon: Flame, color: 'text-red-600 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-950/30 dark:border-red-800' },
+  structural: { icon: Columns3, color: 'text-purple-600 bg-purple-50 border-purple-200 dark:text-purple-400 dark:bg-purple-950/30 dark:border-purple-800' },
+  general: { icon: Eye, color: 'text-gray-600 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-800/50 dark:border-gray-700' },
+};
+
 const INSPECTION_STATUSES: InspectionStatus[] = [
   'scheduled',
   'in_progress',
@@ -106,10 +125,12 @@ interface InspectionFormData {
   location: string;
 }
 
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
 const EMPTY_FORM: InspectionFormData = {
   title: '',
   inspection_type: 'general',
-  date: '',
+  date: todayStr(),
   inspector: '',
   location: '',
 };
@@ -177,7 +198,50 @@ function CreateInspectionModal({
         </div>
 
         {/* Form */}
-        <div className="px-6 py-4 space-y-4">
+        <div className="px-6 py-4 space-y-5">
+          {/* ── Inspection Type ── */}
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-2">
+              {t('inspections.field_type', { defaultValue: 'Inspection Type' })}
+            </label>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              {INSPECTION_TYPES.map((it) => {
+                const cfg = TYPE_CARD_CONFIG[it];
+                const TypeIcon = cfg.icon;
+                const selected = form.inspection_type === it;
+                return (
+                  <button
+                    key={it}
+                    type="button"
+                    onClick={() => set('inspection_type', it)}
+                    className={clsx(
+                      'flex flex-col items-center gap-1.5 rounded-lg border-2 px-2 py-2.5 text-center transition-all',
+                      selected
+                        ? cfg.color + ' ring-2 ring-oe-blue/30'
+                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                    )}
+                  >
+                    <TypeIcon size={18} />
+                    <span className="text-2xs font-medium leading-tight">
+                      {t(`inspections.type_${it}`, {
+                        defaultValue: it.replace(/_/g, ' '),
+                      })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Details Section ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <ClipboardCheck size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('inspections.section_details', { defaultValue: 'Inspection Details' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
           {/* Title */}
           <div>
             <label className="block text-sm font-medium text-content-primary mb-1.5">
@@ -207,34 +271,20 @@ function CreateInspectionModal({
             )}
           </div>
 
-          {/* Two-column: Type + Date */}
+          {/* ── Schedule & Assignment Section ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <Calendar size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('inspections.section_schedule', { defaultValue: 'Schedule & Assignment' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
+          {/* Two-column: Date + Inspector */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('inspections.field_type', { defaultValue: 'Inspection Type' })}
-              </label>
-              <div className="relative">
-                <select
-                  value={form.inspection_type}
-                  onChange={(e) => set('inspection_type', e.target.value as InspectionType)}
-                  className={inputCls + ' appearance-none pr-9'}
-                >
-                  {INSPECTION_TYPES.map((it) => (
-                    <option key={it} value={it}>
-                      {t(`inspections.type_${it}`, {
-                        defaultValue: it.replace(/_/g, ' '),
-                      })}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
-                  <ChevronDown size={14} />
-                </div>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('inspections.field_date', { defaultValue: 'Date' })}{' '}
+                {t('inspections.field_date', { defaultValue: 'Planned Date' })}{' '}
                 <span className="text-semantic-error">*</span>
               </label>
               <input
@@ -256,10 +306,6 @@ function CreateInspectionModal({
                 </p>
               )}
             </div>
-          </div>
-
-          {/* Two-column: Inspector + Location */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
                 {t('inspections.field_inspector', { defaultValue: 'Inspector' })}
@@ -273,19 +319,29 @@ function CreateInspectionModal({
                 })}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('inspections.field_location', { defaultValue: 'Location' })}
-              </label>
-              <input
-                value={form.location}
-                onChange={(e) => set('location', e.target.value)}
-                className={inputCls}
-                placeholder={t('inspections.location_placeholder', {
-                  defaultValue: 'e.g. Building A, Level 3',
-                })}
-              />
-            </div>
+          </div>
+
+          {/* ── Location Section ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <MapPin size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('inspections.section_location', { defaultValue: 'Location' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-1.5">
+              {t('inspections.field_location', { defaultValue: 'Location' })}
+            </label>
+            <input
+              value={form.location}
+              onChange={(e) => set('location', e.target.value)}
+              className={inputCls}
+              placeholder={t('inspections.location_placeholder', {
+                defaultValue: 'e.g. Building A, Level 3, Zone C',
+              })}
+            />
           </div>
         </div>
 

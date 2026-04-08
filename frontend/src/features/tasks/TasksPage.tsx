@@ -16,6 +16,11 @@ import {
   Loader2,
   FileDown,
   Link2,
+  ListTodo,
+  MessageCircle,
+  Info,
+  Scale,
+  UserCircle,
 } from 'lucide-react';
 import { Button, Card, Badge, EmptyState, Breadcrumb, ConfirmDialog, SkeletonGrid } from '@/shared/ui';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
@@ -47,6 +52,14 @@ interface Project {
 
 const TASK_TYPES: TaskType[] = ['task', 'topic', 'info', 'decision', 'personal'];
 const STATUSES: TaskStatus[] = ['open', 'in_progress', 'completed'];
+
+const TYPE_CARD_ICON: Record<TaskType, React.ElementType> = {
+  task: ListTodo,
+  topic: MessageCircle,
+  info: Info,
+  decision: Scale,
+  personal: UserCircle,
+};
 
 const TYPE_COLOR: Record<TaskType, string> = {
   task: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
@@ -162,7 +175,49 @@ function AddTaskModal({
         </div>
 
         {/* Form */}
-        <div className="px-6 py-4 space-y-4">
+        <div className="px-6 py-4 space-y-5">
+          {/* ── Type selector with icons ── */}
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-2">
+              {t('tasks.field_type', { defaultValue: 'Type' })}
+            </label>
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+              {TASK_TYPES.map((tt) => {
+                const TypeIcon = TYPE_CARD_ICON[tt];
+                const selected = form.task_type === tt;
+                return (
+                  <button
+                    key={tt}
+                    type="button"
+                    onClick={() => set('task_type', tt)}
+                    className={clsx(
+                      'flex flex-col items-center gap-1.5 rounded-lg border-2 px-2 py-2.5 text-center transition-all',
+                      selected
+                        ? TYPE_COLOR[tt] + ' border-current ring-2 ring-oe-blue/30'
+                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                    )}
+                  >
+                    <TypeIcon size={18} />
+                    <span className="text-2xs font-medium leading-tight">
+                      {t(`tasks.type_${tt}`, {
+                        defaultValue: tt.charAt(0).toUpperCase() + tt.slice(1),
+                      })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Task Details ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <ClipboardList size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('tasks.section_details', { defaultValue: 'Task Details' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
           {/* Title */}
           <div>
             <label className="block text-sm font-medium text-content-primary mb-1.5">
@@ -176,7 +231,7 @@ function AddTaskModal({
                 defaultValue: 'e.g. Review structural drawings for Level 5',
               })}
               className={clsx(
-                inputCls,
+                'h-12 w-full rounded-lg border border-border bg-surface-primary px-3 text-base font-medium focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue',
                 errors.title &&
                   'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
               )}
@@ -197,66 +252,71 @@ function AddTaskModal({
             <textarea
               value={form.description}
               onChange={(e) => set('description', e.target.value)}
-              rows={2}
+              rows={3}
               className={textareaCls}
               placeholder={t('tasks.description_placeholder', {
-                defaultValue: 'Provide details...',
+                defaultValue: 'Provide details about what needs to be done...',
               })}
             />
           </div>
 
-          {/* Type tabs */}
+          {/* ── Priority (visual badges) ── */}
           <div>
-            <label className="block text-sm font-medium text-content-secondary mb-2">
-              {t('tasks.field_type', { defaultValue: 'Type' })}
+            <label className="block text-sm font-medium text-content-primary mb-2">
+              {t('tasks.field_priority', { defaultValue: 'Priority' })}
             </label>
-            <div className="flex items-center gap-2 flex-wrap">
-              {TASK_TYPES.map((tt) => (
-                <label key={tt} className="relative cursor-pointer">
-                  <input
-                    type="radio"
-                    name="task_type"
-                    value={tt}
-                    checked={form.task_type === tt}
-                    onChange={() => set('task_type', tt)}
-                    className="peer sr-only"
-                  />
-                  <div
+            <div className="grid grid-cols-4 gap-2">
+              {(['low', 'medium', 'high', 'urgent'] as TaskPriority[]).map((p) => {
+                const selected = form.priority === p;
+                const colorMap: Record<TaskPriority, string> = {
+                  low: 'text-gray-600 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-800/50 dark:border-gray-700',
+                  medium: 'text-blue-600 bg-blue-50 border-blue-200 dark:text-blue-400 dark:bg-blue-950/30 dark:border-blue-800',
+                  high: 'text-amber-600 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/30 dark:border-amber-800',
+                  urgent: 'text-red-600 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-950/30 dark:border-red-800',
+                };
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => set('priority', p)}
                     className={clsx(
-                      'rounded-lg border px-3 py-1.5 text-center text-sm font-medium transition-all',
-                      form.task_type === tt
-                        ? TYPE_COLOR[tt] + ' border-current'
-                        : 'border-border text-content-tertiary hover:text-content-secondary',
+                      'rounded-lg border-2 px-3 py-2 text-center text-sm font-semibold transition-all',
+                      selected
+                        ? colorMap[p] + ' ring-2 ring-oe-blue/30'
+                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light',
                     )}
                   >
-                    {t(`tasks.type_${tt}`, {
-                      defaultValue: tt.charAt(0).toUpperCase() + tt.slice(1),
-                    })}
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Two-column: Priority + Due Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('tasks.field_priority', { defaultValue: 'Priority' })}
-              </label>
-              <select
-                value={form.priority}
-                onChange={(e) => set('priority', e.target.value as TaskPriority)}
-                className={inputCls}
-              >
-                {(['low', 'medium', 'high', 'urgent'] as TaskPriority[]).map((p) => (
-                  <option key={p} value={p}>
                     {t(`tasks.priority_${p}`, {
                       defaultValue: p.charAt(0).toUpperCase() + p.slice(1),
                     })}
-                  </option>
-                ))}
-              </select>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Assignment & Schedule ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <Calendar size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('tasks.section_schedule', { defaultValue: 'Assignment & Schedule' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-content-primary mb-1.5">
+                {t('tasks.field_assignee', { defaultValue: 'Assignee' })}
+              </label>
+              <input
+                value={form.assigned_to}
+                onChange={(e) => set('assigned_to', e.target.value)}
+                className={inputCls}
+                placeholder={t('tasks.assignee_placeholder', {
+                  defaultValue: 'Name or email',
+                })}
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
@@ -269,21 +329,6 @@ function AddTaskModal({
                 className={inputCls}
               />
             </div>
-          </div>
-
-          {/* Assignee */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('tasks.field_assignee', { defaultValue: 'Assignee' })}
-            </label>
-            <input
-              value={form.assigned_to}
-              onChange={(e) => set('assigned_to', e.target.value)}
-              className={inputCls}
-              placeholder={t('tasks.assignee_placeholder', {
-                defaultValue: 'Name or email',
-              })}
-            />
           </div>
         </div>
 

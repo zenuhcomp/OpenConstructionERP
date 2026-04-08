@@ -13,6 +13,15 @@ import {
   DollarSign,
   CheckCircle2,
   ClipboardCheck,
+  Package,
+  Wrench,
+  PenTool,
+  FileText,
+  ShieldAlert,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  MapPin,
 } from 'lucide-react';
 import { Button, Card, Badge, EmptyState, Breadcrumb, ConfirmDialog, SkeletonTable } from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
@@ -88,6 +97,21 @@ const NCR_TYPES: NCRType[] = ['material', 'workmanship', 'design', 'documentatio
 
 const NCR_SEVERITIES: NCRSeverity[] = ['critical', 'major', 'minor', 'observation'];
 
+const NCR_TYPE_CARD_CONFIG: Record<NCRType, { icon: React.ElementType; color: string }> = {
+  material: { icon: Package, color: 'text-blue-600 bg-blue-50 border-blue-200 dark:text-blue-400 dark:bg-blue-950/30 dark:border-blue-800' },
+  workmanship: { icon: Wrench, color: 'text-amber-600 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/30 dark:border-amber-800' },
+  design: { icon: PenTool, color: 'text-purple-600 bg-purple-50 border-purple-200 dark:text-purple-400 dark:bg-purple-950/30 dark:border-purple-800' },
+  documentation: { icon: FileText, color: 'text-gray-600 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-800/50 dark:border-gray-700' },
+  safety: { icon: ShieldAlert, color: 'text-red-600 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-950/30 dark:border-red-800' },
+};
+
+const SEVERITY_CARD_CONFIG: Record<NCRSeverity, { icon: React.ElementType; color: string; ringColor: string }> = {
+  critical: { icon: AlertOctagon, color: 'text-red-700 bg-red-50 border-red-300 dark:text-red-400 dark:bg-red-950/30 dark:border-red-800', ringColor: 'ring-red-300' },
+  major: { icon: AlertCircle, color: 'text-orange-600 bg-orange-50 border-orange-200 dark:text-orange-400 dark:bg-orange-950/30 dark:border-orange-800', ringColor: 'ring-orange-300' },
+  minor: { icon: AlertTriangle, color: 'text-yellow-600 bg-yellow-50 border-yellow-200 dark:text-yellow-400 dark:bg-yellow-950/30 dark:border-yellow-800', ringColor: 'ring-yellow-300' },
+  observation: { icon: Info, color: 'text-gray-500 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-800/50 dark:border-gray-700', ringColor: 'ring-gray-300' },
+};
+
 const NCR_STATUSES: NCRStatus[] = [
   'open',
   'under_review',
@@ -104,6 +128,7 @@ interface NCRFormData {
   severity: NCRSeverity;
   description: string;
   location: string;
+  root_cause: string;
 }
 
 const EMPTY_FORM: NCRFormData = {
@@ -112,6 +137,7 @@ const EMPTY_FORM: NCRFormData = {
   severity: 'minor',
   description: '',
   location: '',
+  root_cause: '',
 };
 
 function CreateNCRModal({
@@ -177,7 +203,84 @@ function CreateNCRModal({
         </div>
 
         {/* Form */}
-        <div className="px-6 py-4 space-y-4">
+        <div className="px-6 py-4 space-y-5">
+          {/* ── NCR Type ── */}
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-2">
+              {t('ncr.field_type', { defaultValue: 'Non-Conformance Type' })}
+            </label>
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+              {NCR_TYPES.map((nt) => {
+                const cfg = NCR_TYPE_CARD_CONFIG[nt];
+                const TypeIcon = cfg.icon;
+                const selected = form.ncr_type === nt;
+                return (
+                  <button
+                    key={nt}
+                    type="button"
+                    onClick={() => set('ncr_type', nt)}
+                    className={clsx(
+                      'flex flex-col items-center gap-1.5 rounded-lg border-2 px-2 py-2.5 text-center transition-all',
+                      selected
+                        ? cfg.color + ' ring-2 ring-oe-blue/30'
+                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                    )}
+                  >
+                    <TypeIcon size={18} />
+                    <span className="text-2xs font-medium leading-tight">
+                      {t(`ncr.type_${nt}`, {
+                        defaultValue: nt.charAt(0).toUpperCase() + nt.slice(1),
+                      })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Severity ── */}
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-2">
+              {t('ncr.field_severity', { defaultValue: 'Severity' })}
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {NCR_SEVERITIES.map((sev) => {
+                const cfg = SEVERITY_CARD_CONFIG[sev];
+                const SevIcon = cfg.icon;
+                const selected = form.severity === sev;
+                return (
+                  <button
+                    key={sev}
+                    type="button"
+                    onClick={() => set('severity', sev)}
+                    className={clsx(
+                      'flex items-center gap-2 rounded-lg border-2 px-3 py-2.5 transition-all text-left',
+                      selected
+                        ? cfg.color + ' ring-2 ' + cfg.ringColor
+                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                    )}
+                  >
+                    <SevIcon size={16} className="shrink-0" />
+                    <span className="text-xs font-semibold">
+                      {t(`ncr.severity_${sev}`, {
+                        defaultValue: sev.charAt(0).toUpperCase() + sev.slice(1),
+                      })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Details Section ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <AlertOctagon size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('ncr.section_details', { defaultValue: 'NCR Details' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
           {/* Title */}
           <div>
             <label className="block text-sm font-medium text-content-primary mb-1.5">
@@ -207,56 +310,6 @@ function CreateNCRModal({
             )}
           </div>
 
-          {/* Two-column: Type + Severity */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('ncr.field_type', { defaultValue: 'Type' })}
-              </label>
-              <div className="relative">
-                <select
-                  value={form.ncr_type}
-                  onChange={(e) => set('ncr_type', e.target.value as NCRType)}
-                  className={inputCls + ' appearance-none pr-9'}
-                >
-                  {NCR_TYPES.map((nt) => (
-                    <option key={nt} value={nt}>
-                      {t(`ncr.type_${nt}`, {
-                        defaultValue: nt.charAt(0).toUpperCase() + nt.slice(1),
-                      })}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
-                  <ChevronDown size={14} />
-                </div>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('ncr.field_severity', { defaultValue: 'Severity' })}
-              </label>
-              <div className="relative">
-                <select
-                  value={form.severity}
-                  onChange={(e) => set('severity', e.target.value as NCRSeverity)}
-                  className={inputCls + ' appearance-none pr-9'}
-                >
-                  {NCR_SEVERITIES.map((sev) => (
-                    <option key={sev} value={sev}>
-                      {t(`ncr.severity_${sev}`, {
-                        defaultValue: sev.charAt(0).toUpperCase() + sev.slice(1),
-                      })}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
-                  <ChevronDown size={14} />
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* Description */}
           <div>
             <label className="block text-sm font-medium text-content-primary mb-1.5">
@@ -269,14 +322,14 @@ function CreateNCRModal({
                 set('description', e.target.value);
                 setTouched(true);
               }}
-              rows={3}
+              rows={5}
               className={clsx(
                 textareaCls,
                 descError &&
                   'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
               )}
               placeholder={t('ncr.description_placeholder', {
-                defaultValue: 'Describe the non-conformance in detail...',
+                defaultValue: 'Describe the non-conformance in detail: what was observed, where, and what specification was not met...',
               })}
             />
             {descError && (
@@ -286,7 +339,15 @@ function CreateNCRModal({
             )}
           </div>
 
-          {/* Location */}
+          {/* ── Location Section ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <MapPin size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('ncr.section_location', { defaultValue: 'Location' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-content-primary mb-1.5">
               {t('ncr.field_location', { defaultValue: 'Location' })}
@@ -297,6 +358,22 @@ function CreateNCRModal({
               className={inputCls}
               placeholder={t('ncr.location_placeholder', {
                 defaultValue: 'e.g. Building A, Level 2, Zone C',
+              })}
+            />
+          </div>
+
+          {/* Root Cause */}
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-1.5">
+              {t('ncr.field_root_cause', { defaultValue: 'Root Cause (if known)' })}
+            </label>
+            <textarea
+              value={form.root_cause}
+              onChange={(e) => set('root_cause', e.target.value)}
+              rows={3}
+              className={textareaCls}
+              placeholder={t('ncr.root_cause_placeholder', {
+                defaultValue: 'Preliminary analysis of why the non-conformance occurred...',
               })}
             />
           </div>

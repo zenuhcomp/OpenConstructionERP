@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import {
   HelpCircle,
@@ -15,6 +15,12 @@ import {
   FileText,
   Download,
   Loader2,
+  MessageSquare,
+  User,
+  CalendarClock,
+  AlertTriangle,
+  Paperclip,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { Button, Card, Badge, EmptyState, Breadcrumb, ConfirmDialog, SkeletonTable } from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
@@ -153,7 +159,16 @@ function CreateRFIModal({
         </div>
 
         {/* Form */}
-        <div className="px-6 py-4 space-y-4">
+        <div className="px-6 py-4 space-y-5">
+          {/* ── Request Details ── */}
+          <div className="flex items-center gap-2 pb-1">
+            <MessageSquare size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('rfi.section_request', { defaultValue: 'Request Details' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
           {/* Subject */}
           <div>
             <label className="block text-sm font-medium text-content-primary mb-1.5">
@@ -167,7 +182,7 @@ function CreateRFIModal({
                 defaultValue: 'e.g. Clarification on foundation depth at Grid Line A-3',
               })}
               className={clsx(
-                inputCls,
+                'h-12 w-full rounded-lg border border-border bg-surface-primary px-3 text-base font-medium focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue',
                 errors.subject &&
                   'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
               )}
@@ -189,14 +204,14 @@ function CreateRFIModal({
             <textarea
               value={form.question}
               onChange={(e) => set('question', e.target.value)}
-              rows={3}
+              rows={5}
               className={clsx(
                 textareaCls,
                 errors.question &&
                   'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
               )}
               placeholder={t('rfi.question_placeholder', {
-                defaultValue: 'Describe your question in detail...',
+                defaultValue: 'Describe the information you need...',
               })}
             />
             {errors.question && (
@@ -206,11 +221,20 @@ function CreateRFIModal({
             )}
           </div>
 
+          {/* ── Assignment & Schedule ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <User size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('rfi.section_assignment', { defaultValue: 'Assignment & Schedule' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
           {/* Two-column: Ball in Court + Due Date */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('rfi.field_ball_in_court', { defaultValue: 'Ball in Court' })}
+                {t('rfi.field_ball_in_court', { defaultValue: 'Assigned To' })}
               </label>
               <input
                 value={form.ball_in_court}
@@ -223,7 +247,7 @@ function CreateRFIModal({
             </div>
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('rfi.field_due_date', { defaultValue: 'Due Date' })}
+                {t('rfi.field_due_date', { defaultValue: 'Response Due Date' })}
               </label>
               <input
                 type="date"
@@ -231,35 +255,97 @@ function CreateRFIModal({
                 onChange={(e) => set('due_date', e.target.value)}
                 className={inputCls}
               />
+              <p className="mt-1 text-xs text-content-quaternary">
+                {t('rfi.due_date_hint', { defaultValue: 'Typical: 14 business days from submission' })}
+              </p>
             </div>
           </div>
 
-          {/* Impact toggles */}
-          <div className="flex items-center gap-6">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={form.cost_impact}
-                onChange={() => set('cost_impact', !form.cost_impact)}
-                className="h-4 w-4 rounded border-border text-oe-blue focus:ring-oe-blue"
-              />
-              <span className="text-sm text-content-secondary flex items-center gap-1">
-                <DollarSign size={13} />
-                {t('rfi.cost_impact', { defaultValue: 'Cost Impact' })}
-              </span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={form.schedule_impact}
-                onChange={() => set('schedule_impact', !form.schedule_impact)}
-                className="h-4 w-4 rounded border-border text-oe-blue focus:ring-oe-blue"
-              />
-              <span className="text-sm text-content-secondary flex items-center gap-1">
-                <Clock size={13} />
-                {t('rfi.schedule_impact', { defaultValue: 'Schedule Impact' })}
-              </span>
-            </label>
+          {/* ── Impact Assessment ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <AlertTriangle size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('rfi.section_impact', { defaultValue: 'Impact Assessment' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
+          {/* Impact toggles as visual cards */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => set('cost_impact', !form.cost_impact)}
+              className={clsx(
+                'flex items-center gap-3 rounded-lg border-2 px-4 py-3 transition-all text-left',
+                form.cost_impact
+                  ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-600'
+                  : 'border-border bg-surface-primary hover:bg-surface-secondary',
+              )}
+            >
+              <div className={clsx(
+                'flex h-8 w-8 items-center justify-center rounded-full shrink-0',
+                form.cost_impact
+                  ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400'
+                  : 'bg-surface-tertiary text-content-quaternary',
+              )}>
+                <DollarSign size={16} />
+              </div>
+              <div>
+                <p className={clsx('text-sm font-medium', form.cost_impact ? 'text-amber-700 dark:text-amber-400' : 'text-content-secondary')}>
+                  {t('rfi.cost_impact', { defaultValue: 'Cost Impact' })}
+                </p>
+                <p className="text-xs text-content-quaternary">
+                  {form.cost_impact
+                    ? t('rfi.impact_yes', { defaultValue: 'Yes' })
+                    : t('rfi.impact_no', { defaultValue: 'No' })}
+                </p>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => set('schedule_impact', !form.schedule_impact)}
+              className={clsx(
+                'flex items-center gap-3 rounded-lg border-2 px-4 py-3 transition-all text-left',
+                form.schedule_impact
+                  ? 'border-blue-400 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-600'
+                  : 'border-border bg-surface-primary hover:bg-surface-secondary',
+              )}
+            >
+              <div className={clsx(
+                'flex h-8 w-8 items-center justify-center rounded-full shrink-0',
+                form.schedule_impact
+                  ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400'
+                  : 'bg-surface-tertiary text-content-quaternary',
+              )}>
+                <CalendarClock size={16} />
+              </div>
+              <div>
+                <p className={clsx('text-sm font-medium', form.schedule_impact ? 'text-blue-700 dark:text-blue-400' : 'text-content-secondary')}>
+                  {t('rfi.schedule_impact', { defaultValue: 'Schedule Impact' })}
+                </p>
+                <p className="text-xs text-content-quaternary">
+                  {form.schedule_impact
+                    ? t('rfi.impact_yes', { defaultValue: 'Yes' })
+                    : t('rfi.impact_no', { defaultValue: 'No' })}
+                </p>
+              </div>
+            </button>
+          </div>
+
+          {/* ── Linked Drawings (optional) ── */}
+          <div className="flex items-center gap-2 pt-2 pb-1">
+            <Paperclip size={14} className="text-content-tertiary" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
+              {t('rfi.section_references', { defaultValue: 'References' })}
+            </span>
+            <div className="flex-1 h-px bg-border-light" />
+          </div>
+
+          <div className="rounded-lg border border-dashed border-border p-4 text-center">
+            <Paperclip size={18} className="mx-auto text-content-quaternary mb-1" />
+            <p className="text-xs text-content-tertiary">
+              {t('rfi.linked_drawings_hint', { defaultValue: 'Linked drawings and references can be added after creation' })}
+            </p>
           </div>
         </div>
 
@@ -579,6 +665,7 @@ async function downloadExcelExport(url: string, fallbackFilename: string): Promi
 
 export function RFIPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { projectId: routeProjectId } = useParams<{ projectId: string }>();
   const qc = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
@@ -868,6 +955,14 @@ export function RFIPage() {
             {t('rfi.new_rfi', { defaultValue: 'New RFI' })}
           </Button>
         </div>
+      </div>
+
+      {/* Cross-module link */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/changeorders')}>
+          <ArrowRightLeft size={13} className="me-1" />
+          {t('rfi.link_change_orders', { defaultValue: 'View Change Orders' })}
+        </Button>
       </div>
 
       {/* No-project warning */}

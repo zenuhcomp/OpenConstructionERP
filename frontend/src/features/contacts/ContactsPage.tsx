@@ -19,6 +19,13 @@ import {
   Download,
   Loader2,
   FileDown,
+  Users,
+  HardHat,
+  Truck,
+  Briefcase,
+  CreditCard,
+  MapPin,
+  User,
 } from 'lucide-react';
 import { Button, Card, Badge, EmptyState, Breadcrumb, CountryFlag } from '@/shared/ui';
 import { useToastStore } from '@/stores/useToastStore';
@@ -87,26 +94,53 @@ const inputCls =
 
 /* ── Add Contact Modal ─────────────────────────────────────────────────── */
 
+const TYPE_CARD_CONFIG: Record<ContactType, { icon: React.ElementType; color: string }> = {
+  client: { icon: Users, color: 'text-blue-600 bg-blue-50 border-blue-200 dark:text-blue-400 dark:bg-blue-950/30 dark:border-blue-800' },
+  subcontractor: { icon: HardHat, color: 'text-amber-600 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/30 dark:border-amber-800' },
+  supplier: { icon: Truck, color: 'text-green-600 bg-green-50 border-green-200 dark:text-green-400 dark:bg-green-950/30 dark:border-green-800' },
+  consultant: { icon: Briefcase, color: 'text-gray-600 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-800/50 dark:border-gray-700' },
+};
+
+function SectionHeader({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+  return (
+    <div className="flex items-center gap-2 pt-2 pb-1">
+      <Icon size={14} className="text-content-tertiary" />
+      <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">{label}</span>
+      <div className="flex-1 h-px bg-border-light" />
+    </div>
+  );
+}
+
 interface ContactFormData {
   company_name: string;
-  contact_name: string;
+  legal_name: string;
+  vat_number: string;
+  first_name: string;
+  last_name: string;
   contact_type: ContactType;
   email: string;
   phone: string;
+  website: string;
   country: string;
   address: string;
+  payment_terms: string;
   prequalification_status: PrequalificationStatus;
   notes: string;
 }
 
 const EMPTY_FORM: ContactFormData = {
   company_name: '',
-  contact_name: '',
+  legal_name: '',
+  vat_number: '',
+  first_name: '',
+  last_name: '',
   contact_type: 'client',
   email: '',
   phone: '',
+  website: '',
   country: '',
   address: '',
+  payment_terms: '30',
   prequalification_status: 'none',
   notes: '',
 };
@@ -131,7 +165,8 @@ function AddContactModal({
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};
-    if (!form.company_name.trim() && !form.contact_name.trim()) {
+    const hasName = form.first_name.trim() || form.last_name.trim();
+    if (!form.company_name.trim() && !hasName) {
       e.company_name = t('contacts.company_or_name_required', { defaultValue: 'Company name or contact name is required' });
     }
     setErrors(e);
@@ -169,8 +204,45 @@ function AddContactModal({
         </div>
 
         {/* Form */}
-        <div className="px-6 py-4 space-y-4">
-          {/* Company Name */}
+        <div className="px-6 py-4 space-y-5">
+          {/* ── Contact Type ── */}
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-2">
+              {t('contacts.field_type', { defaultValue: 'Contact Type' })}{' '}
+              <span className="text-semantic-error">*</span>
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {CONTACT_TYPES.map((ct) => {
+                const cfg = TYPE_CARD_CONFIG[ct];
+                const TypeIcon = cfg.icon;
+                const selected = form.contact_type === ct;
+                return (
+                  <button
+                    key={ct}
+                    type="button"
+                    onClick={() => set('contact_type', ct)}
+                    className={clsx(
+                      'flex flex-col items-center gap-1.5 rounded-lg border-2 px-3 py-3 text-center transition-all',
+                      selected
+                        ? cfg.color + ' ring-2 ring-oe-blue/30'
+                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                    )}
+                  >
+                    <TypeIcon size={20} />
+                    <span className="text-xs font-medium">
+                      {t(`contacts.type_${ct}`, {
+                        defaultValue: ct.charAt(0).toUpperCase() + ct.slice(1),
+                      })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Company Section ── */}
+          <SectionHeader icon={Building2} label={t('contacts.section_company', { defaultValue: 'Company' })} />
+
           <div>
             <label className="block text-sm font-medium text-content-primary mb-1.5">
               {t('contacts.field_company', { defaultValue: 'Company Name' })}{' '}
@@ -196,40 +268,62 @@ function AddContactModal({
             )}
           </div>
 
-          {/* Two-column: Contact Name + Type */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_name', { defaultValue: 'Contact Name' })}
+                {t('contacts.field_legal_name', { defaultValue: 'Legal Name' })}
               </label>
               <input
-                value={form.contact_name}
-                onChange={(e) => set('contact_name', e.target.value)}
+                value={form.legal_name}
+                onChange={(e) => set('legal_name', e.target.value)}
                 className={inputCls}
-                placeholder={t('contacts.name_placeholder', { defaultValue: 'Full name' })}
+                placeholder={t('contacts.legal_name_placeholder', { defaultValue: 'Registered legal entity name' })}
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_type', { defaultValue: 'Type' })}
+                {t('contacts.field_vat', { defaultValue: 'VAT / Tax ID' })}
               </label>
-              <select
-                value={form.contact_type}
-                onChange={(e) => set('contact_type', e.target.value as ContactType)}
+              <input
+                value={form.vat_number}
+                onChange={(e) => set('vat_number', e.target.value)}
                 className={inputCls}
-              >
-                {CONTACT_TYPES.map((ct) => (
-                  <option key={ct} value={ct}>
-                    {t(`contacts.type_${ct}`, {
-                      defaultValue: ct.charAt(0).toUpperCase() + ct.slice(1),
-                    })}
-                  </option>
-                ))}
-              </select>
+                placeholder={t('contacts.vat_placeholder', { defaultValue: 'e.g. DE123456789' })}
+              />
             </div>
           </div>
 
-          {/* Two-column: Email + Phone */}
+          {/* ── Person Section ── */}
+          <SectionHeader icon={User} label={t('contacts.section_person', { defaultValue: 'Contact Person' })} />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-content-primary mb-1.5">
+                {t('contacts.field_first_name', { defaultValue: 'First Name' })}
+              </label>
+              <input
+                value={form.first_name}
+                onChange={(e) => set('first_name', e.target.value)}
+                className={inputCls}
+                placeholder={t('contacts.first_name_placeholder', { defaultValue: 'John' })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-content-primary mb-1.5">
+                {t('contacts.field_last_name', { defaultValue: 'Last Name' })}
+              </label>
+              <input
+                value={form.last_name}
+                onChange={(e) => set('last_name', e.target.value)}
+                className={inputCls}
+                placeholder={t('contacts.last_name_placeholder', { defaultValue: 'Doe' })}
+              />
+            </div>
+          </div>
+
+          {/* ── Contact Details Section ── */}
+          <SectionHeader icon={Mail} label={t('contacts.section_contact', { defaultValue: 'Contact Details' })} />
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
@@ -257,20 +351,76 @@ function AddContactModal({
             </div>
           </div>
 
-          {/* Two-column: Country + Prequalification */}
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-1.5">
+              {t('contacts.field_website', { defaultValue: 'Website' })}
+            </label>
+            <input
+              type="url"
+              value={form.website}
+              onChange={(e) => set('website', e.target.value)}
+              className={inputCls}
+              placeholder="https://www.example.com"
+            />
+          </div>
+
+          {/* ── Address Section ── */}
+          <SectionHeader icon={MapPin} label={t('contacts.section_address', { defaultValue: 'Address' })} />
+
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-1.5">
+              {t('contacts.field_country', { defaultValue: 'Country' })}
+            </label>
+            <input
+              value={form.country}
+              onChange={(e) => set('country', e.target.value)}
+              className={inputCls}
+              placeholder={t('contacts.country_placeholder', {
+                defaultValue: 'e.g. DE, US, GB',
+              })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-content-primary mb-1.5">
+              {t('contacts.field_address', { defaultValue: 'Address' })}
+            </label>
+            <textarea
+              value={form.address}
+              onChange={(e) => set('address', e.target.value)}
+              rows={2}
+              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
+              placeholder={t('contacts.address_placeholder', {
+                defaultValue: 'Street address, City, ZIP / Postal code',
+              })}
+            />
+          </div>
+
+          {/* ── Payment & Status Section ── */}
+          <SectionHeader icon={CreditCard} label={t('contacts.section_payment', { defaultValue: 'Payment & Status' })} />
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_country', { defaultValue: 'Country' })}
+                {t('contacts.field_payment_terms', { defaultValue: 'Payment Terms' })}
               </label>
-              <input
-                value={form.country}
-                onChange={(e) => set('country', e.target.value)}
-                className={inputCls}
-                placeholder={t('contacts.country_placeholder', {
-                  defaultValue: 'e.g. DE, US, GB',
-                })}
-              />
+              <div className="flex items-center gap-2">
+                {['30', '45', '60'].map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    onClick={() => set('payment_terms', days)}
+                    className={clsx(
+                      'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all text-center',
+                      form.payment_terms === days
+                        ? 'border-oe-blue bg-oe-blue-subtle text-oe-blue ring-1 ring-oe-blue/30'
+                        : 'border-border text-content-tertiary hover:border-border-light hover:text-content-secondary',
+                    )}
+                  >
+                    {days} {t('contacts.days', { defaultValue: 'days' })}
+                  </button>
+                ))}
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
@@ -294,21 +444,6 @@ function AddContactModal({
                 ))}
               </select>
             </div>
-          </div>
-
-          {/* Address */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('contacts.field_address', { defaultValue: 'Address' })}
-            </label>
-            <input
-              value={form.address}
-              onChange={(e) => set('address', e.target.value)}
-              className={inputCls}
-              placeholder={t('contacts.address_placeholder', {
-                defaultValue: 'Street, City, ZIP',
-              })}
-            />
           </div>
 
           {/* Notes */}
@@ -689,9 +824,10 @@ export function ContactsPage() {
 
   const handleCreateSubmit = useCallback(
     (formData: ContactFormData) => {
+      const contactName = [formData.first_name, formData.last_name].filter(Boolean).join(' ');
       createMut.mutate({
         company_name: formData.company_name,
-        contact_name: formData.contact_name,
+        contact_name: contactName,
         contact_type: formData.contact_type,
         email: formData.email || undefined,
         phone: formData.phone || undefined,

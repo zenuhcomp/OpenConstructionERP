@@ -31,6 +31,9 @@ import {
   Package,
   Activity,
   ClipboardList,
+  FolderOpen,
+  HardHat,
+  Calendar,
 } from 'lucide-react';
 import { Button, Card, CardHeader, Badge, Skeleton, EmptyState, Breadcrumb } from '@/shared/ui';
 import { apiGet } from '@/shared/lib/api';
@@ -1744,6 +1747,51 @@ export function ProjectDetailPage() {
                       onClick={() => navigate('/reports')}
                     >
                       {t('projects.dash_generate_report', { defaultValue: 'Generate Report' })}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="w-full justify-start"
+                      icon={<FolderOpen size={14} />}
+                      onClick={() => navigate('/documents')}
+                    >
+                      {t('projects.dash_documents_link', { defaultValue: 'Documents' })}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="w-full justify-start"
+                      icon={<Calendar size={14} />}
+                      onClick={() => navigate('/schedule')}
+                    >
+                      {t('projects.dash_schedule_link', { defaultValue: 'Schedule' })}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="w-full justify-start"
+                      icon={<Wallet size={14} />}
+                      onClick={() => navigate('/finance')}
+                    >
+                      {t('projects.dash_finance_link', { defaultValue: 'Finance' })}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="w-full justify-start"
+                      icon={<HardHat size={14} />}
+                      onClick={() => navigate('/safety')}
+                    >
+                      {t('projects.dash_safety_link', { defaultValue: 'Safety' })}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="w-full justify-start"
+                      icon={<Package size={14} />}
+                      onClick={() => navigate('/procurement')}
+                    >
+                      {t('projects.dash_procurement_link', { defaultValue: 'Procurement' })}
                     </Button>
                   </div>
                   {/* Document stats */}

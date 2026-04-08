@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Table, Table2, ArrowRight, Copy, Trash2, Plus,
   Search, ArrowUpDown, ChevronDown, GitCompareArrows, X, Loader2,
+  ShieldCheck, Wallet,
 } from 'lucide-react';
 import { Card, Badge, EmptyState, Skeleton, Button, Breadcrumb } from '@/shared/ui';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
@@ -577,6 +578,18 @@ export function BOQListPage() {
             {t('boq.new_estimate', { defaultValue: 'New Estimate' })}
           </Button>
         </div>
+      </div>
+
+      {/* Cross-module links */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/validation')}>
+          <ShieldCheck size={13} className="me-1" />
+          {t('boq.link_validation', { defaultValue: 'Run Validation' })}
+        </Button>
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/finance')}>
+          <Wallet size={13} className="me-1" />
+          {t('boq.link_finance', { defaultValue: 'View Budget' })}
+        </Button>
       </div>
 
       {/* Stats cards */}

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
@@ -12,6 +12,8 @@ import {
   Loader2,
   Plus,
   X,
+  ClipboardCheck,
+  ListChecks,
 } from 'lucide-react';
 import {
   Button,
@@ -195,6 +197,7 @@ const textareaCls =
 
 export function SafetyPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { projectId: routeProjectId } = useParams<{ projectId?: string }>();
   const activeProjectId = useProjectContextStore((s) => s.activeProjectId);
   const projectId = routeProjectId || activeProjectId || '';
@@ -238,6 +241,18 @@ export function SafetyPage() {
             defaultValue: 'Incident tracking and safety observations',
           })}
         </p>
+      </div>
+
+      {/* Cross-module links */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/inspections')}>
+          <ClipboardCheck size={13} className="me-1" />
+          {t('safety.link_inspections', { defaultValue: 'Inspections' })}
+        </Button>
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/punchlist')}>
+          <ListChecks size={13} className="me-1" />
+          {t('safety.link_punchlist', { defaultValue: 'Punch List' })}
+        </Button>
       </div>
 
       {/* No-project warning */}

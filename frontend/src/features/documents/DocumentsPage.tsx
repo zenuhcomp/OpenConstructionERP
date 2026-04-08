@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, FileText, Image, FileSpreadsheet, File, Trash2, Download,
   Search, X, Loader2, FolderOpen, ChevronDown, HardDrive, Eye,
-  MoreHorizontal, Pencil, Tag, Ruler,
+  MoreHorizontal, Pencil, Tag, Ruler, Database, Send,
 } from 'lucide-react';
 import { Card, Button, Badge, EmptyState, Breadcrumb } from '@/shared/ui';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
@@ -557,6 +557,18 @@ export function DocumentsPage() {
             {t('documents.upload', { defaultValue: 'Upload Files' })}
           </Button>
         </div>
+      </div>
+
+      {/* ── Cross-module links ──────────────────────────────────────────── */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/cde')}>
+          <Database size={13} className="me-1" />
+          {t('documents.link_cde', { defaultValue: 'CDE Containers' })}
+        </Button>
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/transmittals')}>
+          <Send size={13} className="me-1" />
+          {t('documents.link_transmittals', { defaultValue: 'Transmittals' })}
+        </Button>
       </div>
 
       {/* ── Stats bar ───────────────────────────────────────────────────── */}

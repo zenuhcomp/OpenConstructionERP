@@ -1,11 +1,14 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   Package,
   ClipboardCheck,
   Search,
   FileText,
+  Wallet,
+  Contact,
 } from 'lucide-react';
 import {
   Button,
@@ -86,6 +89,7 @@ const GR_STATUS_COLORS: Record<
 
 export function ProcurementPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const projectId = useProjectContextStore((s) => s.activeProjectId);
   const projectName = useProjectContextStore((s) => s.activeProjectName);
 
@@ -127,6 +131,18 @@ export function ProcurementPage() {
             defaultValue: 'Purchase orders and goods receipts',
           })}
         </p>
+      </div>
+
+      {/* Cross-module links */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/finance')}>
+          <Wallet size={13} className="me-1" />
+          {t('procurement.link_finance', { defaultValue: 'Finance' })}
+        </Button>
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/contacts')}>
+          <Contact size={13} className="me-1" />
+          {t('procurement.link_contacts', { defaultValue: 'Contacts' })}
+        </Button>
       </div>
 
       {/* No-project warning */}

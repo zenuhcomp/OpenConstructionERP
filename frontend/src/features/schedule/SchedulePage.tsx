@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   Calendar,
   CalendarDays,
@@ -19,6 +20,8 @@ import {
   ShieldAlert,
   RotateCcw,
   Download,
+  ClipboardList,
+  Users,
 } from 'lucide-react';
 import { Button, Card, Badge, EmptyState, Input, InfoHint, SkeletonTable, Breadcrumb, GanttChart as SVGGanttChart } from '@/shared/ui';
 import type { GanttActivity as SVGGanttActivity, GanttViewMode } from '@/shared/ui';
@@ -1694,6 +1697,7 @@ function ProjectSchedules({
 
 export function SchedulePage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { activeProjectId, setActiveProject } = useProjectContextStore();
 
   const { data: projects, isLoading } = useQuery({
@@ -1761,6 +1765,18 @@ export function SchedulePage() {
             'Select a project to view and manage its construction schedule',
           )}
         </p>
+      </div>
+
+      {/* Cross-module links */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/tasks')}>
+          <ClipboardList size={13} className="me-1" />
+          {t('schedule.link_tasks', { defaultValue: 'Tasks' })}
+        </Button>
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => navigate('/meetings')}>
+          <Users size={13} className="me-1" />
+          {t('schedule.link_meetings', { defaultValue: 'Meetings' })}
+        </Button>
       </div>
 
       {/* 4D explanation */}
