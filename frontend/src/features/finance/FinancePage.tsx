@@ -410,6 +410,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
       apiGet<BudgetLine[]>(
         `/v1/finance/budgets?project_id=${projectId}`,
       ),
+    select: (d): BudgetLine[] => (Array.isArray(d) ? d : (d as any)?.items ?? []),
   });
 
   const filtered = useMemo(() => {
@@ -914,6 +915,7 @@ function InvoicesTab({ projectId }: { projectId: string }) {
       apiGet<Invoice[]>(
         `/v1/finance/invoices?project_id=${projectId}&direction=${subTab}`,
       ),
+    select: (d): Invoice[] => (Array.isArray(d) ? d : (d as any)?.items ?? []),
   });
 
   const filtered = useMemo(() => {
@@ -1373,6 +1375,7 @@ function PaymentsTab({ projectId }: { projectId: string }) {
     queryKey: ['finance-payments', projectId],
     queryFn: () =>
       apiGet<Payment[]>(`/v1/finance/payments?project_id=${projectId}`),
+    select: (d): Payment[] => (Array.isArray(d) ? d : (d as any)?.items ?? []),
   });
 
   if (isLoading) return <SkeletonTable rows={5} columns={6} />;

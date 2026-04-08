@@ -493,8 +493,10 @@ function StepWelcome({
     [onLanguageChange],
   );
 
-  // Auto-detect on mount
+  // Auto-detect on mount — only if no explicit user choice has been saved
   useEffect(() => {
+    const saved = localStorage.getItem('i18nextLng');
+    if (saved) return; // User already made an explicit choice — don't override
     const detected = navigator.language?.split('-')[0] || 'en';
     const match = SUPPORTED_LANGUAGES.find((l) => l.code === detected);
     if (match && match.code !== i18n.language) {

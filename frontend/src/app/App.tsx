@@ -360,6 +360,14 @@ export default function App() {
         <Route path="/integrations" element={<P title="Integrations"><IntegrationsPage /></P>} />
         <Route path="/about" element={<P title="About"><AboutPage /></P>} />
 
+        {/* Convenience route aliases — redirect to canonical paths */}
+        <Route path="/change-orders" element={<Navigate to="/changeorders" replace />} />
+        <Route path="/punch-list" element={<Navigate to="/punchlist" replace />} />
+        <Route path="/variations" element={<Navigate to="/changeorders" replace />} />
+        <Route path="/estimates" element={<Navigate to="/boq" replace />} />
+        <Route path="/profile" element={<Navigate to="/settings" replace />} />
+        <Route path="/notifications" element={<Navigate to="/settings" replace />} />
+
         {/* Plugin module routes — lazy-loaded */}
         {moduleRoutes}
 

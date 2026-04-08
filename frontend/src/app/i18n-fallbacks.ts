@@ -5032,7 +5032,7 @@ export const fallbackResources = {
       'error.details': 'Fehlerdetails',
       'error.not_found_desc': 'Die gesuchte Seite existiert nicht oder wurde verschoben.',
       'onboarding.tour_step': 'Schritt {{current}} von {{total}}',
-      'onboarding.step_label': 'Schritt {{number}}',
+      'onboarding.step_label': 'Schritt',
       'onboarding.step_of_connector': 'von',
       'onboarding.previous': 'Zurück',
       'onboarding.next': 'Weiter',
