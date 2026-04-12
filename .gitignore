@@ -70,8 +70,12 @@ data/exports/
 data/cwicr/cache/
 frontend/debug-bim/
 
-# Claude Code / MCP
-internal-notes/
+# Claude Code / MCP — keep instruction files (internal-notes/*.md) but
+# ignore session cache, temp data, and MCP artifacts
+internal-notes/tmp/
+internal-notes/cache/
+internal-notes/projects/
+*.claude-session
 .mcp.json
 .playwright-mcp/
 
