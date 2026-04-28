@@ -27,15 +27,25 @@ import type { CostVariant, VariantStats } from './api';
 export interface VariantPickerProps {
   variants: CostVariant[];
   stats: VariantStats;
-  /** Pre-selected row.  When omitted, the row whose price equals
-   *  `stats.median` is preferred; otherwise `floor(len/2)`. */
+  /** Pre-selected row.  When omitted, the row whose price matches
+   *  `stats[defaultStrategy]` is preferred; otherwise `floor(len/2)`. */
   defaultIndex?: number;
+  /** Which `VariantStats` field drives the auto-default.  `"mean"` is the
+   *  production default for new applies (matches CostX/iTWO behaviour);
+   *  `"median"` is kept for the legacy panel that tags the median row in
+   *  the cost-DB browser. */
+  defaultStrategy?: 'mean' | 'median';
   /** Anchor element used to position the popover.  When `null`, the
    *  popover renders centered on screen as a graceful fallback. */
   anchorEl: HTMLElement | null;
   unitLabel: string;
   currency: string;
   onApply: (chosen: CostVariant) => void;
+  /** Optional one-click "use average" path — when supplied, the picker
+   *  surfaces an extra footer button that applies the mean rate without
+   *  forcing the user to pick a row.  The argument is the strategy that
+   *  was honoured (passed up so the parent can stamp `variant_default`). */
+  onUseDefault?: (strategy: 'mean' | 'median') => void;
   onClose: () => void;
 }
 
@@ -60,10 +70,21 @@ function formatPrice(value: number, currency: string): string {
   }
 }
 
-/** Resolve the initial selected index per the design rule. */
+/** Resolve the initial selected index per the design rule.
+ *
+ *  Resolution order:
+ *    1. Explicit `override` index when in-bounds.
+ *    2. Variant whose `price` equals the chosen strategy stat (mean or
+ *       median) within 1¢ tolerance.
+ *    3. Variant closest in absolute price to the strategy stat — used when
+ *       the average doesn't land on a real entry (common: `mean` between
+ *       two variants).
+ *    4. `floor(len/2)` as a final fallback.
+ */
 function resolveDefaultIndex(
   variants: CostVariant[],
   stats: VariantStats,
+  strategy: 'mean' | 'median',
   override?: number,
 ): number {
   if (
@@ -73,11 +94,26 @@ function resolveDefaultIndex(
   ) {
     return override;
   }
-  const medianIdx = variants.findIndex(
-    (v) => Math.abs(v.price - stats.median) < 0.01,
+  const target = strategy === 'mean' ? stats.mean : stats.median;
+  const exactIdx = variants.findIndex(
+    (v) => Math.abs(v.price - target) < 0.01,
   );
-  if (medianIdx >= 0) return medianIdx;
-  return Math.floor(variants.length / 2);
+  if (exactIdx >= 0) return exactIdx;
+  // No exact hit — pick the closest entry by absolute price.  Mean rarely
+  // lands exactly on a quote so this branch is the common case for the
+  // "mean" strategy.
+  let bestIdx = 0;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < variants.length; i++) {
+    const variant = variants[i];
+    if (!variant) continue;
+    const delta = Math.abs(variant.price - target);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
 }
 
 /* ── Component ────────────────────────────────────────────────────────── */
@@ -86,17 +122,19 @@ export function VariantPicker({
   variants,
   stats,
   defaultIndex,
+  defaultStrategy = 'mean',
   anchorEl,
   unitLabel,
   currency,
   onApply,
+  onUseDefault,
   onClose,
 }: VariantPickerProps) {
   const { t } = useTranslation();
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const [selectedIdx, setSelectedIdx] = useState<number>(() =>
-    resolveDefaultIndex(variants, stats, defaultIndex),
+    resolveDefaultIndex(variants, stats, defaultStrategy, defaultIndex),
   );
 
   // Anchor rect — re-read on mount and on scroll/resize so a long-lived
@@ -166,9 +204,12 @@ export function VariantPicker({
     return { position: 'fixed', left, top, zIndex: 10000 };
   }, [anchorRect]);
 
-  const medianIdx = useMemo(
-    () => variants.findIndex((v) => Math.abs(v.price - stats.median) < 0.01),
-    [variants, stats.median],
+  // Index of the row that visually carries the "default" chip — drives a
+  // subtle highlight so the user can see at a glance which row matches the
+  // current strategy stat (mean / median).
+  const defaultIdx = useMemo(
+    () => resolveDefaultIndex(variants, stats, defaultStrategy),
+    [variants, stats, defaultStrategy],
   );
 
   const chosen = variants[selectedIdx];
@@ -176,6 +217,18 @@ export function VariantPicker({
   const handleApply = () => {
     if (chosen) onApply(chosen);
   };
+
+  // "Use average" — sidesteps the per-row pick.  Parent stamps
+  // `metadata.variant_default = 'mean' | 'median'` so the BOQ row marker
+  // can render a softer "default · choose to refine" hint.
+  const handleUseDefault = () => {
+    onUseDefault?.(defaultStrategy);
+  };
+
+  const defaultChipLabel =
+    defaultStrategy === 'mean'
+      ? t('costs.variant_default_mean_chip', { defaultValue: 'Average' })
+      : t('costs.variant_default_median_chip', { defaultValue: 'Median' });
 
   const popover = (
     <div
@@ -240,7 +293,7 @@ export function VariantPicker({
       >
         {variants.map((v, idx) => {
           const isSel = idx === selectedIdx;
-          const isMedian = idx === medianIdx;
+          const isDefault = idx === defaultIdx;
           return (
             <button
               key={v.index}
@@ -253,6 +306,7 @@ export function VariantPicker({
                   ? 'bg-oe-blue-subtle/20'
                   : 'hover:bg-surface-secondary/60'
               }`}
+              data-testid={`variant-row-${idx}`}
             >
               {/* Radio circle */}
               <span
@@ -272,9 +326,9 @@ export function VariantPicker({
                   >
                     {v.label}
                   </span>
-                  {isMedian && (
+                  {isDefault && (
                     <Badge variant="blue" size="sm">
-                      {t('costs.variant_default_median_chip', { defaultValue: 'Median' })}
+                      {defaultChipLabel}
                     </Badge>
                   )}
                 </div>
@@ -301,18 +355,39 @@ export function VariantPicker({
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2.5 border-t border-border-light bg-surface-secondary/30 flex items-center justify-end gap-2 shrink-0">
-        <Button variant="secondary" size="sm" onClick={onClose}>
-          {t('common.cancel', { defaultValue: 'Cancel' })}
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={handleApply}
-          disabled={!chosen}
-        >
-          {t('common.apply', { defaultValue: 'Apply' })}
-        </Button>
+      <div className="px-4 py-2.5 border-t border-border-light bg-surface-secondary/30 flex items-center justify-between gap-2 shrink-0">
+        {onUseDefault ? (
+          <button
+            type="button"
+            onClick={handleUseDefault}
+            className="text-2xs text-oe-blue hover:underline font-medium"
+            data-testid="variant-picker-use-default"
+            title={t('costs.variant_use_default_tooltip', {
+              defaultValue:
+                'Apply the average rate without picking a specific variant. You can refine later by clicking the row.',
+            })}
+          >
+            {defaultStrategy === 'mean'
+              ? t('costs.variant_use_average', { defaultValue: 'Use average rate' })
+              : t('costs.variant_use_median', { defaultValue: 'Use median rate' })}
+          </button>
+        ) : (
+          <span aria-hidden="true" />
+        )}
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleApply}
+            disabled={!chosen}
+            data-testid="variant-picker-apply"
+          >
+            {t('common.apply', { defaultValue: 'Apply' })}
+          </Button>
+        </div>
       </div>
     </div>
   );

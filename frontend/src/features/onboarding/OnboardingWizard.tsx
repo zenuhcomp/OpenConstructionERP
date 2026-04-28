@@ -42,6 +42,9 @@ const TOTAL_STEPS = 6;
 
 // ── Language -> Region mapping ──────────────────────────────────────────────
 
+// Language → recommended CWICR region. Updated 2026-04-28 — most languages now
+// have a proper local database; previously several locales fell back to
+// DE_BERLIN/SP_BARCELONA/ZH_SHANGHAI as approximations.
 const LANG_TO_REGION: Record<string, string> = {
   de: 'DE_BERLIN',
   fr: 'FR_PARIS',
@@ -52,18 +55,23 @@ const LANG_TO_REGION: Record<string, string> = {
   ar: 'AR_DUBAI',
   hi: 'HI_MUMBAI',
   en: 'USA_USD',
-  tr: 'AR_DUBAI',
-  it: 'SP_BARCELONA',
-  ja: 'ZH_SHANGHAI',
-  ko: 'ZH_SHANGHAI',
-  nl: 'DE_BERLIN',
-  pl: 'DE_BERLIN',
-  cs: 'DE_BERLIN',
-  sv: 'DE_BERLIN',
-  no: 'DE_BERLIN',
-  da: 'DE_BERLIN',
-  fi: 'DE_BERLIN',
-  bg: 'DE_BERLIN',
+  tr: 'TR_ISTANBUL',
+  it: 'IT_ROME',
+  ja: 'JA_TOKYO',
+  ko: 'KO_SEOUL',
+  nl: 'NL_AMSTERDAM',
+  pl: 'PL_WARSAW',
+  cs: 'CS_PRAGUE',
+  hr: 'HR_ZAGREB',
+  sv: 'SV_STOCKHOLM',
+  no: 'SV_STOCKHOLM',
+  da: 'SV_STOCKHOLM',
+  fi: 'SV_STOCKHOLM',
+  bg: 'BG_SOFIA',
+  ro: 'RO_BUCHAREST',
+  th: 'TH_BANGKOK',
+  vi: 'VI_HANOI',
+  id: 'ID_JAKARTA',
 };
 
 // ── Language -> Demo project mapping ────────────────────────────────────────
@@ -88,17 +96,42 @@ interface CWICRDatabase {
 }
 
 const CWICR_DATABASES: CWICRDatabase[] = [
+  // Anglosphere
   { id: 'USA_USD', name: 'United States', city: 'New York', lang: 'English', currency: 'USD', flagId: 'us' },
   { id: 'UK_GBP', name: 'United Kingdom', city: 'London', lang: 'English', currency: 'GBP', flagId: 'gb' },
   { id: 'ENG_TORONTO', name: 'Canada / International', city: 'Toronto', lang: 'English', currency: 'CAD', flagId: 'ca' },
+  { id: 'AU_SYDNEY', name: 'Australia', city: 'Sydney', lang: 'English', currency: 'AUD', flagId: 'au' },
+  { id: 'NZ_AUCKLAND', name: 'New Zealand', city: 'Auckland', lang: 'English', currency: 'NZD', flagId: 'nz' },
+  // Western Europe
   { id: 'DE_BERLIN', name: 'Germany / DACH', city: 'Berlin', lang: 'Deutsch', currency: 'EUR', flagId: 'de' },
   { id: 'FR_PARIS', name: 'France', city: 'Paris', lang: 'Fran\u00e7ais', currency: 'EUR', flagId: 'fr' },
+  { id: 'IT_ROME', name: 'Italy', city: 'Rome', lang: 'Italiano', currency: 'EUR', flagId: 'it' },
   { id: 'SP_BARCELONA', name: 'Spain / Latin America', city: 'Barcelona', lang: 'Espa\u00f1ol', currency: 'EUR', flagId: 'es' },
-  { id: 'PT_SAOPAULO', name: 'Brazil / Portugal', city: 'S\u00e3o Paulo', lang: 'Portugu\u00eas', currency: 'BRL', flagId: 'br' },
+  { id: 'NL_AMSTERDAM', name: 'Netherlands', city: 'Amsterdam', lang: 'Nederlands', currency: 'EUR', flagId: 'nl' },
+  // Central / Eastern Europe
+  { id: 'PL_WARSAW', name: 'Poland', city: 'Warsaw', lang: 'Polski', currency: 'PLN', flagId: 'pl' },
+  { id: 'CS_PRAGUE', name: 'Czech Republic', city: 'Prague', lang: 'Cestina', currency: 'CZK', flagId: 'cz' },
+  { id: 'HR_ZAGREB', name: 'Croatia', city: 'Zagreb', lang: 'Hrvatski', currency: 'EUR', flagId: 'hr' },
+  { id: 'BG_SOFIA', name: 'Bulgaria', city: 'Sofia', lang: 'Balgarski', currency: 'BGN', flagId: 'bg' },
+  { id: 'RO_BUCHAREST', name: 'Romania', city: 'Bucharest', lang: 'Romana', currency: 'RON', flagId: 'ro' },
+  { id: 'SV_STOCKHOLM', name: 'Sweden', city: 'Stockholm', lang: 'Svenska', currency: 'SEK', flagId: 'se' },
+  { id: 'TR_ISTANBUL', name: 'T\u00fcrkiye', city: 'Istanbul', lang: 'T\u00fcrk\u00e7e', currency: 'TRY', flagId: 'tr' },
   { id: 'RU_STPETERSBURG', name: 'Russia / CIS', city: 'St. Petersburg', lang: '\u0420\u0443\u0441\u0441\u043a\u0438\u0439', currency: 'RUB', flagId: 'ru' },
+  // Middle East / Africa
   { id: 'AR_DUBAI', name: 'Middle East / Gulf', city: 'Dubai', lang: '\u0627\u0644\u0639\u0631\u0628\u064a\u0629', currency: 'AED', flagId: 'ae' },
+  { id: 'ZA_JOHANNESBURG', name: 'South Africa', city: 'Johannesburg', lang: 'English', currency: 'ZAR', flagId: 'za' },
+  { id: 'NG_LAGOS', name: 'Nigeria', city: 'Lagos', lang: 'English', currency: 'NGN', flagId: 'ng' },
+  // Asia-Pacific
   { id: 'ZH_SHANGHAI', name: 'China', city: 'Shanghai', lang: '\u4e2d\u6587', currency: 'CNY', flagId: 'cn' },
+  { id: 'JA_TOKYO', name: 'Japan', city: 'Tokyo', lang: '\u65e5\u672c\u8a9e', currency: 'JPY', flagId: 'jp' },
+  { id: 'KO_SEOUL', name: 'South Korea', city: 'Seoul', lang: '\ud55c\uad6d\uc5b4', currency: 'KRW', flagId: 'kr' },
+  { id: 'TH_BANGKOK', name: 'Thailand', city: 'Bangkok', lang: '\u0e44\u0e17\u0e22', currency: 'THB', flagId: 'th' },
+  { id: 'VI_HANOI', name: 'Vietnam', city: 'Hanoi', lang: 'Ti\u1ebfng Vi\u1ec7t', currency: 'VND', flagId: 'vn' },
+  { id: 'ID_JAKARTA', name: 'Indonesia', city: 'Jakarta', lang: 'Bahasa Indonesia', currency: 'IDR', flagId: 'id' },
   { id: 'HI_MUMBAI', name: 'India / South Asia', city: 'Mumbai', lang: 'Hindi', currency: 'INR', flagId: 'in' },
+  // Americas
+  { id: 'PT_SAOPAULO', name: 'Brazil / Portugal', city: 'S\u00e3o Paulo', lang: 'Portugu\u00eas', currency: 'BRL', flagId: 'br' },
+  { id: 'MX_MEXICOCITY', name: 'Mexico', city: 'Mexico City', lang: 'Espa\u00f1ol', currency: 'MXN', flagId: 'mx' },
 ];
 
 // ── AI Provider definitions ─────────────────────────────────────────────────
@@ -1285,6 +1318,24 @@ function StepDataSetup({
   // Show all regions
   const [aiExpanded, setAiExpanded] = useState(false);
 
+  // Region filter (added 2026-04-28: with 30 regions the full grid is too tall
+  // for a single onboarding step; the filter lets the user narrow down quickly
+  // by name / city / currency / language before scrolling).
+  const [regionQuery, setRegionQuery] = useState('');
+  const filteredRegions = (() => {
+    const q = regionQuery.trim().toLowerCase();
+    if (!q) return CWICR_DATABASES;
+    return CWICR_DATABASES.filter((db) => {
+      return (
+        db.name.toLowerCase().includes(q) ||
+        db.city.toLowerCase().includes(q) ||
+        db.currency.toLowerCase().includes(q) ||
+        db.lang.toLowerCase().includes(q) ||
+        db.id.toLowerCase().includes(q)
+      );
+    });
+  })();
+
   return (
     <div className="flex flex-col items-center">
       <h2 className="text-2xl font-bold text-content-primary">
@@ -1313,9 +1364,31 @@ function StepDataSetup({
             </div>
           </div>
 
-          {/* All regions as selectable cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-3">
-            {CWICR_DATABASES.map((db) => {
+          {/* Region filter — keeps the 30-region grid manageable */}
+          <div className="mb-2">
+            <input
+              type="search"
+              value={regionQuery}
+              onChange={(e) => setRegionQuery(e.target.value)}
+              placeholder={t('onboarding.region_filter_placeholder', {
+                defaultValue: 'Filter by country, city, or currency…',
+              })}
+              disabled={loadingDb || !!loadedDb}
+              className="w-full rounded-lg bg-surface-secondary/70 px-3 py-1.5 text-xs text-content-primary placeholder:text-content-quaternary border border-transparent focus:border-oe-blue/40 focus:outline-none focus:bg-surface-secondary disabled:opacity-50"
+            />
+          </div>
+
+          {/* All regions as selectable cards (scrollable for 30 entries) */}
+          <div className="max-h-72 overflow-y-auto pr-1 -mr-1 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-3">
+            {filteredRegions.length === 0 && (
+              <div className="col-span-full py-6 text-center text-xs text-content-tertiary">
+                {t('onboarding.region_filter_no_results', {
+                  defaultValue: 'No regions match "{{q}}"',
+                  q: regionQuery,
+                })}
+              </div>
+            )}
+            {filteredRegions.map((db) => {
               const isSelected = selectedRegion === db.id;
               return (
                 <button

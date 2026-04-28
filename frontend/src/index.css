@@ -529,6 +529,29 @@ h4 {
   box-shadow: inset 2.5px 0 0 var(--color-amber-400, #fbbf24);
 }
 
+/* ── CWICR abstract-resource row accents ──────────────────────────────
+   4px left-edge bar so the user can scan a long BOQ and tell at a glance
+   which positions came from a multi-variant cost item. Mirrors the pill
+   colours rendered by DescriptionCellRenderer / UnitRateCellRenderer.
+   • boq-row-variant         → blue   (explicit pick)
+   • boq-row-variant-default → amber  (auto-applied average — refine!) */
+
+.ag-theme-quartz .ag-row.boq-row-variant {
+  box-shadow: inset 4px 0 0 var(--color-oe-blue, #3b82f6);
+}
+
+.ag-theme-quartz .ag-row.boq-row-variant-default {
+  box-shadow: inset 4px 0 0 var(--color-amber-500, #f59e0b);
+}
+
+.dark .ag-theme-quartz .ag-row.boq-row-variant {
+  box-shadow: inset 4px 0 0 var(--color-oe-blue, #60a5fa);
+}
+
+.dark .ag-theme-quartz .ag-row.boq-row-variant-default {
+  box-shadow: inset 4px 0 0 var(--color-amber-400, #fbbf24);
+}
+
 /* ── Premium Visual Polish ──────────────────────────────────────────── */
 
 /* Smooth scroll behavior */

@@ -61,7 +61,7 @@ export function InstallConverterPrompt({
   // match the banner and the /quantities UI.
   const { data } = useQuery<BIMConvertersResponse>({
     queryKey: ['bim-converters'],
-    queryFn: fetchBIMConverters,
+    queryFn: () => fetchBIMConverters(),
     staleTime: 30_000,
     enabled: open,
   });

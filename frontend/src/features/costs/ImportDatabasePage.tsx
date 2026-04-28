@@ -181,10 +181,55 @@ const CWICR_DATABASES: CWICRDatabase[] = [
   { id: 'AR_DUBAI', name: 'Middle East / Gulf', city: 'Dubai', lang: 'Arabic', currency: 'AED', flagId: 'ae', parquetName: 'AR_DUBAI' },
   { id: 'ZH_SHANGHAI', name: 'China', city: 'Shanghai', lang: 'Chinese', currency: 'CNY', flagId: 'cn', parquetName: 'ZH_SHANGHAI' },
   { id: 'HI_MUMBAI', name: 'India / South Asia', city: 'Mumbai', lang: 'Hindi', currency: 'INR', flagId: 'in', parquetName: 'HI_MUMBAI' },
+  // Added 2026-04-28 — DDC CWICR repo grew from 11 to 30 country folders.
+  { id: 'AU_SYDNEY', name: 'Australia', city: 'Sydney', lang: 'English', currency: 'AUD', flagId: 'au', parquetName: 'AU_SYDNEY' },
+  { id: 'NZ_AUCKLAND', name: 'New Zealand', city: 'Auckland', lang: 'English', currency: 'NZD', flagId: 'nz', parquetName: 'NZ_AUCKLAND' },
+  { id: 'IT_ROME', name: 'Italy', city: 'Rome', lang: 'Italiano', currency: 'EUR', flagId: 'it', parquetName: 'IT_ROME' },
+  { id: 'NL_AMSTERDAM', name: 'Netherlands', city: 'Amsterdam', lang: 'Nederlands', currency: 'EUR', flagId: 'nl', parquetName: 'NL_AMSTERDAM' },
+  { id: 'PL_WARSAW', name: 'Poland', city: 'Warsaw', lang: 'Polski', currency: 'PLN', flagId: 'pl', parquetName: 'PL_WARSAW' },
+  { id: 'CS_PRAGUE', name: 'Czech Republic', city: 'Prague', lang: 'Cestina', currency: 'CZK', flagId: 'cz', parquetName: 'CS_PRAGUE' },
+  { id: 'HR_ZAGREB', name: 'Croatia', city: 'Zagreb', lang: 'Hrvatski', currency: 'EUR', flagId: 'hr', parquetName: 'HR_ZAGREB' },
+  { id: 'BG_SOFIA', name: 'Bulgaria', city: 'Sofia', lang: 'Balgarski', currency: 'BGN', flagId: 'bg', parquetName: 'BG_SOFIA' },
+  { id: 'RO_BUCHAREST', name: 'Romania', city: 'Bucharest', lang: 'Romana', currency: 'RON', flagId: 'ro', parquetName: 'RO_BUCHAREST' },
+  { id: 'SV_STOCKHOLM', name: 'Sweden', city: 'Stockholm', lang: 'Svenska', currency: 'SEK', flagId: 'se', parquetName: 'SV_STOCKHOLM' },
+  { id: 'TR_ISTANBUL', name: 'Türkiye', city: 'Istanbul', lang: 'Türkçe', currency: 'TRY', flagId: 'tr', parquetName: 'TR_ISTANBUL' },
+  { id: 'JA_TOKYO', name: 'Japan', city: 'Tokyo', lang: 'Nihongo', currency: 'JPY', flagId: 'jp', parquetName: 'JA_TOKYO' },
+  { id: 'KO_SEOUL', name: 'South Korea', city: 'Seoul', lang: 'Hangugeo', currency: 'KRW', flagId: 'kr', parquetName: 'KO_SEOUL' },
+  { id: 'TH_BANGKOK', name: 'Thailand', city: 'Bangkok', lang: 'Thai', currency: 'THB', flagId: 'th', parquetName: 'TH_BANGKOK' },
+  { id: 'VI_HANOI', name: 'Vietnam', city: 'Hanoi', lang: 'Tieng Viet', currency: 'VND', flagId: 'vn', parquetName: 'VI_HANOI' },
+  { id: 'ID_JAKARTA', name: 'Indonesia', city: 'Jakarta', lang: 'Bahasa Indonesia', currency: 'IDR', flagId: 'id', parquetName: 'ID_JAKARTA' },
+  { id: 'MX_MEXICOCITY', name: 'Mexico', city: 'Mexico City', lang: 'Espanol', currency: 'MXN', flagId: 'mx', parquetName: 'MX_MEXICOCITY' },
+  { id: 'ZA_JOHANNESBURG', name: 'South Africa', city: 'Johannesburg', lang: 'English', currency: 'ZAR', flagId: 'za', parquetName: 'ZA_JOHANNESBURG' },
+  { id: 'NG_LAGOS', name: 'Nigeria', city: 'Lagos', lang: 'English', currency: 'NGN', flagId: 'ng', parquetName: 'NG_LAGOS' },
 ];
 
-// Databases that may only be available via GitHub download (not in local DDC_Toolkit)
-const GITHUB_ONLY_DBS = new Set(['UK_GBP', 'USA_USD']);
+// Databases that may only be available via GitHub download (not in local DDC_Toolkit).
+// All 19 regions added 2026-04-28 are GitHub-only — they were never shipped in the
+// local DDC_Toolkit/pricing/data/excel directory, so the resolver must fall through
+// to the GitHub-cache path on first load.
+const GITHUB_ONLY_DBS = new Set([
+  'UK_GBP',
+  'USA_USD',
+  'AU_SYDNEY',
+  'NZ_AUCKLAND',
+  'IT_ROME',
+  'NL_AMSTERDAM',
+  'PL_WARSAW',
+  'CS_PRAGUE',
+  'HR_ZAGREB',
+  'BG_SOFIA',
+  'RO_BUCHAREST',
+  'SV_STOCKHOLM',
+  'TR_ISTANBUL',
+  'JA_TOKYO',
+  'KO_SEOUL',
+  'TH_BANGKOK',
+  'VI_HANOI',
+  'ID_JAKARTA',
+  'MX_MEXICOCITY',
+  'ZA_JOHANNESBURG',
+  'NG_LAGOS',
+]);
 
 /** Mini flag component — uses bundled inline SVGs */
 function MiniFlag({ code }: { code: string }) {
@@ -206,6 +251,22 @@ function CWICRDatabaseGrid(_props: { onLoadDatabase: (file: File) => void }) {
   const [elapsed, setElapsed] = useState(0);
   const [activeDb, setActiveDb] = useState<string | null>(() => getActiveDatabase());
   const addToast = useToastStore((s) => s.addToast);
+
+  // Region filter — added 2026-04-28 when the registry grew from 11 to 30
+  // entries. Without it the grid scrolls past one viewport on small laptops.
+  const [regionQuery, setRegionQuery] = useState('');
+  const filteredDatabases = (() => {
+    const q = regionQuery.trim().toLowerCase();
+    if (!q) return CWICR_DATABASES;
+    return CWICR_DATABASES.filter(
+      (db) =>
+        db.name.toLowerCase().includes(q) ||
+        db.city.toLowerCase().includes(q) ||
+        db.currency.toLowerCase().includes(q) ||
+        db.lang.toLowerCase().includes(q) ||
+        db.id.toLowerCase().includes(q),
+    );
+  })();
 
   // Sync loaded state with actual backend data
   const { data: regionStats } = useQuery({
@@ -318,9 +379,37 @@ function CWICRDatabaseGrid(_props: { onLoadDatabase: (file: File) => void }) {
 
   return (
     <div>
+      {/* Region filter (30 regions — keep grid navigable) */}
+      <div className="mb-3 flex items-center gap-2">
+        <input
+          type="search"
+          value={regionQuery}
+          onChange={(e) => setRegionQuery(e.target.value)}
+          placeholder={t('costs.region_filter_placeholder', {
+            defaultValue: 'Filter by country, city, currency or language…',
+          })}
+          className="flex-1 rounded-lg bg-surface-secondary/70 px-3 py-2 text-sm text-content-primary placeholder:text-content-quaternary border border-transparent focus:border-oe-blue/40 focus:outline-none focus:bg-surface-secondary"
+        />
+        <span className="shrink-0 text-xs text-content-tertiary tabular-nums">
+          {t('costs.region_filter_count', {
+            defaultValue: '{{shown}} of {{total}}',
+            shown: filteredDatabases.length,
+            total: CWICR_DATABASES.length,
+          })}
+        </span>
+      </div>
+
       {/* Database grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-        {CWICR_DATABASES.map((db) => {
+        {filteredDatabases.length === 0 && (
+          <div className="col-span-full py-8 text-center text-sm text-content-tertiary">
+            {t('costs.region_filter_no_results', {
+              defaultValue: 'No regions match "{{q}}"',
+              q: regionQuery,
+            })}
+          </div>
+        )}
+        {filteredDatabases.map((db) => {
           const isLoading = loading === db.id;
           const isLoaded = loaded.has(db.id);
           const isActive = activeDb === db.id;

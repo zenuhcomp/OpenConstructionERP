@@ -66,6 +66,7 @@ import {
   BimLinkCellRenderer,
   QuantityCellRenderer,
   UnitCellRenderer,
+  UnitRateCellRenderer,
   SectionFullWidthRenderer,
   ResourceFullWidthRenderer,
   BimQtyPickerCellRenderer,
@@ -648,6 +649,24 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
       } else if (validationStatus === 'warnings') {
         classes.push('boq-row-warning');
       }
+
+      // CWICR abstract-resource left-edge accent. We give the row a 4px
+      // colour bar on the leading edge so the user can scan a long BOQ
+      // and tell which positions came from a multi-variant cost item:
+      //   • Picked variant   → blue (oe-blue, matches the picker chip)
+      //   • Auto default     → amber (matches the "default · refine" pill)
+      // Only applied when no validation accent is already winning, so an
+      // erroring row keeps its red bar instead of being recoloured.
+      if (validationStatus !== 'errors' && validationStatus !== 'warnings') {
+        const meta = params.data?.metadata as Record<string, unknown> | undefined;
+        if (meta) {
+          if (meta.variant && typeof meta.variant === 'object') {
+            classes.push('boq-row-variant');
+          } else if (meta.variant_default === 'mean' || meta.variant_default === 'median') {
+            classes.push('boq-row-variant-default');
+          }
+        }
+      }
     }
     return classes.join(' ');
   }, []);
@@ -902,6 +921,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
       bimLinkCellRenderer: BimLinkCellRenderer,
       quantityCellRenderer: QuantityCellRenderer,
       unitCellRenderer: UnitCellRenderer,
+      unitRateCellRenderer: UnitRateCellRenderer,
       bimQtyPickerCellRenderer: BimQtyPickerCellRenderer,
       sectionFullWidthRenderer: SectionFullWidthRenderer,
       resourceFullWidthRenderer: ResourceFullWidthRenderer,

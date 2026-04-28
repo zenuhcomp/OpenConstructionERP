@@ -965,11 +965,54 @@ async def _process_cad_in_background(
     # specific actionable error ("install the RVT converter") instead of the
     # generic "no elements extracted" message that lands when DDC isn't found
     # mid-pipeline. IFC has a built-in text fallback so we don't gate on it.
+    #
+    # Two-stage check (added 2026-04-28 to address "many problems with the
+    # converters and downloading"):
+    #   1. ``find_converter`` — file exists on disk (cheap, file-stat only).
+    #   2. ``smoke_test_converter`` — binary actually loads (8 s timeout,
+    #      result cached 5 min). Catches Qt-DLL / Mark-of-the-Web /
+    #      VC-Redist-missing breakage that the first check can't see.
     if ext.lower() == ".rvt":
         try:
-            from app.modules.boq.cad_import import find_converter as _fc
+            from app.modules.boq.cad_import import (
+                find_converter as _fc,
+            )
+            from app.modules.boq.cad_import import (
+                smoke_test_converter as _smoke,
+            )
 
-            if _fc("rvt") is None:
+            converter_id = "rvt"
+            failure_reason: str | None = None
+            failure_code: str | None = None
+            suggested_actions: list[str] = []
+
+            if _fc(converter_id) is None:
+                failure_code = "ddc_not_found"
+                failure_reason = (
+                    "The Revit (RVT) converter is not installed on this "
+                    "server. Open Settings → BIM Converters and click "
+                    "Install for RVT, then click Retry on this model."
+                )
+                suggested_actions = ["install_converter"]
+            else:
+                # Run the cached smoke test before the (expensive) RVT
+                # conversion. If the binary fails to load we report the
+                # DLL/perm error to the user immediately rather than
+                # letting them wait through a 5-minute conversion that
+                # has no chance of succeeding.
+                health = await asyncio.to_thread(_smoke, converter_id)
+                if health["status"] != "ok":
+                    failure_code = "ddc_smoke_failed"
+                    failure_reason = health["message"] or (
+                        "The Revit (RVT) converter is installed but the "
+                        "smoke test failed. Open Settings → BIM Converters "
+                        "and click Reinstall, then click Retry on this model."
+                    )
+                    suggested_actions = list(health["suggested_actions"]) or [
+                        "reinstall_converter"
+                    ]
+
+            if failure_code:
                 async with async_session_factory() as session:
                     model = (
                         await session.execute(
@@ -978,22 +1021,23 @@ async def _process_cad_in_background(
                     ).scalar_one_or_none()
                     if model is not None:
                         model.status = "needs_converter"
-                        model.error_message = (
-                            "The Revit (RVT) converter is not installed on this "
-                            "server. Open Settings → BIM Converters and click "
-                            "Install for RVT, then click Retry on this model."
-                        )
+                        model.error_message = failure_reason
                         meta = dict(model.metadata_ or {})
-                        meta["error_code"] = "ddc_not_found"
-                        meta["converter_id"] = "rvt"
+                        meta["error_code"] = failure_code
+                        meta["converter_id"] = converter_id
+                        meta["suggested_actions"] = suggested_actions
                         meta["install_endpoint"] = (
-                            "/api/v1/takeoff/converters/rvt/install/"
+                            f"/api/v1/takeoff/converters/{converter_id}/install/"
+                        )
+                        meta["verify_endpoint"] = (
+                            f"/api/v1/takeoff/converters/{converter_id}/verify/"
                         )
                         model.metadata_ = meta
                         await session.commit()
                 logger.warning(
-                    "RVT pre-flight failed for model %s: converter not installed",
+                    "RVT pre-flight failed for model %s: %s",
                     model_id,
+                    failure_code,
                 )
                 return
         except Exception:  # noqa: BLE001 — pre-flight is best-effort

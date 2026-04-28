@@ -16,6 +16,7 @@ import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useLocalStorage } from '@/shared/hooks/useLocalStorage';
 import { type BOQWithPositions } from '../boq/api';
 import { CreateProjectModal } from './CreateProjectPage';
+import { BIMConverterStatusBanner } from '../bim/BIMConverterStatusBanner';
 
 interface BOQBasic {
   id: string;
@@ -455,17 +456,26 @@ export function ProjectsPage() {
           })}
         />
       ) : !projects || projects.length === 0 ? (
-        <EmptyState
-          icon={<FolderOpen size={28} strokeWidth={1.5} />}
-          title={t('projects.no_projects', { defaultValue: 'No projects yet' })}
-          description={t('projects.no_projects_description', {
-            defaultValue: 'Projects organize your estimates, documents, and team. Create your first project to get started with cost estimation.',
-          })}
-          action={{
-            label: t('projects.new_project', { defaultValue: 'Create Project' }),
-            onClick: () => setCreateModalOpen(true),
-          }}
-        />
+        <div className="space-y-4">
+          {/* Surface the BIM converter status here so a fresh-install user
+           *  can see at a glance whether RVT/IFC/DWG/DGN drag-and-drop will
+           *  work BEFORE creating the first project. Dismissible — once
+           *  acknowledged it stays out of the way until the user resets
+           *  the localStorage flag. */}
+          <BIMConverterStatusBanner dismissible />
+          <EmptyState
+            icon={<FolderOpen size={28} strokeWidth={1.5} />}
+            title={t('projects.no_projects', { defaultValue: 'No projects yet' })}
+            description={t('projects.no_projects_description', {
+              defaultValue:
+                'Projects organize your estimates, documents, and team. Create your first project to get started with cost estimation.',
+            })}
+            action={{
+              label: t('projects.new_project', { defaultValue: 'Create Project' }),
+              onClick: () => setCreateModalOpen(true),
+            }}
+          />
+        </div>
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -44,6 +44,8 @@ import type { BIMElementData } from '@/shared/ui/BIMViewer/ElementManager';
 import { getIntlLocale } from '@/shared/lib/formatters';
 import { useFxRatesStore, getFxRate } from '@/stores/useFxRatesStore';
 import { isFormula, evaluateFormula } from './cellEditors';
+import { VariantPicker } from '@/features/costs/VariantPicker';
+import type { CostVariant, VariantStats } from '@/features/costs/api';
 
 /* ── Validation Status Dot ────────────────────────────────────────── */
 
@@ -388,22 +390,31 @@ export function ExpandCellRenderer(params: ICellRendererParams) {
 /* ── Description + CWICR Variant Badge ────────────────────────────── */
 
 /**
- * Position-description renderer that surfaces a small "variant" badge
- * when the position was applied from a CWICR cost item via the variant
- * picker.  The variant payload is stored under
- * `position.metadata.variant = { label, price, index }` by
- * `CostDatabaseSearchModal.handleAdd` and the BOQ patch flow on
- * `CwicrMatchPanel.onApply`.  Rows without `metadata.variant` render as
- * plain text — no visual change.
+ * Position-description renderer that surfaces a CWICR abstract-resource
+ * marker when the position was applied from a cost item that carries
+ * variants (concrete C25 / C30 / C35, …).  Two visual states:
  *
- * The cell is editable (the column passes `editable: true`); AG Grid
- * still mounts the cell editor on edit, the renderer only owns the
- * read-only view.
+ *   • `metadata.variant = { label, price, index }` → user picked a
+ *     specific variant.  Renders a bold blue pill "Variant: <label>"
+ *     so the choice is unmistakable at a glance.
+ *
+ *   • `metadata.variant_default ∈ {"mean","median"}` → user accepted
+ *     the auto-suggested rate without picking.  Renders a softer
+ *     amber pill "Default · refine ▾" prompting the user to click and
+ *     pick a real variant.
+ *
+ * The pill itself is decorative (pointer-events: none on the inner
+ * text) — actual variant editing happens via the inline picker on the
+ * unit_rate cell.  The description cell remains plain-text editable;
+ * the renderer only owns the read-only view.
  */
 export function DescriptionCellRenderer(params: ICellRendererParams) {
   const { data, value, context } = params;
   const ctx = context as FullGridContext | undefined;
-  const t = ctx?.t ?? ((key: string, opts?: Record<string, string>) => (opts?.defaultValue as string) ?? key);
+  const t =
+    ctx?.t ??
+    ((key: string, opts?: Record<string, string | number>) =>
+      (opts?.defaultValue as string) ?? key);
 
   // Sections + footer + resource rows have their own renderers; bail
   // out cleanly so AG Grid falls back to the default text rendering
@@ -412,34 +423,93 @@ export function DescriptionCellRenderer(params: ICellRendererParams) {
     return <span>{value ?? ''}</span>;
   }
 
-  const meta = (data.metadata ?? {}) as Record<string, unknown> | undefined;
-  const variant = (meta as { variant?: { label?: string; price?: number; index?: number } } | undefined)?.variant;
+  const meta = (data.metadata ?? {}) as Record<string, unknown>;
+  const variant = (meta as { variant?: { label?: string; price?: number; index?: number } }).variant;
+  const variantDefault = (meta as { variant_default?: 'mean' | 'median' }).variant_default;
   const hasVariant = !!variant && typeof variant.label === 'string' && typeof variant.price === 'number';
+  const hasDefault = !hasVariant && (variantDefault === 'mean' || variantDefault === 'median');
 
-  if (!hasVariant) {
+  if (!hasVariant && !hasDefault) {
     return <span className="truncate">{value ?? ''}</span>;
   }
 
-  const formattedPrice = (() => {
+  const fmt = (n: number) => {
     try {
       return new Intl.NumberFormat(getIntlLocale(), {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      }).format(variant!.price as number);
+      }).format(n);
     } catch {
-      return String(variant!.price);
+      return String(n);
     }
-  })();
-  const tooltip = `${variant!.label} \u00B7 ${formattedPrice}`;
+  };
+
+  if (hasVariant) {
+    const variantLabel = String(variant!.label ?? '');
+    const formattedPrice = fmt(variant!.price as number);
+    const tooltip = `${variantLabel} \u00B7 ${formattedPrice}`;
+    return (
+      <span className="inline-flex items-center gap-1.5 min-w-0 max-w-full">
+        <span className="truncate min-w-0">{value ?? ''}</span>
+        <Badge
+          variant="blue"
+          size="sm"
+          className="shrink-0 cursor-help"
+        >
+          <span title={tooltip}>
+            {t('boq.variant_pill_label', {
+              defaultValue: 'Variant: {{label}}',
+              label: variantLabel,
+            })}
+          </span>
+        </Badge>
+      </span>
+    );
+  }
+
+  // Auto-default branch: surface the "options" count + the average rate
+  // so the user knows there are alternatives behind the locked-in price.
+  // Stats / option count come from `cost_item_variant_count` /
+  // `cost_item_variant_mean` snapshots if the apply path stamped them;
+  // otherwise we fall back to a generic "default · refine" hint.
+  const optsRaw = (meta as { cost_item_variant_count?: number }).cost_item_variant_count;
+  const meanRaw = (meta as { cost_item_variant_mean?: number }).cost_item_variant_mean;
+  const opts = typeof optsRaw === 'number' && optsRaw >= 2 ? optsRaw : null;
+  const mean = typeof meanRaw === 'number' && meanRaw > 0 ? meanRaw : null;
+
+  const tooltip = t('boq.variant_default_pill_tooltip', {
+    defaultValue:
+      'Auto-applied with the {{strategy}} rate. Click the unit_rate cell to pick a specific variant.',
+    strategy:
+      variantDefault === 'mean'
+        ? t('costs.variant_mean_word', { defaultValue: 'average' })
+        : t('costs.variant_median_word', { defaultValue: 'median' }),
+  });
 
   return (
     <span className="inline-flex items-center gap-1.5 min-w-0 max-w-full">
       <span className="truncate min-w-0">{value ?? ''}</span>
-      <Badge variant="blue" size="sm" className="shrink-0 cursor-help">
-        <span title={tooltip}>
-          {t('boq.from_variant', { defaultValue: 'variant' })}
-        </span>
-      </Badge>
+      <span
+        className="shrink-0 inline-flex items-center gap-1 rounded
+                   bg-amber-100 dark:bg-amber-900/40
+                   text-amber-700 dark:text-amber-300
+                   px-1.5 py-0.5 text-2xs font-medium cursor-help"
+        title={tooltip}
+        data-testid="boq-variant-default-pill"
+      >
+        {opts != null
+          ? t('boq.variant_default_pill_with_count', {
+              defaultValue: 'Abstract \u00B7 {{count}} options',
+              count: opts,
+            })
+          : t('boq.variant_default_pill', { defaultValue: 'Default \u00B7 refine \u25BE' })}
+        {mean != null && (
+          <span className="text-content-tertiary tabular-nums">
+            {'\u00A0\u00B7\u00A0'}
+            {t('costs.variant_avg_short', { defaultValue: 'avg' })} {fmt(mean)}
+          </span>
+        )}
+      </span>
     </span>
   );
 }
@@ -2873,6 +2943,218 @@ export function QuantityCellRenderer(params: ICellRendererParams) {
       title={titleText}
     >
       {formatted}
+    </span>
+  );
+}
+
+/* ── Unit Rate Cell + inline CWICR Variant Picker ──────────────────── */
+
+/**
+ * `UnitRateCellRenderer` — shows the position's `unit_rate` and, when the
+ * position carries CWICR abstract-resource variants, surfaces a small
+ * "▾ N options" pill that opens the inline `VariantPicker` for live
+ * variant switching.
+ *
+ * Persistence: the picker resolves to a `CostVariant`, the renderer wraps
+ * the parent's `onUpdatePosition` callback to PATCH `metadata.variant`
+ * + `unit_rate`.  The backend re-stamps `variant_snapshot` (frozen rate
+ * + currency + UTC timestamp) so the choice survives a cost-DB re-import.
+ *
+ * Visibility rules:
+ *   • Positions without `metadata.cost_item_variants` (or with <2) fall
+ *     through to the default tabular-nums numeric cell — no extra UI.
+ *   • Resource-driven positions (where `metadata.resources` derives the
+ *     rate) suppress the pill — picking a variant on a position whose
+ *     rate is computed from resources would silently get overwritten on
+ *     the next resource edit.
+ *
+ * Why a renderer (not a popup off the column header):
+ *   • AG Grid mounts/unmounts row renderers on virtualisation, so the
+ *     picker state must live OUTSIDE the renderer.  We portal the picker
+ *     to `document.body` from inside the renderer hook — same pattern as
+ *     `BIMQuantityPicker` / `PdfDwgSourcePopover`.
+ */
+export function UnitRateCellRenderer(params: ICellRendererParams) {
+  const { data, value, context } = params;
+  const ctx = context as FullGridContext | undefined;
+  const t = ctx?.t ?? ((key: string, opts?: Record<string, string | number>) =>
+    (opts?.defaultValue as string) ?? key);
+
+  // Footer / section / resource sub-row / add-resource row → default cell.
+  if (!data || data._isSection || data._isFooter || data._isResource || data._isAddResource) {
+    return <span className="text-right text-xs tabular-nums">{value ?? ''}</span>;
+  }
+
+  const meta = (data.metadata ?? {}) as Record<string, unknown>;
+  const variants = meta.cost_item_variants as CostVariant[] | undefined;
+  const stats = meta.cost_item_variant_stats as VariantStats | undefined;
+  const variant = (meta as { variant?: { label: string; price: number; index: number } }).variant;
+  const variantDefault = meta.variant_default as 'mean' | 'median' | undefined;
+  const currency = (meta.currency as string | undefined) || ctx?.currencyCode || 'USD';
+  const unit = data.unit as string | undefined;
+  const resources = meta.resources;
+  const isResourceDriven = Array.isArray(resources) && resources.length > 0;
+
+  const numericVal = typeof value === 'number' ? value : parseFloat(String(value ?? 0));
+  const formatted = (() => {
+    try {
+      return new Intl.NumberFormat(getIntlLocale(), {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(isNaN(numericVal) ? 0 : numericVal);
+    } catch {
+      return String(value ?? '');
+    }
+  })();
+
+  const hasVariants = Array.isArray(variants) && variants.length >= 2 && stats != null;
+
+  // Picker state — owned per renderer instance.  AG Grid re-mounts the
+  // renderer when the row scrolls out / back, so an open picker on a
+  // virtualised row will close cleanly when the row leaves the viewport.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+
+  const closePicker = useCallback(() => setPickerOpen(false), []);
+
+  const handlePick = useCallback(
+    (chosen: CostVariant) => {
+      setPickerOpen(false);
+      if (!ctx?.onUpdatePosition || !data?.id) return;
+      const newMeta = { ...meta };
+      // Drop the auto-default marker — user made an explicit pick.
+      if ('variant_default' in newMeta) delete newMeta.variant_default;
+      newMeta.variant = {
+        label: chosen.label,
+        price: chosen.price,
+        index: chosen.index,
+      };
+      ctx.onUpdatePosition(
+        data.id as string,
+        {
+          unit_rate: chosen.price,
+          metadata: newMeta,
+        },
+        {
+          unit_rate: numericVal,
+          metadata: meta,
+        },
+      );
+    },
+    [ctx, data, meta, numericVal],
+  );
+
+  const handleUseDefault = useCallback(
+    (strategy: 'mean' | 'median') => {
+      setPickerOpen(false);
+      if (!ctx?.onUpdatePosition || !data?.id || !stats) return;
+      const newRate =
+        strategy === 'mean' && stats.mean > 0
+          ? stats.mean
+          : stats.median > 0
+            ? stats.median
+            : numericVal;
+      const newMeta = { ...meta };
+      if ('variant' in newMeta) delete newMeta.variant;
+      newMeta.variant_default = strategy;
+      ctx.onUpdatePosition(
+        data.id as string,
+        {
+          unit_rate: newRate,
+          metadata: newMeta,
+        },
+        {
+          unit_rate: numericVal,
+          metadata: meta,
+        },
+      );
+    },
+    [ctx, data, meta, numericVal, stats],
+  );
+
+  // No variant cache → just render the formatted number.  Cell is still
+  // editable (click → AG Grid mounts agNumberCellEditor).
+  if (!hasVariants) {
+    const colorClass = isResourceDriven ? 'text-content-tertiary' : '';
+    return (
+      <span className={`block text-right text-xs tabular-nums w-full h-full leading-[32px] ${colorClass}`}>
+        {formatted}
+      </span>
+    );
+  }
+
+  // Variant cache present — render number + pill.  When resource-driven,
+  // suppress the pill (rate is computed from resources, not a variant).
+  const optsCount = stats!.count;
+  const minMax = `${stats!.min.toFixed(2)} – ${stats!.max.toFixed(2)} ${currency}`;
+  const tooltip = variant
+    ? t('boq.unit_rate_variant_pill_tooltip_picked', {
+        defaultValue:
+          'Currently: {{label}}. Click to switch to a different variant.',
+        label: variant.label,
+      })
+    : variantDefault
+      ? t('boq.unit_rate_variant_pill_tooltip_default', {
+          defaultValue:
+            'Auto-applied with {{strategy}} rate ({{count}} options, {{range}}). Click to refine.',
+          strategy:
+            variantDefault === 'mean'
+              ? t('costs.variant_mean_word', { defaultValue: 'average' })
+              : t('costs.variant_median_word', { defaultValue: 'median' }),
+          count: optsCount,
+          range: minMax,
+        })
+      : t('boq.unit_rate_variant_pill_tooltip_unset', {
+          defaultValue:
+            '{{count}} priced variants available ({{range}}). Click to pick one.',
+          count: optsCount,
+          range: minMax,
+        });
+
+  return (
+    <span className="flex items-center justify-end gap-1.5 w-full h-full text-xs tabular-nums leading-[32px]">
+      <span className={isResourceDriven ? 'text-content-tertiary' : ''}>{formatted}</span>
+      {!isResourceDriven && (
+        <button
+          ref={anchorRef}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setPickerOpen((open) => !open);
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          className={`shrink-0 inline-flex items-center gap-0.5 h-5 px-1.5 rounded text-[10px] font-semibold
+                      transition-colors cursor-pointer ${
+                        variant
+                          ? 'bg-oe-blue/15 text-oe-blue hover:bg-oe-blue/25'
+                          : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60'
+                      }`}
+          title={tooltip}
+          aria-label={tooltip}
+          aria-haspopup="dialog"
+          aria-expanded={pickerOpen}
+          data-testid={`boq-variant-pill-${data.id}`}
+        >
+          {t('boq.unit_rate_variant_pill', {
+            defaultValue: '\u25BE {{count}} options',
+            count: optsCount,
+          })}
+        </button>
+      )}
+      {pickerOpen && hasVariants && (
+        <VariantPicker
+          variants={variants!}
+          stats={stats!}
+          defaultStrategy="mean"
+          defaultIndex={variant?.index}
+          anchorEl={anchorRef.current}
+          unitLabel={unit || ''}
+          currency={currency}
+          onApply={handlePick}
+          onUseDefault={handleUseDefault}
+          onClose={closePicker}
+        />
+      )}
     </span>
   );
 }

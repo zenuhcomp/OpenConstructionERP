@@ -43,6 +43,33 @@ export interface VariantStats {
 }
 
 /**
+ * Frozen copy of the variant choice persisted on a BOQ position so its
+ * unit_rate cannot be silently rewritten by a later cost-database re-import.
+ * Stamped server-side by `_stamp_variant_snapshot` in
+ * `backend/app/modules/boq/service.py`.  Read-only on the client.
+ */
+export interface VariantSnapshot {
+  /** Variant label or "average" / "median" when the user accepted the auto-suggested rate. */
+  label: string;
+  /** Unit rate as it was at the moment of the choice. */
+  rate: number;
+  /** ISO 4217 currency captured alongside the rate. */
+  currency: string;
+  /** UTC ISO-8601 timestamp of the freeze. */
+  captured_at: string;
+  /** Provenance flag: explicit user pick vs auto-suggested mean / median. */
+  source: 'user_pick' | 'default_mean' | 'default_median';
+}
+
+/**
+ * Default-selection strategy hint persisted on the BOQ position when the user
+ * applied an abstract-resource cost item without explicitly opening the
+ * picker.  Drives the softer "default · choose to refine" hint in the BOQ
+ * row marker (vs the bolder "Variant: foo" label for a deliberate pick).
+ */
+export type VariantDefault = 'mean' | 'median';
+
+/**
  * The shape of `CostItem.metadata_` as it actually flows from the backend.
  * Numeric cost-breakdown fields (`labor_cost`, ...) ride alongside the
  * optional variant payload.  Kept open via the index signature so module

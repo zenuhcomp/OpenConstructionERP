@@ -9,12 +9,11 @@ export interface BOQColumnContext {
   t: (key: string, opts?: Record<string, string>) => string;
 }
 
-function currencyFormatter(params: ValueFormatterParams): string {
-  const ctx = params.context as BOQColumnContext | undefined;
-  if (params.value == null || params.data?._isSection || params.data?._isFooter) return '';
-  const fmt = ctx?.fmt ?? new Intl.NumberFormat('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return fmt.format(params.value);
-}
+// Note: `currencyFormatter` was previously applied to the unit_rate column
+// but has been superseded by `UnitRateCellRenderer` (which handles both
+// formatting and the inline CWICR variant pill).  Keep this comment as a
+// breadcrumb so a future refactor doesn't reintroduce a duplicate
+// formatter-vs-renderer race.
 
 function totalFormatter(params: ValueFormatterParams): string {
   const ctx = params.context as BOQColumnContext | undefined;
@@ -221,7 +220,7 @@ export function getColumnDefs(context: BOQColumnContext): ColDef[] {
     {
       headerName: t('boq.unit_rate', { defaultValue: 'Unit Rate' }),
       field: 'unit_rate',
-      width: 110,
+      width: 130,
       editable: (params) => {
         if (params.data?._isSection || params.data?._isFooter) return false;
         const res = params.data?.metadata?.resources;
@@ -234,7 +233,10 @@ export function getColumnDefs(context: BOQColumnContext): ColDef[] {
         const val = parseFloat(params.newValue);
         return isNaN(val) ? params.oldValue : val;
       },
-      valueFormatter: currencyFormatter,
+      // Custom renderer surfaces the inline CWICR variant picker pill when
+      // the position carries `metadata.cost_item_variants` (cached at apply
+      // time).  Falls through to a plain numeric span when no variants.
+      cellRenderer: 'unitRateCellRenderer',
       cellClass: (params) => {
         let base = 'text-right tabular-nums text-xs !pr-2 !pl-2';
         const res = params.data?.metadata?.resources;

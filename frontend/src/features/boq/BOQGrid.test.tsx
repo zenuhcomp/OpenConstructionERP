@@ -68,7 +68,7 @@ describe('getColumnDefs', () => {
     expect(checkboxCol).toBeDefined();
     if (!checkboxCol) return;
     expect(checkboxCol.colId).toBe('_checkbox');
-    expect(checkboxCol.width).toBe(36);
+    expect(checkboxCol.width).toBe(24);
     expect(checkboxCol.editable).toBe(false);
     expect(checkboxCol.sortable).toBe(false);
     // AG Grid v32.2+: checkboxSelection / headerCheckboxSelection moved to

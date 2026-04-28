@@ -58,26 +58,47 @@ APPROVED_UNITS: Final[frozenset[str]] = frozenset(
 # so totals stay accurate.
 _MULTI_PREFIX_RE: Final = re.compile(r"^\s*(\d{1,6})\s+([A-Za-z][A-Za-z0-9]{0,9})\s*$")
 
+# A unit token's "shape" — used as a permissive fallback so estimators can
+# coin custom units (region-specific, internal-coding, novel materials) and
+# have them round-trip through the validator. Must start with a letter,
+# allow alphanumerics + space + a small set of separators (./-), max 20
+# chars. Rejects empty strings, control characters, HTML/SQL payloads, and
+# anything obviously non-unit-shaped. Curated catalogue still takes
+# priority for canonical forms (e.g. "tonne" → still rejected in favour of
+# "t") so existing aggregations stay coherent.
+_CUSTOM_UNIT_RE: Final = re.compile(r"^[A-Za-z][A-Za-z0-9 ._/-]{0,19}$")
+
 
 def normalise_unit(unit: str | None) -> str | None:
-    """Return the canonical form of ``unit`` if approved, else None.
+    """Return the canonical form of ``unit`` if accepted, else None.
 
-    Accepts:
+    Accepts (in order of priority):
       - bare units from APPROVED_UNITS (case-insensitive)
       - CWICR-style multi-prefix forms like "100 EA", "1000 m" — returned
         as ``"<N> <unit>"`` lower-cased.
+      - any user-coined custom unit matching ``_CUSTOM_UNIT_RE`` — letters
+        first, alphanumerics / space / ``._-/`` after, max 20 chars.
+        Lower-cased on the way through. Lets estimators register novel
+        units without a backend release; aggregations key off the saved
+        string so identical custom units bucket together.
     """
     if not unit:
         return None
     stripped = unit.strip()
+    if not stripped:
+        return None
     lower = stripped.lower()
     if lower in APPROVED_UNITS:
         return lower
     m = _MULTI_PREFIX_RE.match(stripped)
     if m:
         n, base = m.group(1), m.group(2).lower()
-        if base in APPROVED_UNITS:
+        # Trailing token: prefer canonical form, fall back to custom-shape
+        # so "100 myunit" (custom unit per 100 group) round-trips.
+        if base in APPROVED_UNITS or _CUSTOM_UNIT_RE.match(base):
             return f"{n} {base}"
+    if _CUSTOM_UNIT_RE.match(stripped):
+        return lower
     return None
 
 

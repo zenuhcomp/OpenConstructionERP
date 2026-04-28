@@ -159,6 +159,227 @@ def is_cad_file(filename: str) -> bool:
     return ext in SUPPORTED_CAD_EXTENSIONS
 
 
+# ── Health check / pre-conversion smoke test ──────────────────────────────
+#
+# Why this exists: ``find_converter()`` only checks the binary file is
+# present and bigger than 1 KB. That doesn't catch the realistic broken
+# states a Windows user runs into:
+#   * Required Qt6 DLL did not download with the rest of the install.
+#   * Wrong-architecture binary (x86 on ARM) refuses to load.
+#   * Permission denied because the install dir was extracted with the
+#     wrong attributes (read-only / blocked-by-Mark-of-the-Web).
+#   * Visual C++ Redistributable missing (msvcp140.dll, vcruntime140.dll).
+#
+# Calling ``smoke_test_converter`` before scheduling a conversion lets us
+# fail FAST with a clear error + suggested fix instead of letting the
+# upload run for 5 minutes and then time out with no diagnostic info.
+
+import time
+from typing import Literal, TypedDict
+
+ConverterHealthStatus = Literal["ok", "failed", "unknown"]
+SuggestedAction = Literal[
+    "install_converter",
+    "reinstall_converter",
+    "install_vc_redist",
+    "unblock_files",
+    "check_permissions",
+    "manual_install_from_github",
+]
+
+
+class ConverterHealth(TypedDict):
+    """Result of a converter smoke test.
+
+    ``status``:
+        - ``"ok"`` — binary loads and exits cleanly.
+        - ``"failed"`` — binary doesn't load (DLL missing, etc).
+        - ``"unknown"`` — smoke test couldn't run (timeout, OS error
+          unrelated to the binary itself).
+    ``message``:
+        Human-readable explanation. Empty string on the happy path.
+    ``suggested_actions``:
+        Stable string ids the frontend uses to render specific buttons
+        / instructions (Reinstall / Open install dir / Run as admin /
+        Install VCRedist / etc).
+    ``checked_at``:
+        Unix timestamp of the check — used by the cache layer.
+    """
+
+    status: ConverterHealthStatus
+    message: str
+    suggested_actions: list[str]
+    checked_at: float
+
+
+# In-process cache so we don't re-spawn the binary on every API call.
+# 5 minutes is enough that page-refresh navigation reuses one result;
+# manual install/uninstall paths invalidate explicitly.
+_HEALTH_CACHE: dict[str, ConverterHealth] = {}
+_HEALTH_TTL_SEC = 300
+
+# Windows NTSTATUS exit codes that always mean "the loader couldn't bring
+# the binary up". The values appear as both signed (Python's negative-int
+# representation of an unsigned u32) and unsigned in the wild, so we
+# match both.
+_WINDOWS_DLL_LOAD_FAILURES: frozenset[int] = frozenset(
+    {
+        -1073741515,  # 0xC0000135 STATUS_DLL_NOT_FOUND
+        -1073741502,  # 0xC0000142 STATUS_DLL_INIT_FAILED
+        3221225781,   # 0xC0000135 unsigned
+        3221225794,   # 0xC0000142 unsigned
+    }
+)
+
+
+def smoke_test_converter(extension: str, force: bool = False) -> ConverterHealth:
+    """Quick health check: spawn the converter binary and verify it loads.
+
+    Sends an empty stdin and waits up to ``8`` seconds for an exit. The
+    purpose is NOT to detect feature bugs — only to verify that the OS
+    can launch the binary without a missing-DLL / wrong-arch / perms
+    error. A binary that loads and then exits with an error code (because
+    the empty input didn't parse) is fine for our purposes.
+
+    Args:
+        extension: Lowercase file extension without dot (``"rvt"`` etc.).
+        force: Bypass the 5-minute cache and re-spawn the binary.
+
+    Returns:
+        ``ConverterHealth`` dict (always; never raises).
+    """
+    now = time.time()
+    cached = _HEALTH_CACHE.get(extension)
+    if cached and not force and (now - cached["checked_at"]) < _HEALTH_TTL_SEC:
+        return cached
+
+    exe_path = find_converter(extension)
+    if exe_path is None:
+        result: ConverterHealth = {
+            "status": "failed",
+            "message": (
+                f"The .{extension.upper()} converter is not installed. "
+                f"Use the Install button in the BIM page header to download it."
+            ),
+            "suggested_actions": ["install_converter"],
+            "checked_at": now,
+        }
+        _HEALTH_CACHE[extension] = result
+        return result
+
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            [str(exe_path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=str(exe_path.parent),
+            input=b"\n",
+            timeout=8,
+        )
+        rc = proc.returncode
+
+        if rc in _WINDOWS_DLL_LOAD_FAILURES:
+            result = {
+                "status": "failed",
+                "message": (
+                    f"{exe_path.name} exists on disk but cannot load — a "
+                    f"required Qt6 / Visual C++ DLL is missing "
+                    f"(Windows error 0x{rc & 0xFFFFFFFF:08x}). The Qt6 "
+                    f"plugins probably did not download cleanly during "
+                    f"install."
+                ),
+                "suggested_actions": [
+                    "reinstall_converter",
+                    "install_vc_redist",
+                    "manual_install_from_github",
+                ],
+                "checked_at": now,
+            }
+        else:
+            # Any other exit code (including non-zero from the empty input
+            # not being valid CAD): the binary did load, so the install
+            # is healthy from our perspective.
+            result = {
+                "status": "ok",
+                "message": "",
+                "suggested_actions": [],
+                "checked_at": now,
+            }
+    except subprocess.TimeoutExpired:
+        # Binary is alive but waiting for stdin / showing a window. That
+        # means the loader succeeded — treat as healthy.
+        result = {
+            "status": "ok",
+            "message": "",
+            "suggested_actions": [],
+            "checked_at": now,
+        }
+    except FileNotFoundError:
+        result = {
+            "status": "failed",
+            "message": (
+                f"Binary {exe_path} disappeared between detection and launch. "
+                f"The install may have been partially deleted."
+            ),
+            "suggested_actions": ["reinstall_converter"],
+            "checked_at": now,
+        }
+    except PermissionError as exc:
+        result = {
+            "status": "failed",
+            "message": (
+                f"Permission denied when launching {exe_path.name}: {exc}. "
+                f"On Windows this is usually 'Mark of the Web' — right-click "
+                f"the file → Properties → Unblock, or reinstall."
+            ),
+            "suggested_actions": ["unblock_files", "reinstall_converter"],
+            "checked_at": now,
+        }
+    except OSError as exc:
+        result = {
+            "status": "failed",
+            "message": (
+                f"OS could not launch {exe_path.name}: "
+                f"{exc.__class__.__name__}: {exc}. The binary may be the "
+                f"wrong architecture for this machine."
+            ),
+            "suggested_actions": ["reinstall_converter", "check_permissions"],
+            "checked_at": now,
+        }
+    except Exception as exc:  # noqa: BLE001 — health check must never raise
+        logger.warning(
+            "Smoke test for .%s converter errored: %s", extension, exc
+        )
+        result = {
+            "status": "unknown",
+            "message": (
+                f"Health check could not complete: "
+                f"{exc.__class__.__name__}: {exc}"
+            ),
+            "suggested_actions": [],
+            "checked_at": now,
+        }
+
+    _HEALTH_CACHE[extension] = result
+    return result
+
+
+def invalidate_converter_health(extension: str | None = None) -> None:
+    """Drop cached health for one or all converters.
+
+    Call this after a successful install / uninstall so the next health
+    poll re-runs the smoke test instead of reading a stale "failed" or
+    "ok" entry.
+    """
+    if extension is None:
+        _HEALTH_CACHE.clear()
+    else:
+        _HEALTH_CACHE.pop(extension, None)
+
+
 async def convert_cad_to_excel(
     input_path: Path,
     output_dir: Path,

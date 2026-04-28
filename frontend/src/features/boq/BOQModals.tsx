@@ -50,10 +50,20 @@ interface CostSearchItem {
 }
 
 /** Pending variant pick — stored in state so the picker can render once
- *  outside the multi-item add loop and the loop can resolve sequentially. */
+ *  outside the multi-item add loop and the loop can resolve sequentially.
+ *
+ *  Resolution shape:
+ *    `{ kind: 'variant', variant }` — explicit user pick.
+ *    `{ kind: 'default', strategy }` — user clicked "Use average".
+ *    `null` — cancelled.
+ */
+type VariantResolution =
+  | { kind: 'variant'; variant: CostVariant }
+  | { kind: 'default'; strategy: 'mean' | 'median' };
+
 interface PendingVariantPick {
   item: CostSearchItem;
-  resolve: (chosen: CostVariant | null) => void;
+  resolve: (chosen: VariantResolution | null) => void;
 }
 
 /* ── AssemblyPickerModal ─────────────────────────────────────────────── */
@@ -352,23 +362,26 @@ export function CostDatabaseSearchModal({
       // Promise wrapper around the variant picker — used only when a cost
       // item carries 2+ CWICR abstract-resource variants.  Cancelling the
       // picker (Esc / Cancel / outside-click) resolves with `null` and the
-      // outer loop skips that item but continues with the rest.
-      const pickVariant = (item: CostSearchItem): Promise<CostVariant | null> =>
+      // outer loop skips that item but continues with the rest.  Resolving
+      // with `{ kind: 'default' }` honours the "Use average" CTA and writes
+      // `variant_default` instead of a per-row pick on the position.
+      const pickVariant = (item: CostSearchItem): Promise<VariantResolution | null> =>
         new Promise((resolve) => {
           setActiveVariantPick({ item, resolve });
         });
 
       let variantToastShown = false;
+      let defaultToastShown = false;
 
       for (const item of selectedItems) {
         const variants = item.metadata_?.variants;
         const stats = item.metadata_?.variant_stats;
-        let chosenVariant: CostVariant | null = null;
+        let resolution: VariantResolution | null = null;
 
         if (variants && variants.length >= 2 && stats) {
-          chosenVariant = await pickVariant(item);
+          resolution = await pickVariant(item);
           // Cancelled — skip THIS item but keep going with the rest.
-          if (!chosenVariant) continue;
+          if (!resolution) continue;
         }
 
         const section = String(Math.floor((nextOrdNum - 1) / 999) + 1).padStart(2, '0');
@@ -385,11 +398,55 @@ export function CostDatabaseSearchModal({
           total: c.cost || (c.quantity ?? 1) * (c.unit_rate ?? 0),
         }));
 
+        // Resolve description + unit rate from the resolution.  The default
+        // path (kind === 'default') uses the resolved stats[strategy] —
+        // which is the rate the position will lock in via variant_snapshot
+        // server-side.
         const baseDescription = item.description || 'Unnamed item';
-        const description = chosenVariant
-          ? `${baseDescription} (Variant: ${chosenVariant.label})`
-          : baseDescription;
-        const unitRate = chosenVariant ? chosenVariant.price : (item.rate ?? 0);
+        let description = baseDescription;
+        let unitRate = item.rate ?? 0;
+        let variantMeta: Record<string, unknown> = {};
+
+        if (resolution?.kind === 'variant') {
+          description = `${baseDescription} (Variant: ${resolution.variant.label})`;
+          unitRate = resolution.variant.price;
+          variantMeta = {
+            variant: {
+              label: resolution.variant.label,
+              price: resolution.variant.price,
+              index: resolution.variant.index,
+            },
+          };
+        } else if (resolution?.kind === 'default') {
+          // Mean is the production default; median is exposed only by
+          // legacy callers.  Fall back to median if mean is zero (defensive).
+          const stats2 = item.metadata_!.variant_stats!;
+          const meanRate = stats2.mean;
+          const medianRate = stats2.median;
+          unitRate =
+            resolution.strategy === 'mean' && meanRate > 0
+              ? meanRate
+              : medianRate > 0
+                ? medianRate
+                : (item.rate ?? 0);
+          variantMeta = {
+            variant_default: resolution.strategy,
+          };
+        }
+
+        // Cache the variant set on the position metadata so the inline
+        // picker on the BOQ row can re-open without an extra fetch.  The
+        // backend `_stamp_variant_snapshot` will also use these for the
+        // immutability snapshot.
+        const variantCacheMeta: Record<string, unknown> = {};
+        if (variants && variants.length >= 2 && stats) {
+          variantCacheMeta.cost_item_variants = variants;
+          variantCacheMeta.cost_item_variant_stats = stats;
+          variantCacheMeta.cost_item_variant_count = stats.count;
+          variantCacheMeta.cost_item_variant_mean = stats.mean;
+          variantCacheMeta.cost_item_variant_min = stats.min;
+          variantCacheMeta.cost_item_variant_max = stats.max;
+        }
 
         await apiPost(`/v1/boq/boqs/${boqId}/positions/`, {
           boq_id: boqId,
@@ -403,28 +460,35 @@ export function CostDatabaseSearchModal({
           metadata: {
             cost_item_code: item.code,
             cost_item_region: item.region,
-            ...(chosenVariant
-              ? {
-                  variant: {
-                    label: chosenVariant.label,
-                    price: chosenVariant.price,
-                    index: chosenVariant.index,
-                  },
-                }
-              : {}),
+            cost_item_id: item.id,
+            currency: item.currency || 'USD',
+            ...variantCacheMeta,
+            ...variantMeta,
             ...(resources.length > 0 ? { resources } : {}),
           },
         });
 
-        if (chosenVariant && !variantToastShown) {
+        if (resolution?.kind === 'variant' && !variantToastShown) {
           addToast({
             type: 'success',
             title: t('boq.variant_applied', {
               defaultValue: 'Variant applied: {{label}}',
-              label: chosenVariant.label,
+              label: resolution.variant.label,
             }),
           });
           variantToastShown = true;
+        } else if (resolution?.kind === 'default' && !defaultToastShown) {
+          addToast({
+            type: 'info',
+            title: t('boq.variant_default_applied_title', {
+              defaultValue: 'Applied with average price',
+            }),
+            message: t('boq.variant_default_applied_msg', {
+              defaultValue:
+                'Click the row in the BOQ to choose a specific variant.',
+            }),
+          });
+          defaultToastShown = true;
         }
 
         nextOrdNum++;
@@ -663,19 +727,28 @@ export function CostDatabaseSearchModal({
 
       {/* Variant picker — anchored to the Add button so positioning is
           stable across the multi-item add loop.  Rendered outside the
-          modal's overflow:hidden body via createPortal in VariantPicker. */}
+          modal's overflow:hidden body via createPortal in VariantPicker.
+          Default strategy is "mean" (matches CostX/iTWO defaults); the
+          legacy "median" tag in the Cost-DB browser remains available
+          via the `defaultStrategy` prop on direct callers. */}
       {activeVariantPick && activeVariantPick.item.metadata_?.variants
         && activeVariantPick.item.metadata_?.variant_stats && (
         <VariantPicker
           variants={activeVariantPick.item.metadata_.variants}
           stats={activeVariantPick.item.metadata_.variant_stats}
+          defaultStrategy="mean"
           anchorEl={addButtonRef.current}
           unitLabel={activeVariantPick.item.unit || ''}
           currency={activeVariantPick.item.currency || 'USD'}
           onApply={(chosen) => {
             const pending = activeVariantPick;
             setActiveVariantPick(null);
-            pending.resolve(chosen);
+            pending.resolve({ kind: 'variant', variant: chosen });
+          }}
+          onUseDefault={(strategy) => {
+            const pending = activeVariantPick;
+            setActiveVariantPick(null);
+            pending.resolve({ kind: 'default', strategy });
           }}
           onClose={() => {
             const pending = activeVariantPick;

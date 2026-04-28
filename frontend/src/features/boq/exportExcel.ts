@@ -62,7 +62,41 @@ function getResources(pos: Position): Resource[] {
 
 /* ── Constants ────────────────────────────────────────────────────────── */
 
-const BOQ_COLUMNS = ['No.', 'Description', 'Unit', 'Quantity', 'Unit Rate', 'Total', 'Type', 'Code'];
+const BOQ_COLUMNS = [
+  'No.',
+  'Description',
+  'Unit',
+  'Quantity',
+  'Unit Rate',
+  'Total',
+  'Variant',
+  'Type',
+  'Code',
+];
+
+/** Read the CWICR variant marker (if any) off a position's metadata.
+ *  Returns the cell text to drop into the "Variant" column:
+ *    • Specific pick      → variant.label
+ *    • Auto-default       → "Average (5 options)" / "Median (5 options)"
+ *    • Plain position     → '' (empty cell — Excel reads as null) */
+function getVariantCellValue(pos: Position): string {
+  const meta = (pos.metadata ?? (pos as unknown as Record<string, unknown>).metadata_) as
+    | Record<string, unknown>
+    | undefined;
+  if (!meta) return '';
+  const variant = meta.variant as { label?: unknown } | undefined;
+  if (variant && typeof variant.label === 'string') {
+    return variant.label;
+  }
+  const variantDefault = meta.variant_default;
+  if (variantDefault === 'mean' || variantDefault === 'median') {
+    const stats = meta.cost_item_variant_stats as { count?: number } | undefined;
+    const count = typeof stats?.count === 'number' ? stats.count : null;
+    const word = variantDefault === 'mean' ? 'Average' : 'Median';
+    return count != null ? `${word} (${count} options)` : word;
+  }
+  return '';
+}
 
 /** A single 2-D table of values; null for blank cells. */
 type Row = (string | number | null)[];
@@ -148,6 +182,7 @@ export function buildBOQSheetData(options: ExportOptions): {
       group.subtotal,
       null,
       null,
+      null,
     ]);
     merge(sectionRowIdx, 1, sectionRowIdx, 4);
 
@@ -159,6 +194,7 @@ export function buildBOQSheetData(options: ExportOptions): {
         child.quantity,
         child.unit_rate,
         child.total,
+        getVariantCellValue(child),
         null,
         null,
       ]);
@@ -171,6 +207,7 @@ export function buildBOQSheetData(options: ExportOptions): {
           r.quantity,
           r.unit_rate,
           rTotal,
+          null,
           r.type || '',
           r.code || '',
         ]);
@@ -186,6 +223,7 @@ export function buildBOQSheetData(options: ExportOptions): {
       group.subtotal,
       null,
       null,
+      null,
     ]);
     merge(rows.length - 1, 1, rows.length - 1, 4);
 
@@ -195,7 +233,17 @@ export function buildBOQSheetData(options: ExportOptions): {
   // Ungrouped
   for (const pos of grouped.ungrouped) {
     if (isSection(pos)) continue;
-    rows.push([pos.ordinal, pos.description, pos.unit, pos.quantity, pos.unit_rate, pos.total, null, null]);
+    rows.push([
+      pos.ordinal,
+      pos.description,
+      pos.unit,
+      pos.quantity,
+      pos.unit_rate,
+      pos.total,
+      getVariantCellValue(pos),
+      null,
+      null,
+    ]);
     for (const r of getResources(pos)) {
       const rTotal = r.total ?? r.quantity * r.unit_rate;
       rows.push([
@@ -205,6 +253,7 @@ export function buildBOQSheetData(options: ExportOptions): {
         r.quantity,
         r.unit_rate,
         rTotal,
+        null,
         r.type || '',
         r.code || '',
       ]);
@@ -212,25 +261,38 @@ export function buildBOQSheetData(options: ExportOptions): {
   }
 
   // ── Summary block ─────────────────────────────────────────────────────
+  // Helper: build a `colCount`-wide row with the supplied non-null values
+  // at the indices specified.  Keeps the summary block in sync with
+  // BOQ_COLUMNS so adding a new column doesn't desync the merge ranges.
+  const summaryRow = (
+    label: string | null,
+    total: number | null,
+  ): Row => {
+    const r: Row = Array(colCount).fill(null);
+    if (label !== null) r[1] = label;
+    if (total !== null) r[5] = total;
+    return r;
+  };
+
   rows.push(Array(colCount).fill(null));
-  rows.push([null, 'COST SUMMARY', null, null, null, null, null, null]);
+  rows.push(summaryRow('COST SUMMARY', null));
   merge(rows.length - 1, 1, rows.length - 1, 4);
 
   const directCost = positions.filter((p) => !isSection(p)).reduce((sum, p) => sum + p.total, 0);
-  rows.push([null, 'Direct Cost', null, null, null, directCost, null, null]);
+  rows.push(summaryRow('Direct Cost', directCost));
 
   for (const m of markupTotals) {
-    rows.push([null, `  + ${m.name} (${m.percentage}%)`, null, null, null, m.amount, null, null]);
+    rows.push(summaryRow(`  + ${m.name} (${m.percentage}%)`, m.amount));
   }
 
   rows.push(Array(colCount).fill(null));
-  rows.push([null, 'Net Total', null, null, null, netTotal, null, null]);
+  rows.push(summaryRow('Net Total', netTotal));
 
   const vatLabel = vatRate > 0 ? `VAT (${(vatRate * 100).toFixed(0)}%)` : 'VAT (0%)';
-  rows.push([null, `  + ${vatLabel}`, null, null, null, vatAmount, null, null]);
+  rows.push(summaryRow(`  + ${vatLabel}`, vatAmount));
 
   rows.push(Array(colCount).fill(null));
-  rows.push([null, 'GROSS TOTAL', null, null, null, grossTotal, null, null]);
+  rows.push(summaryRow('GROSS TOTAL', grossTotal));
   merge(rows.length - 1, 1, rows.length - 1, 4);
 
   // Footer
@@ -332,11 +394,13 @@ export async function buildBOQWorkbookBuffer(options: ExportOptions): Promise<Ar
     { width: 14 }, // Quantity
     { width: 14 }, // Unit Rate
     { width: 16 }, // Total
+    { width: 22 }, // Variant
     { width: 12 }, // Type
     { width: 14 }, // Code
   ];
 
-  // Number format for quantity / unit rate / total columns (1-based: 4, 5, 6)
+  // Number format for quantity / unit rate / total columns (1-based: 4, 5, 6).
+  // The newly-added Variant column (1-based 7) is always text — no numFmt.
   for (let r = numberFormatStartRow + 1; r <= boqSheet.rowCount; r++) {
     const row = boqSheet.getRow(r);
     for (const c of [4, 5, 6]) {

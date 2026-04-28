@@ -73,6 +73,29 @@ export interface BIMCadUploadResponse {
 
 /* ── Converter Management (BIM preflight + auto-install) ─────────────── */
 
+/** Health states surfaced by the backend smoke test:
+ *   - `ok` — binary loads and exits cleanly.
+ *   - `failed` — binary doesn't load (DLL missing, perms, etc.).
+ *   - `unknown` — install detected, smoke test not yet run (the
+ *     `verify=true` query param triggers it).
+ *   - `not_installed` — the binary isn't present on disk. */
+export type BIMConverterHealth =
+  | 'ok'
+  | 'failed'
+  | 'unknown'
+  | 'not_installed';
+
+/** Stable action ids returned by the backend so the UI can render the
+ *  correct fix button. New ids are added here as the smoke test learns
+ *  to detect more failure modes. */
+export type BIMConverterAction =
+  | 'install_converter'
+  | 'reinstall_converter'
+  | 'install_vc_redist'
+  | 'unblock_files'
+  | 'check_permissions'
+  | 'manual_install_from_github';
+
 /** Single DDC converter entry as returned by the backend
  *  `/v1/takeoff/converters/` endpoint. */
 export interface BIMConverterInfo {
@@ -87,13 +110,34 @@ export interface BIMConverterInfo {
   size_mb: number;
   installed: boolean;
   path: string | null;
+  /** Smoke-test result. Always present from v2.6.23+ (older servers omit
+   *  the field — frontend treats missing as `'unknown'`). */
+  health?: BIMConverterHealth;
+  /** Human-readable explanation when `health !== 'ok'`. */
+  health_message?: string;
+  /** Stable action ids the UI maps to fix buttons. */
+  suggested_actions?: BIMConverterAction[];
 }
 
 /** Response payload of `GET /v1/takeoff/converters/`. */
 export interface BIMConvertersResponse {
   converters: BIMConverterInfo[];
   installed_count: number;
+  /** Number of converters where `health === 'ok'`. Only meaningful when
+   *  the request was made with `verify=true`. */
+  healthy_count?: number;
   total_count: number;
+}
+
+/** Result of `POST /v1/takeoff/converters/{id}/verify/` — force-runs the
+ *  smoke test (bypasses the 5-minute cache) and returns fresh health. */
+export interface BIMConverterVerifyResult {
+  converter_id: string;
+  installed: boolean;
+  path: string | null;
+  health: BIMConverterHealth;
+  health_message: string;
+  suggested_actions: BIMConverterAction[];
 }
 
 /** Result of `POST /v1/takeoff/converters/{id}/install/`.
@@ -123,9 +167,31 @@ export interface BIMConverterInstallResult {
 /** List every DDC converter and its install status.  Shared with the
  *  Quantities page — use the same `['bim-converters']` query key in
  *  any component that renders converter state so cache invalidations
- *  stay in sync. */
-export async function fetchBIMConverters(): Promise<BIMConvertersResponse> {
-  return apiGet<BIMConvertersResponse>('/v1/takeoff/converters/');
+ *  stay in sync.
+ *
+ *  Pass `verify: true` to also run the per-converter smoke test (cached
+ *  5 min server-side). Without it, every installed converter reports
+ *  `health: 'unknown'` and the UI shows neutral pills. */
+export async function fetchBIMConverters(
+  options: { verify?: boolean } = {},
+): Promise<BIMConvertersResponse> {
+  const url = options.verify
+    ? '/v1/takeoff/converters/?verify=true'
+    : '/v1/takeoff/converters/';
+  return apiGet<BIMConvertersResponse>(url);
+}
+
+/** Force-run the smoke test for a single converter, bypassing the
+ *  server-side cache. Used by the BIM page's "Re-check" button after
+ *  the user manually fixed something (installed VCRedist, unblocked
+ *  the files, ran as admin). */
+export async function verifyBIMConverter(
+  converterId: string,
+): Promise<BIMConverterVerifyResult> {
+  return apiPost<BIMConverterVerifyResult>(
+    `/v1/takeoff/converters/${encodeURIComponent(converterId)}/verify/`,
+    {},
+  );
 }
 
 /** Trigger an auto-install of a DDC converter from GitHub releases.

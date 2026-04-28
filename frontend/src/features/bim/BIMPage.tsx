@@ -449,7 +449,7 @@ function UploadPanel({
             try {
               const status = await queryClient.fetchQuery({
                 queryKey: ['bim-converters'],
-                queryFn: fetchBIMConverters,
+                queryFn: () => fetchBIMConverters(),
                 staleTime: 30_000,
               });
               const conv = status.converters.find(

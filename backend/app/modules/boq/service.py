@@ -19,6 +19,7 @@ Stateless service layer. Handles:
 
 import logging
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -27,6 +28,109 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import event_bus
+
+# ── CWICR variant snapshot helpers ───────────────────────────────────────
+#
+# When a BOQ position is applied from a CostItem that carries CWICR
+# abstract-resource variants (e.g. concrete C25 / C30 / C35), the position
+# stores either the picked variant under ``metadata.variant`` (with
+# ``{label, price, index}``) or — when the user accepted the auto-suggested
+# average — under ``metadata.variant_default = "mean" | "median"``.
+#
+# To make the relationship immutable from the position's side, we also write
+# ``metadata.variant_snapshot`` with a frozen copy at the moment of choice:
+#
+#     {
+#         "label": str,            # variant label or "average"/"median"
+#         "rate": float,           # numeric unit rate captured at this point
+#         "currency": str,         # ISO 4217 currency code
+#         "captured_at": str,      # UTC ISO-8601 timestamp
+#         "source": "user_pick" | "default_mean" | "default_median",
+#     }
+#
+# The snapshot is computed deterministically from the incoming metadata
+# (``variant`` / ``variant_default`` / ``variant_stats`` / ``unit_rate``
+# / ``currency``) so any later import / cost-DB rate change cannot silently
+# rewrite the BOQ position's price.  Callers re-stamp the snapshot only when
+# ``variant`` or ``variant_default`` actually changes — a no-op patch leaves
+# the existing snapshot intact.
+
+
+def _stamp_variant_snapshot(
+    metadata: dict[str, Any],
+    *,
+    unit_rate: float | str | Decimal | None,
+    currency: str | None,
+) -> dict[str, Any]:
+    """Add or refresh ``metadata.variant_snapshot`` when the metadata carries
+    a ``variant`` (user pick) or ``variant_default`` (auto-average) marker.
+
+    Idempotent: when ``variant_snapshot`` already exists and matches the
+    current ``variant`` / ``variant_default``, the existing snapshot is
+    preserved (we don't move ``captured_at`` forward on a no-op patch).
+
+    Returns the same metadata dict (mutated in-place) so it can be fed back
+    into the SQL UPDATE without an extra alloc.
+
+    Args:
+        metadata: BOQ position metadata dict.  Must be safe to mutate.
+        unit_rate: The numeric unit rate the caller is about to persist.
+            Accepts string / Decimal / float to mirror ``_quantize_money_str``.
+        currency: ISO 4217 code captured alongside the rate.  ``None`` is
+            allowed; falls back to ``"USD"`` to avoid losing the snapshot.
+    """
+    variant = metadata.get("variant")
+    variant_default = metadata.get("variant_default")
+
+    has_user_pick = (
+        isinstance(variant, dict)
+        and isinstance(variant.get("label"), str)
+        and isinstance(variant.get("price"), int | float)
+    )
+    has_default = isinstance(variant_default, str) and variant_default in {
+        "mean",
+        "median",
+    }
+
+    if not (has_user_pick or has_default):
+        return metadata
+
+    # Numeric rate — quantise lightly so the snapshot never carries a
+    # full-precision Decimal that won't survive JSON round-trip.
+    try:
+        rate_val = float(unit_rate) if unit_rate is not None else 0.0
+    except (TypeError, ValueError):
+        rate_val = 0.0
+    rate_val = round(rate_val, 4)
+
+    if has_user_pick:
+        label = str(variant["label"])
+        source = "user_pick"
+    else:
+        label = "average" if variant_default == "mean" else "median"
+        source = f"default_{variant_default}"
+
+    existing = metadata.get("variant_snapshot")
+    if (
+        isinstance(existing, dict)
+        and existing.get("label") == label
+        and existing.get("source") == source
+        and abs(float(existing.get("rate", 0)) - rate_val) < 0.005
+    ):
+        # No-op patch — preserve the original captured_at timestamp so the
+        # immutability marker doesn't drift on every unrelated metadata
+        # update.
+        return metadata
+
+    metadata["variant_snapshot"] = {
+        "label": label,
+        "rate": rate_val,
+        "currency": currency or "USD",
+        "captured_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "source": source,
+    }
+    return metadata
+
 
 logger_events = logging.getLogger(__name__ + ".events")
 _logger_audit = logging.getLogger(__name__ + ".audit")
@@ -1202,8 +1306,7 @@ class BOQService:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    "Parent position belongs to a different BOQ "
-                    f"({parent.boq_id}); cross-BOQ parents are not allowed."
+                    f"Parent position belongs to a different BOQ ({parent.boq_id}); cross-BOQ parents are not allowed."
                 ),
             )
 
@@ -1218,8 +1321,7 @@ class BOQService:
             current = frontier.pop()
             if current in visited:
                 logger.warning(
-                    "Cycle guard: revisited position %s while walking descendants of %s — "
-                    "data may already be corrupt.",
+                    "Cycle guard: revisited position %s while walking descendants of %s — data may already be corrupt.",
                     current,
                     position_id,
                 )
@@ -1432,9 +1534,7 @@ class BOQService:
         # created with ``source='cwicr'`` (or any source) can carry a typed
         # link back to the cost database.  No DB migration — we piggyback
         # on the existing JSON metadata column.
-        merged_metadata: dict[str, Any] = (
-            dict(data.metadata) if isinstance(data.metadata, dict) else {}
-        )
+        merged_metadata: dict[str, Any] = dict(data.metadata) if isinstance(data.metadata, dict) else {}
         if data.cost_item_id is not None:
             try:
                 cost_repo = CostItemRepository(self.session)
@@ -1442,15 +1542,10 @@ class BOQService:
             except HTTPException:
                 raise
             except Exception as exc:  # noqa: BLE001 — surface any DB failure as 422
-                logger.exception(
-                    "add_position cost_item lookup failed for %s", data.cost_item_id
-                )
+                logger.exception("add_position cost_item lookup failed for %s", data.cost_item_id)
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=(
-                        "cost_item_id does not reference an active CostItem "
-                        f"({type(exc).__name__})"
-                    ),
+                    detail=(f"cost_item_id does not reference an active CostItem ({type(exc).__name__})"),
                 ) from exc
             if cost_item is None or not getattr(cost_item, "is_active", False):
                 raise HTTPException(
@@ -1458,6 +1553,18 @@ class BOQService:
                     detail="cost_item_id does not reference an active CostItem",
                 )
             merged_metadata["cost_item_id"] = str(data.cost_item_id)
+
+        # Stamp the CWICR variant snapshot so the position's unit_rate is
+        # immutable from the cost-database side: a later re-import or rate
+        # update on the source CostItem cannot rewrite it silently.  Only
+        # active when the caller actually attached a ``variant`` or
+        # ``variant_default`` marker (no-op for plain manual positions).
+        currency_hint = merged_metadata.get("currency") if isinstance(merged_metadata, dict) else None
+        _stamp_variant_snapshot(
+            merged_metadata,
+            unit_rate=data.unit_rate,
+            currency=currency_hint if isinstance(currency_hint, str) else None,
+        )
 
         total = _compute_total(data.quantity, data.unit_rate)
         max_order = await self.position_repo.get_max_sort_order(data.boq_id)
@@ -1623,10 +1730,7 @@ class BOQService:
                 )
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=(
-                        "cost_item_id does not reference an active CostItem "
-                        f"({type(exc).__name__})"
-                    ),
+                    detail=(f"cost_item_id does not reference an active CostItem ({type(exc).__name__})"),
                 ) from exc
             if cost_item is None or not getattr(cost_item, "is_active", False):
                 raise HTTPException(
@@ -1641,9 +1745,7 @@ class BOQService:
             if "metadata" in fields and isinstance(fields["metadata"], dict):
                 base_meta = dict(fields["metadata"])
             else:
-                existing_meta = (
-                    position.metadata_ if isinstance(position.metadata_, dict) else {}
-                )
+                existing_meta = position.metadata_ if isinstance(position.metadata_, dict) else {}
                 base_meta = dict(existing_meta)
             base_meta["cost_item_id"] = str(client_cost_item_id)
             fields["metadata"] = base_meta
@@ -1676,9 +1778,7 @@ class BOQService:
 
         # If ordinal is being changed, check uniqueness within the BOQ
         if "ordinal" in fields and fields["ordinal"] != position.ordinal:
-            if await self.position_repo.ordinal_exists(
-                position.boq_id, fields["ordinal"], exclude_id=position_id
-            ):
+            if await self.position_repo.ordinal_exists(position.boq_id, fields["ordinal"], exclude_id=position_id):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"Position with ordinal '{fields['ordinal']}' already exists in this BOQ",
@@ -1748,14 +1848,16 @@ class BOQService:
         ):
             resources = meta["resources"]
             # Sum of per-unit subtotals == position unit_rate (NO division by qty).
-            new_unit_rate = str(round(
-                sum(
-                    float(r.get("quantity", 0)) * float(r.get("unit_rate", 0))
-                    for r in resources
-                    if isinstance(r, dict)
-                ),
-                4,
-            ))
+            new_unit_rate = str(
+                round(
+                    sum(
+                        float(r.get("quantity", 0)) * float(r.get("unit_rate", 0))
+                        for r in resources
+                        if isinstance(r, dict)
+                    ),
+                    4,
+                )
+            )
             fields["unit_rate"] = new_unit_rate
 
         # Recalculate total only when something pricing-related actually changed.
@@ -1798,6 +1900,40 @@ class BOQService:
                 fields["metadata_"] = base_meta
             if "validation_status" not in fields:
                 fields["validation_status"] = "pending"
+
+        # ── CWICR variant snapshot ───────────────────────────────────────
+        # When the incoming metadata sets ``variant`` or ``variant_default``,
+        # stamp ``variant_snapshot`` so the position's unit_rate is frozen
+        # against later cost-database changes.  We only mutate metadata when
+        # the snapshot is actually missing or stale — the helper is a no-op
+        # for plain manual positions.
+        #
+        # Idempotency: a no-op metadata patch (same variant payload, no
+        # snapshot in the incoming dict) must not advance ``captured_at``.
+        # We pre-seed the incoming metadata with the existing snapshot so
+        # ``_stamp_variant_snapshot`` can short-circuit when nothing changed.
+        if "metadata_" in fields and isinstance(fields["metadata_"], dict):
+            # Resolve the rate that's about to be persisted; falls back to
+            # the new_unit_rate computed above when the patch only touches
+            # metadata.
+            snapshot_rate = fields.get("unit_rate", new_unit_rate)
+            existing_meta = position.metadata_ if isinstance(position.metadata_, dict) else {}
+            currency = fields["metadata_"].get("currency") or (
+                existing_meta.get("currency") if isinstance(existing_meta, dict) else None
+            )
+            existing_snapshot = existing_meta.get("variant_snapshot") if isinstance(existing_meta, dict) else None
+            if isinstance(existing_snapshot, dict) and "variant_snapshot" not in fields["metadata_"]:
+                # Carry the existing snapshot forward so the idempotency
+                # check inside ``_stamp_variant_snapshot`` can compare
+                # against it.  If the new variant choice still matches,
+                # ``captured_at`` stays stable.  If it has changed, the
+                # helper overwrites this seed with a fresh entry below.
+                fields["metadata_"]["variant_snapshot"] = existing_snapshot
+            _stamp_variant_snapshot(
+                fields["metadata_"],
+                unit_rate=snapshot_rate,
+                currency=currency if isinstance(currency, str) else None,
+            )
 
         if fields:
             # BUG-CONCURRENCY01: bump the version counter atomically with the
@@ -1962,7 +2098,9 @@ class BOQService:
 
         logger.info(
             "Position deleted: %s from BOQ %s (cascade=%d descendants)",
-            position_id, boq_id, len(deleted_position_ids) - 1,
+            position_id,
+            boq_id,
+            len(deleted_position_ids) - 1,
         )
 
     async def _scrub_activity_position_refs(
@@ -1983,9 +2121,7 @@ class BOQService:
             from app.modules.schedule.models import Activity, Schedule
 
             # Find all schedules in the same project as this BOQ
-            boq_row = (await self.session.execute(
-                select(BOQ.project_id).where(BOQ.id == boq_id)
-            )).first()
+            boq_row = (await self.session.execute(select(BOQ.project_id).where(BOQ.id == boq_id))).first()
             if not boq_row:
                 return
             project_id = boq_row[0]
@@ -2003,20 +2139,21 @@ class BOQService:
                 cleaned = [pid for pid in current if str(pid) not in deleted_set]
                 if len(cleaned) != len(current):
                     await self.session.execute(
-                        update(Activity)
-                        .where(Activity.id == act.id)
-                        .values(boq_position_ids=cleaned)
+                        update(Activity).where(Activity.id == act.id).values(boq_position_ids=cleaned)
                     )
                     updated_count += 1
             if updated_count:
                 logger.info(
                     "Scrubbed %d deleted position refs from %d activities (boq=%s)",
-                    len(deleted_position_ids), updated_count, boq_id,
+                    len(deleted_position_ids),
+                    updated_count,
+                    boq_id,
                 )
         except Exception as exc:  # best-effort cleanup — never fail the parent delete
             logger.warning(
                 "Failed to scrub activity position refs for boq=%s: %s",
-                boq_id, exc,
+                boq_id,
+                exc,
             )
 
     async def reorder_positions(self, boq_id: uuid.UUID, position_ids: list[uuid.UUID]) -> None:
@@ -4492,10 +4629,7 @@ class BOQService:
                             "description": pos.description or "",
                             "type": "outlier",
                             "severity": "warning",
-                            "detail": (
-                                f"Unit rate {rate:.2f} is {z:+.2f}\u03c3 from the "
-                                f"group mean {mean:.2f}"
-                            ),
+                            "detail": (f"Unit rate {rate:.2f} is {z:+.2f}\u03c3 from the group mean {mean:.2f}"),
                             "value": round(rate, 2),
                             "reference": round(mean, 2),
                         }
@@ -4507,9 +4641,7 @@ class BOQService:
             by_boq.setdefault(pos.boq_id, []).append(pos)
 
         for boq_positions in by_boq.values():
-            ordered = sorted(
-                boq_positions, key=lambda p: (p.sort_order, p.ordinal or "")
-            )
+            ordered = sorted(boq_positions, key=lambda p: (p.sort_order, p.ordinal or ""))
             for idx, pos in enumerate(ordered):
                 rate = _str_to_float(pos.unit_rate)
                 if rate <= 0:
@@ -4525,11 +4657,7 @@ class BOQService:
                     continue
                 neighbours.sort()
                 mid = len(neighbours) // 2
-                median = (
-                    neighbours[mid]
-                    if len(neighbours) % 2 == 1
-                    else (neighbours[mid - 1] + neighbours[mid]) / 2
-                )
+                median = neighbours[mid] if len(neighbours) % 2 == 1 else (neighbours[mid - 1] + neighbours[mid]) / 2
                 if median > 0 and rate > 2 * median:
                     anomalies.append(
                         {
@@ -4538,10 +4666,7 @@ class BOQService:
                             "description": pos.description or "",
                             "type": "jump",
                             "severity": "warning",
-                            "detail": (
-                                f"Unit rate {rate:.2f} exceeds 2x the "
-                                f"neighbour median {median:.2f}"
-                            ),
+                            "detail": (f"Unit rate {rate:.2f} exceeds 2x the neighbour median {median:.2f}"),
                             "value": round(rate, 2),
                             "reference": round(median, 2),
                         }

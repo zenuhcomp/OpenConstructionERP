@@ -297,9 +297,20 @@ export function BOQEditorPage() {
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdatePositionData }) =>
       boqApi.updatePosition(id, data),
-    onMutate: ({ id, data }: { id: string; data: UpdatePositionData }) => {
-      // Optimistic cache write — paint the user's edit instantly so the grid
-      // shows the new value without the ~5s server round-trip flicker.
+    // ── Optimistic update, full pattern (Bug: edit jumps back to old then
+    // reappears) ─────────────────────────────────────────────────────────
+    // 1. Cancel in-flight ['boq', boqId] refetches so a slow GET that was
+    //    issued before the user typed cannot land AFTER setQueryData and
+    //    overwrite the optimistic value.
+    // 2. Snapshot the previous cache so onError can roll back without a
+    //    refetch round-trip (which would also briefly show old values).
+    // 3. setQueryData paints the user's edit instantly.
+    // 4. invalidateAll runs in onSettled (not onSuccess) so it fires once
+    //    per mutation regardless of outcome and never races with a sibling
+    //    mutation's onSuccess.
+    onMutate: async ({ id, data }: { id: string; data: UpdatePositionData }) => {
+      await queryClient.cancelQueries({ queryKey: ['boq', boqId] });
+      const previous = queryClient.getQueryData(['boq', boqId]);
       queryClient.setQueryData(['boq', boqId], (old: unknown) => {
         if (!old || typeof old !== 'object') return old;
         const cur = old as { positions: Position[]; [k: string]: unknown };
@@ -309,6 +320,9 @@ export function BOQEditorPage() {
             if (p.id !== id) return p;
             const next = { ...p, ...data } as Position;
             if (data.quantity !== undefined || data.unit_rate !== undefined) {
+              // Mirror backend semantics (boq/service.py::_compute_total):
+              // total = quantity × unit_rate, no VAT, no markups. Markups
+              // are layered on top in derived selectors, not stored here.
               next.total = (next.quantity ?? 0) * (next.unit_rate ?? 0);
             }
             if (data.quantity !== undefined) {
@@ -333,15 +347,16 @@ export function BOQEditorPage() {
           }),
         };
       });
+      return { previous };
     },
-    onSuccess: () => invalidateAll(),
-    onError: (err: Error) => {
-      // Roll back the optimistic cache mutation by re-fetching server truth.
-      // Without this the grid keeps the user's edited value while the server
-      // never accepted it — silent data loss (Bug 5).
-      invalidateAll();
+    onError: (err: Error, _vars, ctx) => {
+      // Restore the snapshot synchronously — no refetch flicker.
+      if (ctx?.previous !== undefined) {
+        queryClient.setQueryData(['boq', boqId], ctx.previous);
+      }
       addToast({ type: 'error', title: t('boq.update_failed', { defaultValue: 'Failed to update position' }), message: err.message });
     },
+    onSettled: () => invalidateAll(),
   });
 
   const deleteMutation = useMutation({

@@ -122,31 +122,136 @@ _CONVERTER_META: list[dict[str, Any]] = [
 
 
 @router.get("/converters/")
-async def list_converters() -> dict[str, Any]:
+async def list_converters(verify: bool = False) -> dict[str, Any]:
     """Return the status of all known CAD/BIM converters.
 
     Scans standard install paths and returns which converters are found.
     No authentication required — this is a public status check.
+
+    Args:
+        verify: When ``true``, also runs a quick smoke test (~8 s timeout
+            per installed converter) to confirm the binary actually
+            loads. Result is cached for 5 minutes so repeated calls are
+            cheap. The default is ``false`` so the page-load list call
+            stays fast (<50 ms); the BIM page polls with ``verify=true``
+            after install completes.
     """
-    from app.modules.boq.cad_import import find_converter
+    import asyncio
+
+    from app.modules.boq.cad_import import find_converter, smoke_test_converter
+
+    # Phase 1: cheap file-stat lookup for every converter (synchronous,
+    # bounded by ~4 disk reads — sub-millisecond on a warm cache).
+    paths: list[Path | None] = [find_converter(m["id"]) for m in _CONVERTER_META]
+
+    # Phase 2: when ``verify=true``, run ALL installed-converter smoke
+    # tests CONCURRENTLY with ``asyncio.gather`` so the wall-clock cost
+    # is bounded by the slowest one (8 s timeout) instead of the sum of
+    # all of them. Without this the request was up to 32 s for four
+    # installed converters — long enough that React Query stayed in
+    # ``isFetching`` and the user saw a stale "0/4 verified" view with
+    # no health pills.
+    health_results: list[dict[str, Any] | None] = [None] * len(_CONVERTER_META)
+    if verify:
+        smoke_tasks: list[Any] = []
+        smoke_indices: list[int] = []
+        for idx, (meta, path) in enumerate(zip(_CONVERTER_META, paths, strict=True)):
+            if path is not None:
+                smoke_tasks.append(
+                    asyncio.to_thread(smoke_test_converter, meta["id"])
+                )
+                smoke_indices.append(idx)
+        if smoke_tasks:
+            results = await asyncio.gather(*smoke_tasks, return_exceptions=True)
+            for slot, result in zip(smoke_indices, results, strict=True):
+                if isinstance(result, BaseException):
+                    health_results[slot] = {
+                        "status": "unknown",
+                        "message": f"Smoke test errored: {result}",
+                        "suggested_actions": [],
+                        "checked_at": 0.0,
+                    }
+                else:
+                    health_results[slot] = result  # type: ignore[assignment]
 
     converters: list[dict[str, Any]] = []
-    for meta in _CONVERTER_META:
-        ext = meta["id"]
-        path = find_converter(ext)
-        converters.append(
-            {
-                **meta,
-                "installed": path is not None,
-                "path": str(path) if path else None,
-            }
-        )
+    for idx, meta in enumerate(_CONVERTER_META):
+        path = paths[idx]
+        installed = path is not None
+        entry: dict[str, Any] = {
+            **meta,
+            "installed": installed,
+            "path": str(path) if path else None,
+        }
+        if not installed:
+            entry["health"] = "not_installed"
+            entry["health_message"] = ""
+            entry["suggested_actions"] = ["install_converter"]
+        elif verify and health_results[idx] is not None:
+            h = health_results[idx]
+            assert h is not None
+            entry["health"] = h["status"]
+            entry["health_message"] = h["message"]
+            entry["suggested_actions"] = h["suggested_actions"]
+        else:
+            entry["health"] = "unknown"
+            entry["health_message"] = ""
+            entry["suggested_actions"] = []
+        converters.append(entry)
 
     installed_count = sum(1 for c in converters if c["installed"])
+    healthy_count = sum(1 for c in converters if c["health"] == "ok")
     return {
         "converters": converters,
         "installed_count": installed_count,
+        "healthy_count": healthy_count,
         "total_count": len(converters),
+    }
+
+
+@router.post("/converters/{converter_id}/verify/")
+async def verify_converter(converter_id: str) -> dict[str, Any]:
+    """Force-run the smoke test for one converter and return health.
+
+    Bypasses the 5-minute cache. Used by the BIM page's "Re-check" button
+    so the user can re-verify after manually fixing a broken install
+    (e.g. installing VC++ Redistributable, unblocking files, or running
+    the converter exe once as administrator).
+    """
+    import asyncio
+
+    from app.modules.boq.cad_import import find_converter, smoke_test_converter
+
+    if converter_id not in {m["id"] for m in _CONVERTER_META}:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown converter id: {converter_id}",
+        )
+
+    path = find_converter(converter_id)
+    if path is None:
+        return {
+            "converter_id": converter_id,
+            "installed": False,
+            "path": None,
+            "health": "not_installed",
+            "health_message": (
+                f"The .{converter_id.upper()} converter is not installed. "
+                f"Use the Install button on the BIM page to download it."
+            ),
+            "suggested_actions": ["install_converter"],
+        }
+
+    health = await asyncio.to_thread(
+        smoke_test_converter, converter_id, True
+    )
+    return {
+        "converter_id": converter_id,
+        "installed": True,
+        "path": str(path),
+        "health": health["status"],
+        "health_message": health["message"],
+        "suggested_actions": health["suggested_actions"],
     }
 
 
@@ -534,6 +639,14 @@ async def install_converter(
                 logger.warning("Smoke test for %s converter failed: %s", converter_id, exc)
 
             size_bytes = exe_path.stat().st_size if exe_path.exists() else 0
+
+            # Drop any stale "not_installed" health entry so the next
+            # ``/converters/?verify=true`` poll re-runs the smoke test
+            # against the freshly installed binary instead of replaying
+            # a cached pre-install ``not_installed`` result.
+            from app.modules.boq.cad_import import invalidate_converter_health
+            invalidate_converter_health(converter_id)
+
             return {
                 "converter_id": converter_id,
                 "installed": smoke_ok,
@@ -665,6 +778,12 @@ async def uninstall_converter(
             logger.info("Removed per-format converter folder: %s", per_format_root)
         except OSError as exc:
             logger.warning("Could not remove %s: %s", per_format_root, exc)
+
+    # Drop cached health for this converter so the next status poll
+    # re-runs the smoke test against the empty install dir (and reports
+    # ``not_installed`` instead of a stale ``ok``).
+    from app.modules.boq.cad_import import invalidate_converter_health
+    invalidate_converter_health(converter_id)
 
     return {
         "converter_id": converter_id,
