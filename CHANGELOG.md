@@ -5,6 +5,13 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.9] — 2026-05-06
+
+### Fixed
+- Onboarding wizard no longer hijacks the dashboard for users whose workspace already has projects. The redirect now waits for `/v1/projects/` to resolve and only fires when the workspace is genuinely empty; otherwise it stamps `oe_onboarding_completed` so the next visit (and every other browser the user opens) lands on the dashboard, not the 6-step welcome flow.
+- `/files` no longer leaks the server's absolute filesystem layout. The PathBar that surfaced `C:\Users\…\.openestimator\uploads\…`, the per-root chips (DB / Uploads / Photos / BIM / DWG), and the amber location notes have been removed; users who actually need on-disk paths can find them under /settings → System.
+- Cost Database header showed "France — 0 items" while the France tab badge advertised 55,121 because the in-flight search returned `total=0` first. Header now falls back to the region's catalog count from `/v1/costs/regions/stats/` while the search is still resolving.
+
 ## [2.9.8] — 2026-05-06
 
 ### Fixed

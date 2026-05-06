@@ -1447,23 +1447,6 @@ export function DashboardPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  // First launch: redirect to onboarding wizard.
-  // Skipped when the user arrived via the `g d` keyboard chord (Sidebar
-  // sets oe_skip_onboarding_redirect for one-shot use) so the chord
-  // always lands on the dashboard, never bounces to /onboarding.
-  useEffect(() => {
-    try {
-      const skip = sessionStorage.getItem('oe_skip_onboarding_redirect') === '1';
-      if (skip) {
-        sessionStorage.removeItem('oe_skip_onboarding_redirect');
-        return;
-      }
-      if (localStorage.getItem('oe_onboarding_completed') !== 'true') {
-        navigate('/onboarding', { replace: true });
-      }
-    } catch { /* storage unavailable */ }
-  }, [navigate]);
-
   const [showAllActivity, setShowAllActivity] = useState(false);
 
   const { data: projects } = useQuery({
@@ -1472,6 +1455,28 @@ export function DashboardPage() {
     retry: false,
     staleTime: 5 * 60_000,
   });
+
+  // First launch: redirect to onboarding wizard ONLY when the workspace
+  // is genuinely empty.  When the server already has projects (demo seed,
+  // or any tenant with real data), short-circuit by writing the completed
+  // flag so the wizard doesn't ambush returning users on a new browser.
+  // Skip is also honoured when the user pressed the `g d` chord.
+  useEffect(() => {
+    try {
+      const skip = sessionStorage.getItem('oe_skip_onboarding_redirect') === '1';
+      if (skip) {
+        sessionStorage.removeItem('oe_skip_onboarding_redirect');
+        return;
+      }
+      if (localStorage.getItem('oe_onboarding_completed') === 'true') return;
+      if (projects === undefined) return; // wait for fetch
+      if (projects.length > 0) {
+        localStorage.setItem('oe_onboarding_completed', 'true');
+        return;
+      }
+      navigate('/onboarding', { replace: true });
+    } catch { /* storage unavailable */ }
+  }, [navigate, projects]);
 
   // Fetch lightweight per-project summary metrics for dashboard cards (single endpoint)
   const { data: projectCards, isLoading: cardsLoading } = useQuery({

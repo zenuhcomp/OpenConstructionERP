@@ -763,7 +763,20 @@ export function CostsPage() {
           <span className="mt-1 text-sm text-content-secondary inline-flex items-center gap-0.5 flex-wrap">
             <span>
               {regionInfo
-                ? `${regionInfo.name} — ${total.toLocaleString()} ${t('costs.items', 'items')}`
+                ? (() => {
+                    // While the search request is in-flight, prefer the
+                    // catalog count from the tab badge over the still-zero
+                    // `total` to avoid the misleading "0 items" flash.
+                    const tabCount =
+                      regionStats?.find((r) => r.region === activeRegion)?.count ?? null;
+                    const display =
+                      total > 0
+                        ? total
+                        : isFetching && tabCount != null
+                          ? tabCount
+                          : 0;
+                    return `${regionInfo.name} — ${display.toLocaleString()} ${t('costs.items', 'items')}`;
+                  })()
                 : total > 0
                   ? `${total.toLocaleString()} ${t('costs.results_found', 'results found')}`
                   : t('costs.search_hint', 'Search cost items by description or code')}
