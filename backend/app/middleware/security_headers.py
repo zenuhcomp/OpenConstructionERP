@@ -35,19 +35,28 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Google Fonts), but blocks everything else. Override per-deployment
         # via the `csp` constructor argument when nginx/Caddy isn't already
         # injecting one.
+        # The dashboard map uses MapLibre (`react-map-gl/maplibre`), which
+        # spawns a Web Worker from a blob: URL and fetches vector tiles
+        # from openfreemap + nominatim (geocoding). Both need explicit
+        # CSP allow-listing — without `worker-src blob:` MapLibre can't
+        # boot at all, and without the connect-src hosts the map stays
+        # blank with CSP violations in the console.
         self._csp = csp or (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: "
             "https://www.googletagmanager.com https://www.google-analytics.com; "
             "script-src-elem 'self' 'unsafe-inline' "
             "https://www.googletagmanager.com https://www.google-analytics.com; "
+            "worker-src 'self' blob:; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "img-src 'self' data: blob: https:; "
             "font-src 'self' data: https://fonts.gstatic.com; "
             "connect-src 'self' https://www.google-analytics.com "
             "https://*.google-analytics.com https://*.analytics.google.com "
-            "https://api.github.com; "
+            "https://api.github.com "
+            "https://tiles.openfreemap.org https://*.openfreemap.org "
+            "https://nominatim.openstreetmap.org; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
             "form-action 'self'"

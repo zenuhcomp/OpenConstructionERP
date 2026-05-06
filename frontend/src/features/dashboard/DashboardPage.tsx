@@ -1114,13 +1114,20 @@ function ProjectMetricCards({
         </Button>
       </div>
 
-      {/* No empty cells: cap visible cards so the grid is always a
-          full multiple of 4 (the widest breakpoint). With ≤3 projects
-          show all + CTA = 4 (1 row of 4). Otherwise show 7 + CTA = 8
-          (2 rows of 4). Grid drops the lg=3 step so there's no
-          breakpoint where 4 / 8 doesn't tile cleanly. */}
+      {/* No partial rows: cap visible cards so (visible + 1 CTA) is a
+          full multiple of 4 (the widest breakpoint). Examples:
+          5 projects → show 3 + CTA = 4 (1 row), 2 hidden behind CTA
+          7 projects → show 7 + CTA = 8 (2 rows), 0 hidden
+          8 projects → show 7 + CTA = 8, 1 hidden
+          11+ projects → show 11 + CTA = 12 (3 rows), rest hidden.
+          For ≤2 projects we keep the partial last row (capping to 0
+          would just show the CTA alone). Grid drops the lg=3 step so
+          the tile math always works. */}
       {(() => {
-        const visibleCount = cards.length <= 3 ? cards.length : 7;
+        const visibleCount =
+          cards.length <= 2
+            ? cards.length
+            : Math.max(0, Math.floor((cards.length + 1) / 4) * 4 - 1);
         const visible = cards.slice(0, visibleCount);
         const hidden = Math.max(0, cards.length - visibleCount);
         return (

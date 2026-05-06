@@ -5,6 +5,15 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.6] — 2026-05-06
+
+### Added
+- Sidebar footer Telegram community link — single-row layout: left half = `v{version} · AGPL-3.0` with GitHub icon, right half = brand-blue Telegram pill with Community label. Links to https://t.me/datadrivenconstruction.
+
+### Fixed
+- Dashboard map (`/`) blank/grey — Content-Security-Policy was blocking MapLibre's `blob:` worker and the openfreemap tile + nominatim geocode endpoints. Added `worker-src 'self' blob:`, `script-src … blob:`, and `connect-src https://tiles.openfreemap.org https://*.openfreemap.org https://nominatim.openstreetmap.org`.
+- Dashboard project cards no longer leave half-empty rows at the lg breakpoint. Visible count is now capped to `floor((cards+1)/4)*4 - 1` so `(visible + CTA)` always fills the 4-column grid: 5 projects → 3 + CTA, 8 → 7 + CTA, 11+ → 11 + CTA. Fewer than 3 still show all + CTA (capping further would just hide everything).
+
 ## [2.9.5] — 2026-05-06
 
 ### Fixed
