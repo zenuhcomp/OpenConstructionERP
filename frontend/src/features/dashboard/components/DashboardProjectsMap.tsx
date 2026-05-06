@@ -91,25 +91,55 @@ async function geocodeOne(query: string, signal: AbortSignal): Promise<{ lat: nu
 }
 
 // Region → broad lat/lng fallback so projects without an address still
-// land on the right continent. Better than dropping the marker entirely.
+// land on the right continent. Keys cover both single-country labels
+// ("germany") and the higher-level region groupings the project model
+// actually uses ("dach", "europe", "middle east", "asia-pacific", …)
+// so demo data with `region: "DACH"` doesn't silently drop off the map.
 const REGION_FALLBACK: Record<string, { lat: number; lng: number }> = {
+  // Country-level
   germany: { lat: 51.165, lng: 10.451 },
   austria: { lat: 47.516, lng: 14.55 },
   switzerland: { lat: 46.818, lng: 8.227 },
   france: { lat: 46.227, lng: 2.213 },
   uk: { lat: 54.0, lng: -2.0 },
+  'united kingdom': { lat: 54.0, lng: -2.0 },
+  britain: { lat: 54.0, lng: -2.0 },
   spain: { lat: 40.463, lng: -3.749 },
   italy: { lat: 41.871, lng: 12.567 },
   netherlands: { lat: 52.13, lng: 5.291 },
   poland: { lat: 51.919, lng: 19.145 },
   usa: { lat: 39.83, lng: -98.58 },
+  us: { lat: 39.83, lng: -98.58 },
+  'united states': { lat: 39.83, lng: -98.58 },
+  'united states of america': { lat: 39.83, lng: -98.58 },
+  america: { lat: 39.83, lng: -98.58 },
   canada: { lat: 56.13, lng: -106.34 },
   brazil: { lat: -14.235, lng: -51.925 },
+  mexico: { lat: 23.635, lng: -102.553 },
   russia: { lat: 61.524, lng: 105.318 },
   china: { lat: 35.861, lng: 104.195 },
   india: { lat: 20.594, lng: 78.962 },
   australia: { lat: -25.274, lng: 133.775 },
   japan: { lat: 36.204, lng: 138.252 },
+  uae: { lat: 23.424, lng: 53.848 },
+  'united arab emirates': { lat: 23.424, lng: 53.848 },
+  'saudi arabia': { lat: 23.886, lng: 45.079 },
+  // Higher-level region groupings used in the project model
+  dach: { lat: 49.5, lng: 10.5 },          // ~middle of DE/AT/CH
+  europe: { lat: 50.0, lng: 10.0 },
+  eu: { lat: 50.0, lng: 10.0 },
+  'middle east': { lat: 27.0, lng: 45.0 }, // ~middle of GCC region
+  gcc: { lat: 27.0, lng: 45.0 },
+  asia: { lat: 34.047, lng: 100.619 },
+  'asia-pacific': { lat: 0.0, lng: 120.0 },
+  asiapacific: { lat: 0.0, lng: 120.0 },
+  apac: { lat: 0.0, lng: 120.0 },
+  'latin america': { lat: -14.235, lng: -60.0 },
+  latam: { lat: -14.235, lng: -60.0 },
+  'south america': { lat: -14.235, lng: -60.0 },
+  'north america': { lat: 45.0, lng: -100.0 },
+  africa: { lat: 0.0, lng: 20.0 },
+  oceania: { lat: -25.0, lng: 140.0 },
 };
 
 function regionFallback(region?: string | null): { lat: number; lng: number } | null {

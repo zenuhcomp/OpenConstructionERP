@@ -726,12 +726,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             The GitHub link uses Lucide's Github mark — keeps the row aligned
             with the rest of the sidebar's lucide icons and gives a clear
             visual entry point to the source repo. */}
-        {/* Single-row footer: left half = GitHub + version + AGPL link
-            (the meta strip), right half = Telegram Community pill. The
-            pill is half-width with brand colour so the community CTA is
-            visible but not louder than the meta strip. */}
-        <div className="px-2 pb-2 pt-1 flex items-center gap-1.5">
-          <div className="flex-1 flex items-center justify-center gap-1.5 min-w-0">
+        {/* Two-row footer so neither chip truncates at narrow sidebar
+            widths. Row 1 = GitHub icon + version + AGPL link (centred,
+            quiet). Row 2 = full-width Telegram Community pill in brand
+            colour so the CTA reads as an obvious invitation rather than
+            something hidden in tiny fine print. */}
+        <div className="px-2 pb-2 pt-1 flex flex-col gap-1.5">
+          <div className="flex items-center justify-center gap-1.5 min-w-0">
             <a
               href="https://github.com/datadrivenconstruction/OpenConstructionERP"
               target="_blank"
@@ -742,13 +743,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             >
               <Github size={11} strokeWidth={1.75} />
             </a>
-            <span className="text-2xs text-content-quaternary/50 truncate">v{APP_VERSION}</span>
+            <span className="text-2xs text-content-quaternary/50">v{APP_VERSION}</span>
             <span className="text-2xs text-content-quaternary/30">·</span>
             <a
               href="/api/source"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-2xs text-content-quaternary/50 hover:text-content-quaternary transition-colors truncate"
+              className="text-2xs text-content-quaternary/50 hover:text-content-quaternary transition-colors"
             >
               AGPL-3.0
             </a>
@@ -759,13 +760,16 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             rel="noopener noreferrer"
             title="Join the Telegram community"
             aria-label="Telegram community"
-            className="flex-1 flex items-center justify-center gap-1 rounded-md border border-[#26A5E4]/25 bg-[#26A5E4]/[0.06] hover:bg-[#26A5E4]/[0.12] hover:border-[#26A5E4]/50 px-2 py-1 transition-all group"
+            className="flex items-center justify-center gap-1.5 rounded-md border border-[#26A5E4]/25 bg-[#26A5E4]/[0.06] hover:bg-[#26A5E4]/[0.12] hover:border-[#26A5E4]/50 px-2 py-1.5 transition-all"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3 text-[#26A5E4]" aria-hidden>
+            <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5 text-[#26A5E4]" aria-hidden>
               <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71l-4.14-3.06-1.99 1.93c-.23.23-.42.42-.83.42z" />
             </svg>
-            <span className="text-2xs font-medium text-[#26A5E4] truncate">
+            <span className="text-xs font-semibold text-[#26A5E4]">
               {t('sidebar.community_title', { defaultValue: 'Community' })}
+            </span>
+            <span className="text-[10px] font-normal text-[#26A5E4]/70">
+              {t('sidebar.community_join', { defaultValue: '· Join us on Telegram' })}
             </span>
           </a>
         </div>

@@ -5,6 +5,12 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.7] — 2026-05-06
+
+### Fixed
+- Dashboard map now shows ALL projects, not just one. Region fallback only had country-level keys (`uk`, `usa`, `germany`); demo + onboarding data uses higher-level groupings (`Europe`, `DACH`, `Middle East`, `United States`, `Asia-Pacific`, `LATAM`, …) which silently dropped off the map. Fallback table now covers both granularities.
+- Sidebar footer text was truncating at narrow widths (`AGPL-3.0` and `Community` got chopped). Footer is now two rows — meta strip on top (`GitHub · v{version} · AGPL-3.0`), full-width Telegram Community pill below — so nothing is cut off.
+
 ## [2.9.6] — 2026-05-06
 
 ### Added
