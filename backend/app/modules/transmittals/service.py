@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.events import event_bus
 from app.modules.transmittals.models import (
     Transmittal,
     TransmittalItem,
@@ -25,6 +26,14 @@ from app.modules.transmittals.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+_logger_ev = logging.getLogger(__name__ + ".events")
+
+
+async def _safe_publish(name: str, data: dict, source_module: str = "oe_transmittals") -> None:
+    try:
+        event_bus.publish_detached(name, data, source_module=source_module)
+    except Exception:
+        _logger_ev.debug("Event publish skipped: %s", name)
 
 
 class TransmittalService:
@@ -194,6 +203,15 @@ class TransmittalService:
             )
 
         now = datetime.now(UTC).isoformat()
+        project_id_s = str(transmittal.project_id)
+        transmittal_number_s = transmittal.transmittal_number
+        subject_s = transmittal.subject
+        recipient_user_ids = [
+            str(r.recipient_user_id)
+            for r in (transmittal.recipients or [])
+            if r.recipient_user_id is not None
+        ]
+
         await self.repo.update_fields(
             transmittal_id,
             status="issued",
@@ -203,6 +221,19 @@ class TransmittalService:
 
         updated = await self.repo.get(transmittal_id)
         logger.info("Transmittal issued: %s", transmittal.transmittal_number)
+
+        for recipient_user_id in recipient_user_ids:
+            await _safe_publish(
+                "transmittal.issued",
+                {
+                    "transmittal_id": str(transmittal_id),
+                    "project_id": project_id_s,
+                    "recipient_user_id": recipient_user_id,
+                    "code": transmittal_number_s,
+                    "title": subject_s,
+                },
+            )
+
         return updated  # type: ignore[return-value]
 
     # ── Acknowledge ───────────────────────────────────────────────────────
@@ -234,11 +265,30 @@ class TransmittalService:
                 detail="Recipient has already acknowledged this transmittal",
             )
 
+        project_id_s = str(transmittal.project_id)
+        sender_user_id_s = str(transmittal.created_by) if transmittal.created_by else None
+        ack_user_id_s = str(recipient.recipient_user_id) if recipient.recipient_user_id else None
+        transmittal_number_s = transmittal.transmittal_number
+        subject_s = transmittal.subject
+
         now = datetime.now(UTC)
         await self.repo.update_recipient(recipient_id, acknowledged_at=now)
 
         result = await self.repo.get_recipient(recipient_id)
         logger.info("Transmittal acknowledged: recipient=%s", recipient_id)
+
+        await _safe_publish(
+            "transmittal.acknowledged",
+            {
+                "transmittal_id": str(transmittal_id),
+                "project_id": project_id_s,
+                "sender_user_id": sender_user_id_s,
+                "acknowledged_by_user_id": ack_user_id_s,
+                "code": transmittal_number_s,
+                "title": subject_s,
+            },
+        )
+
         return result  # type: ignore[return-value]
 
     # ── Respond ───────────────────────────────────────────────────────────
@@ -265,6 +315,15 @@ class TransmittalService:
                 detail="Recipient not found for this transmittal",
             )
 
+        project_id_s = str(transmittal.project_id)
+        sender_user_id_s = str(transmittal.created_by) if transmittal.created_by else None
+        responder_user_id_s = (
+            str(recipient.recipient_user_id) if recipient.recipient_user_id else None
+        )
+        transmittal_number_s = transmittal.transmittal_number
+        subject_s = transmittal.subject
+        response_summary = (response_text or "")[:200]
+
         now = datetime.now(UTC)
         await self.repo.update_recipient(
             recipient_id,
@@ -281,4 +340,18 @@ class TransmittalService:
 
         result = await self.repo.get_recipient(recipient_id)
         logger.info("Transmittal response submitted: recipient=%s", recipient_id)
+
+        await _safe_publish(
+            "transmittal.responded",
+            {
+                "transmittal_id": str(transmittal_id),
+                "project_id": project_id_s,
+                "sender_user_id": sender_user_id_s,
+                "responder_user_id": responder_user_id_s,
+                "response_summary": response_summary,
+                "code": transmittal_number_s,
+                "title": subject_s,
+            },
+        )
+
         return result  # type: ignore[return-value]

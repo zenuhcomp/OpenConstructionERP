@@ -719,13 +719,6 @@ async def import_budgets_file(
             detail="Uploaded file is empty.",
         )
 
-    # Limit file size (10 MB)
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File too large. Maximum size is 10 MB.",
-        )
-
     # Zip-bomb guard: reject .xlsx whose uncompressed sheets exceed 50 MB.
     reject_if_xlsx_bomb(content)
 

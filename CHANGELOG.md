@@ -5,6 +5,50 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.16] — 2026-05-06
+
+### Fixed (Finance correctness)
+
+- **Decimal precision on dashboard SUMs.** `finance/repository.py` cast money columns through `Float` before SUMming, silently losing precision on totals over 2^53 cents. All five aggregations (invoice ×2, payment, budget ×4) now `cast(..., Numeric)` and accumulate as `Decimal`.
+- **Budget search crash.** `FinancePage.tsx:834` read `b.wbs_code.toLowerCase()` but the API returns `wbs_id`; `b.wbs_code` was always `undefined` and threw on the first character typed. Now reads `(b.wbs_id ?? '').toLowerCase()`. Also widened `BudgetLine` type with `currency_code`.
+- **EVM forecast formula mismatch.** Service computes `EAC = AC + (BAC − EV) / CPI`; the modal hint claimed `EAC = BAC / CPI`. Hint corrected to match the service.
+- **TCPI sign flip on over-budget projects.** The denominator `(BAC − AC)` could go negative; TCPI flipped sign and read as a "good" number. Now clamped — when remaining budget ≤ 0, TCPI returns 0 (interpretable as "infeasible").
+- **EVM snapshot wrote zeros.** `Create Snapshot` POSTed only `{project_id, snapshot_date}`; the schema defaulted BAC/PV/EV/AC to `"0"`, so every snapshot persisted zeros. The handler now derives BAC/PV/EV/AC from the actual budget + payments at `snapshot_date` whenever a payload value is exactly `Decimal("0")` and writes those derived numbers to the row.
+- **Invoice status filter missing `cancelled`.** Added the option so cancelled invoices are filterable from the dropdown.
+
+### Added (Finance currency_code)
+
+- **`ProjectBudget.currency_code`.** New `String(3)` column (default `"EUR"`, NOT NULL) on the budget row; surfaced through `BudgetCreate / BudgetUpdate / BudgetResponse` and respected by `service.create_budget`. Frontend `BudgetLine` type extended; `BudgetsTab` now renders the row's actual currency instead of always falling back to EUR. Alembic migration `v2916_project_budget_currency.py` is inspector-guarded and reversible.
+
+### Changed
+
+- **`FinanceSummaryCards` switched to `/v1/finance/dashboard/`.** The cards previously fired three list queries (invoices/payments/budgets) and reduced in JS, which both burned RTT and re-introduced the precision-loss path. Now a single `useQuery(['finance','dashboard',projectId])` reads `total_budget_original / total_payable / total_receivable / total_actual` from the SQL aggregator. Drops ~150 lines of FE coercion.
+- **`BudgetsTab` mobile card view.** The 8-column budget table forced horizontal scroll on phones. Tablet/phone now shows a stack of cards (wbs_id + category + original + committed + actual + forecast + colorized variance + currency); table reappears at `md`.
+
+### Added (Communication notifications)
+
+- **9 new notification subscribers wired in `notifications/events.py`** for events that publishers were already firing but no handler consumed:
+  - `rfi.assigned` → notifies the assignee.
+  - `rfi.responded` → notifies the original requester.
+  - `submittal.submitted` → notifies the reviewer + project owner (deduplicated).
+  - `submittal.approved` → notifies the submitter.
+  - `submittal.rejected` → notifies the submitter with rejection reason.
+  - `submittal.revise_resubmit` → notifies the submitter.
+  - `transmittal.issued` → notifies each recipient.
+  - `transmittal.acknowledged` → notifies the original sender.
+  - `transmittal.responded` → notifies the original sender.
+- **Transmittal events are now actually published.** `transmittals/service.py` had zero `_safe_publish` calls; `issue_transmittal / acknowledge_receipt / submit_response` now emit the three transmittal events that the new subscribers consume.
+- **`submittal.rejected` and `submittal.revise_resubmit` events.** The producer previously emitted a single `submittal.reviewed` with the decision in the payload; the two specific event names are now also published so subscribers can fan out cleanly.
+
+### Added (i18n — `files.*` namespace coverage)
+
+- **22 locales backfilled in `frontend/src/app/i18n-fallbacks.ts`** so the `/files` UI no longer shows raw keys (`files.col.modified`, `files.bulk.delete`, etc.) on non-EN/DE/RU sessions:
+  - `ar` filled 65 missing keys (had 72/137).
+  - `fr / es / pt / zh / hi / ja` each filled 80 missing keys (had 57/137).
+  - `tr / it / nl / pl / cs / ko / sv / no / da / fi / bg / hr / id / ro / th / vi` each gained the full 137-key block (had 0).
+  - **Total: ~2 737 strings across 22 locales.** All 26 supported locales now have full `files.*` coverage.
+- Tone follows the authoritative German + Russian blocks; brand and format names (BIM, IFC, DWG, PDF, GAEB, OpenConstructionERP, `.ocep`) preserved verbatim.
+
 ## [2.9.15] — 2026-05-06
 
 ### Security (cross-category IDOR sweep — ~73 endpoints)

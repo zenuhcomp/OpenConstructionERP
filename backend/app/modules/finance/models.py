@@ -164,6 +164,9 @@ class ProjectBudget(Base):
     )
     wbs_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    currency_code: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="EUR", server_default="EUR"
+    )
     # Phase 2d pilot: money columns now return Decimal in Python.
     # On PostgreSQL this emits NUMERIC(18, 2); on the existing SQLite
     # dev DBs the physical column stays VARCHAR(50), so no destructive

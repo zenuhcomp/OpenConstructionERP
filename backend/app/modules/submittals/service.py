@@ -290,6 +290,34 @@ class SubmittalService:
             },
         )
 
+        submittal_number_s = getattr(submittal, "submittal_number", None)
+        if new_status == "rejected":
+            await _safe_publish(
+                "submittal.rejected",
+                {
+                    "project_id": project_id_s,
+                    "submittal_id": str(submittal_id),
+                    "submittal_number": submittal_number_s,
+                    "title": title_s,
+                    "reviewer_id": reviewer_id,
+                    "submitted_by": created_by_s,
+                    "reason": fields.get("review_notes") or "",
+                },
+            )
+        elif new_status == "revise_and_resubmit":
+            await _safe_publish(
+                "submittal.revise_resubmit",
+                {
+                    "project_id": project_id_s,
+                    "submittal_id": str(submittal_id),
+                    "submittal_number": submittal_number_s,
+                    "title": title_s,
+                    "reviewer_id": reviewer_id,
+                    "submitted_by": created_by_s,
+                    "reason": fields.get("review_notes") or "",
+                },
+            )
+
         logger.info("Submittal reviewed: %s -> %s by %s", submittal_id, new_status, reviewer_id)
         return fresh or submittal
 

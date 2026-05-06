@@ -119,13 +119,13 @@ class InvoiceRepository:
         Returns dict with payable/receivable/overdue totals and status counts,
         computed entirely in the database for performance.
         """
-        from sqlalchemy import Float, cast
+        from sqlalchemy import Numeric, cast
 
         base = select(
             Invoice.invoice_direction,
             Invoice.status,
             func.count().label("cnt"),
-            func.sum(cast(Invoice.amount_total, Float)).label("total"),
+            func.sum(cast(Invoice.amount_total, Numeric)).label("total"),
         )
         if project_id is not None:
             base = base.where(Invoice.project_id == project_id)
@@ -155,7 +155,7 @@ class InvoiceRepository:
         today = date.today().isoformat()
         overdue_base = select(
             func.count().label("cnt"),
-            func.coalesce(func.sum(cast(Invoice.amount_total, Float)), 0).label("total"),
+            func.coalesce(func.sum(cast(Invoice.amount_total, Numeric)), 0).label("total"),
         ).where(
             Invoice.due_date < today,
             Invoice.status.notin_(("paid", "cancelled")),
@@ -239,10 +239,10 @@ class PaymentRepository:
 
         Returns total as float. Much faster than loading all rows.
         """
-        from sqlalchemy import Float, cast
+        from sqlalchemy import Numeric, cast
 
         base = select(
-            func.coalesce(func.sum(cast(Payment.amount, Float)), 0)
+            func.coalesce(func.sum(cast(Payment.amount, Numeric)), 0)
         )
         if invoice_id is not None:
             base = base.where(Payment.invoice_id == invoice_id)
@@ -291,13 +291,13 @@ class BudgetRepository:
 
         Returns dict with original/revised/committed/actual totals.
         """
-        from sqlalchemy import Float, cast
+        from sqlalchemy import Numeric, cast
 
         base = select(
-            func.coalesce(func.sum(cast(ProjectBudget.original_budget, Float)), 0),
-            func.coalesce(func.sum(cast(ProjectBudget.revised_budget, Float)), 0),
-            func.coalesce(func.sum(cast(ProjectBudget.committed, Float)), 0),
-            func.coalesce(func.sum(cast(ProjectBudget.actual, Float)), 0),
+            func.coalesce(func.sum(cast(ProjectBudget.original_budget, Numeric)), 0),
+            func.coalesce(func.sum(cast(ProjectBudget.revised_budget, Numeric)), 0),
+            func.coalesce(func.sum(cast(ProjectBudget.committed, Numeric)), 0),
+            func.coalesce(func.sum(cast(ProjectBudget.actual, Numeric)), 0),
         )
         if project_id is not None:
             base = base.where(ProjectBudget.project_id == project_id)

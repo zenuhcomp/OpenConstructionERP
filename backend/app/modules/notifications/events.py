@@ -196,6 +196,326 @@ async def _on_cde_state_transitioned(event: Event) -> None:
         )
 
 
+async def _on_rfi_assigned(event: Event) -> None:
+    """``rfi.assigned`` → notify the assignee."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    assignee_id = (
+        data.get("assigned_to")
+        or data.get("assigned_to_user_id")
+        or data.get("assignee_id")
+    )
+    rfi_id = data.get("rfi_id") or data.get("id")
+    if not assignee_id or not rfi_id:
+        return
+    try:
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=assignee_id,
+                notification_type="rfi_assigned",
+                title_key="notifications.rfi.assigned",
+                body_key="notifications.rfi.assigned",
+                body_context={
+                    "code": data.get("rfi_number") or "",
+                    "title": data.get("subject") or "",
+                },
+                entity_type="rfi",
+                entity_id=str(rfi_id),
+                action_url=f"/rfi?id={rfi_id}",
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("notifications: _on_rfi_assigned failed", exc_info=True)
+
+
+async def _on_rfi_responded(event: Event) -> None:
+    """``rfi.responded`` → notify the original requester."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    requester_id = (
+        data.get("raised_by")
+        or data.get("requested_by_user_id")
+        or data.get("ball_in_court")
+    )
+    rfi_id = data.get("rfi_id") or data.get("id")
+    if not requester_id or not rfi_id:
+        return
+    try:
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=requester_id,
+                notification_type="rfi_responded",
+                title_key="notifications.rfi.responded",
+                body_key="notifications.rfi.responded",
+                body_context={
+                    "code": data.get("rfi_number") or "",
+                    "title": data.get("subject") or "",
+                },
+                entity_type="rfi",
+                entity_id=str(rfi_id),
+                action_url=f"/rfi?id={rfi_id}",
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("notifications: _on_rfi_responded failed", exc_info=True)
+
+
+async def _resolve_project_owner(session, project_id: str) -> str | None:
+    """Look up the owner_id for a project, returning the UUID as a string."""
+    try:
+        from app.modules.projects.models import Project
+
+        proj = await session.get(Project, uuid_from_str(project_id))
+        if proj is None:
+            return None
+        return str(proj.owner_id) if proj.owner_id else None
+    except Exception:
+        return None
+
+
+def uuid_from_str(value: str):
+    import uuid as _uuid
+
+    try:
+        return _uuid.UUID(str(value))
+    except Exception:
+        return value
+
+
+async def _on_submittal_submitted(event: Event) -> None:
+    """``submittal.submitted`` → notify the reviewer + project owner."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    reviewer_id = data.get("reviewer_id")
+    project_id = data.get("project_id")
+    submittal_id = data.get("submittal_id") or data.get("id")
+    if not submittal_id:
+        return
+    targets: set[str] = set()
+    if reviewer_id:
+        targets.add(str(reviewer_id))
+    try:
+        async with async_session_factory() as session:
+            if project_id:
+                owner_id = await _resolve_project_owner(session, project_id)
+                if owner_id:
+                    targets.add(owner_id)
+            if not targets:
+                return
+            svc = NotificationService(session)
+            for uid in targets:
+                await svc.create(
+                    user_id=uid,
+                    notification_type="submittal_submitted",
+                    title_key="notifications.submittal.submitted",
+                    body_key="notifications.submittal.submitted",
+                    body_context={
+                        "code": data.get("submittal_number") or "",
+                        "title": data.get("title") or "",
+                    },
+                    entity_type="submittal",
+                    entity_id=str(submittal_id),
+                    action_url=f"/submittals?id={submittal_id}",
+                )
+            await session.commit()
+    except Exception:
+        logger.debug("notifications: _on_submittal_submitted failed", exc_info=True)
+
+
+async def _on_submittal_approved(event: Event) -> None:
+    """``submittal.approved`` → notify the submitter."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    submitter_id = data.get("submitted_by") or data.get("created_by")
+    submittal_id = data.get("submittal_id") or data.get("id")
+    if not submitter_id or not submittal_id:
+        return
+    try:
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=submitter_id,
+                notification_type="submittal_approved",
+                title_key="notifications.submittal.approved",
+                body_key="notifications.submittal.approved",
+                body_context={
+                    "code": data.get("submittal_number") or "",
+                    "title": data.get("title") or "",
+                },
+                entity_type="submittal",
+                entity_id=str(submittal_id),
+                action_url=f"/submittals?id={submittal_id}",
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("notifications: _on_submittal_approved failed", exc_info=True)
+
+
+async def _on_submittal_rejected(event: Event) -> None:
+    """``submittal.rejected`` → notify the submitter with rejection reason."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    submitter_id = data.get("submitted_by") or data.get("created_by")
+    submittal_id = data.get("submittal_id") or data.get("id")
+    if not submitter_id or not submittal_id:
+        return
+    try:
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=submitter_id,
+                notification_type="submittal_rejected",
+                title_key="notifications.submittal.rejected",
+                body_key="notifications.submittal.rejected",
+                body_context={
+                    "code": data.get("submittal_number") or "",
+                    "title": data.get("title") or "",
+                    "reason": (data.get("reason") or "")[:200],
+                },
+                entity_type="submittal",
+                entity_id=str(submittal_id),
+                action_url=f"/submittals?id={submittal_id}",
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("notifications: _on_submittal_rejected failed", exc_info=True)
+
+
+async def _on_submittal_revise_resubmit(event: Event) -> None:
+    """``submittal.revise_resubmit`` → notify the submitter."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    submitter_id = data.get("submitted_by") or data.get("created_by")
+    submittal_id = data.get("submittal_id") or data.get("id")
+    if not submitter_id or not submittal_id:
+        return
+    try:
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=submitter_id,
+                notification_type="submittal_revise_resubmit",
+                title_key="notifications.submittal.revise_resubmit",
+                body_key="notifications.submittal.revise_resubmit",
+                body_context={
+                    "code": data.get("submittal_number") or "",
+                    "title": data.get("title") or "",
+                    "reason": (data.get("reason") or "")[:200],
+                },
+                entity_type="submittal",
+                entity_id=str(submittal_id),
+                action_url=f"/submittals?id={submittal_id}",
+            )
+            await session.commit()
+    except Exception:
+        logger.debug(
+            "notifications: _on_submittal_revise_resubmit failed", exc_info=True
+        )
+
+
+async def _on_transmittal_issued(event: Event) -> None:
+    """``transmittal.issued`` → notify the recipient."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    recipient_id = data.get("recipient_user_id")
+    transmittal_id = data.get("transmittal_id") or data.get("id")
+    if not recipient_id or not transmittal_id:
+        return
+    try:
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=recipient_id,
+                notification_type="transmittal_issued",
+                title_key="notifications.transmittal.issued",
+                body_key="notifications.transmittal.issued",
+                body_context={
+                    "code": data.get("code") or "",
+                    "title": data.get("title") or "",
+                },
+                entity_type="transmittal",
+                entity_id=str(transmittal_id),
+                action_url=f"/transmittals?id={transmittal_id}",
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("notifications: _on_transmittal_issued failed", exc_info=True)
+
+
+async def _on_transmittal_acknowledged(event: Event) -> None:
+    """``transmittal.acknowledged`` → notify the original sender."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    sender_id = data.get("sender_user_id")
+    transmittal_id = data.get("transmittal_id") or data.get("id")
+    if not sender_id or not transmittal_id:
+        return
+    try:
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=sender_id,
+                notification_type="transmittal_acknowledged",
+                title_key="notifications.transmittal.acknowledged",
+                body_key="notifications.transmittal.acknowledged",
+                body_context={
+                    "code": data.get("code") or "",
+                    "title": data.get("title") or "",
+                },
+                entity_type="transmittal",
+                entity_id=str(transmittal_id),
+                action_url=f"/transmittals?id={transmittal_id}",
+            )
+            await session.commit()
+    except Exception:
+        logger.debug(
+            "notifications: _on_transmittal_acknowledged failed", exc_info=True
+        )
+
+
+async def _on_transmittal_responded(event: Event) -> None:
+    """``transmittal.responded`` → notify the original sender."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    sender_id = data.get("sender_user_id")
+    transmittal_id = data.get("transmittal_id") or data.get("id")
+    if not sender_id or not transmittal_id:
+        return
+    try:
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=sender_id,
+                notification_type="transmittal_responded",
+                title_key="notifications.transmittal.responded",
+                body_key="notifications.transmittal.responded",
+                body_context={
+                    "code": data.get("code") or "",
+                    "title": data.get("title") or "",
+                    "response_summary": (data.get("response_summary") or "")[:200],
+                },
+                entity_type="transmittal",
+                entity_id=str(transmittal_id),
+                action_url=f"/transmittals?id={transmittal_id}",
+            )
+            await session.commit()
+    except Exception:
+        logger.debug(
+            "notifications: _on_transmittal_responded failed", exc_info=True
+        )
+
+
 # Declarative subscription map.  Adding a new event to this list
 # is the ONE place to wire a new notification trigger — keeps the
 # event topology auditable from a single grep.
@@ -204,6 +524,15 @@ _SUBSCRIPTIONS: list[tuple[str, callable]] = [  # type: ignore[type-arg]
     ("meeting.action_items_created", _on_meeting_action_items_created),
     ("bim_hub.element.deleted", _on_bim_element_deleted),
     ("cde.container.state_transitioned", _on_cde_state_transitioned),
+    ("rfi.assigned", _on_rfi_assigned),
+    ("rfi.responded", _on_rfi_responded),
+    ("submittal.submitted", _on_submittal_submitted),
+    ("submittal.approved", _on_submittal_approved),
+    ("submittal.rejected", _on_submittal_rejected),
+    ("submittal.revise_resubmit", _on_submittal_revise_resubmit),
+    ("transmittal.issued", _on_transmittal_issued),
+    ("transmittal.acknowledged", _on_transmittal_acknowledged),
+    ("transmittal.responded", _on_transmittal_responded),
 ]
 
 

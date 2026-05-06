@@ -439,6 +439,7 @@ class FinanceService:
             project_id=data.project_id,
             wbs_id=data.wbs_id,
             category=data.category,
+            currency_code=data.currency_code,
             original_budget=data.original_budget,
             revised_budget=data.revised_budget,
             committed=data.committed,
@@ -510,11 +511,43 @@ class FinanceService:
         - VAC  = BAC - EAC               (variance at completion)
         - ETC  = EAC - AC                (estimate to complete)
         - TCPI = (BAC - EV) / (BAC - AC) (to-complete performance index)
+
+        Client-supplied BAC/PV/EV/AC values that are exactly "0" are
+        replaced with values derived from the project's current budget and
+        paid-invoice totals (same aggregation that powers ``get_dashboard``).
+        Non-zero client values are honoured unchanged so power users can
+        still record bespoke snapshots.
         """
         bac = _parse_decimal(data.bac, "bac")
         ev = _parse_decimal(data.ev, "ev")
         pv = _parse_decimal(data.pv, "pv")
         ac = _parse_decimal(data.ac, "ac")
+
+        zero = Decimal("0")
+        if bac == zero or pv == zero or ev == zero or ac == zero:
+            budget_agg = await self.budgets.aggregate_for_dashboard(
+                project_id=data.project_id,
+            )
+            derived_bac = Decimal(
+                str(budget_agg["total_budget_revised"] or budget_agg["total_budget_original"])
+            )
+            derived_ac = Decimal(str(budget_agg["total_actual"]))
+            derived_committed = Decimal(str(budget_agg["total_committed"]))
+            # PV approximation: planned spend up to snapshot date is the
+            # revised baseline (matches dashboard behaviour where plan
+            # equals revised budget). EV approximation: committed work
+            # represents earned value progress when no schedule timeline
+            # is present.
+            derived_pv = derived_bac
+            derived_ev = derived_committed if derived_committed > zero else derived_ac
+            if bac == zero:
+                bac = derived_bac
+            if ac == zero:
+                ac = derived_ac
+            if pv == zero:
+                pv = derived_pv
+            if ev == zero:
+                ev = derived_ev
 
         sv = ev - pv
         cv = ev - ac
@@ -538,8 +571,11 @@ class FinanceService:
         etc = (eac - ac).quantize(Decimal("0.01"))
 
         # TCPI: performance needed on remaining work to stay within BAC.
+        # Clamp when over budget (bac - ac <= 0): the index is undefined
+        # because no remaining budget exists, and a negative denominator
+        # would flip the sign and report misleading positive performance.
         remaining_budget = bac - ac
-        if remaining_budget != 0:
+        if remaining_budget > 0:
             tcpi = ((bac - ev) / remaining_budget).quantize(Decimal("0.0001")).normalize()
         else:
             tcpi = Decimal("0")
@@ -547,10 +583,10 @@ class FinanceService:
         snapshot = EVMSnapshot(
             project_id=data.project_id,
             snapshot_date=data.snapshot_date,
-            bac=data.bac,
-            pv=data.pv,
-            ev=data.ev,
-            ac=data.ac,
+            bac=str(bac),
+            pv=str(pv),
+            ev=str(ev),
+            ac=str(ac),
             sv=str(sv),
             cv=str(cv),
             spi=str(spi),

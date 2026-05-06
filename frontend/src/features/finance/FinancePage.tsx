@@ -50,15 +50,18 @@ import { useAuthStore } from '@/stores/useAuthStore';
 interface BudgetLine {
   id: string;
   project_id: string;
-  wbs_code: string;
+  wbs_id: string | null;
+  wbs_code?: string;
   category: string;
   original_budget: number;
   revised_budget: number;
   committed: number;
   actual: number;
   forecast: number;
+  forecast_final?: number;
   variance: number;
-  currency: string;
+  currency_code?: string;
+  currency?: string;
   created_at: string;
   updated_at: string;
 }
@@ -220,56 +223,52 @@ const inputCls =
 
 /* ── Finance Summary Cards ────────────────────────────────────────────── */
 
+interface FinanceDashboardData {
+  total_payable: number;
+  total_receivable: number;
+  total_overdue: number;
+  overdue_count: number;
+  invoices_draft: number;
+  invoices_pending: number;
+  invoices_approved: number;
+  invoices_paid: number;
+  total_budget_original: number;
+  total_budget_revised: number;
+  total_committed: number;
+  total_actual: number;
+  total_variance: number;
+  budget_consumed_pct: number;
+  budget_warning_level: string;
+  total_payments: number;
+  cash_flow_net: number;
+}
+
 function FinanceSummaryCards({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
 
-  const { data: budgets } = useQuery({
-    queryKey: ['finance-budgets', projectId],
+  const { data: dashboard } = useQuery({
+    queryKey: ['finance', 'dashboard', projectId],
     queryFn: () =>
-      apiGet<BudgetLine[]>(`/v1/finance/budgets/?project_id=${projectId}`),
-    select: (d): BudgetLine[] => normalizeListResponse(d),
+      apiGet<FinanceDashboardData>(`/v1/finance/dashboard/?project_id=${projectId}`),
   });
 
-  const { data: invoicesPayable } = useQuery({
-    queryKey: ['finance-invoices', projectId, 'payable'],
-    queryFn: () =>
-      apiGet<InvoiceWire[]>(`/v1/finance/?project_id=${projectId}&direction=payable`),
-    select: (d): Invoice[] =>
-      normalizeListResponse<InvoiceWire>(d).map(normaliseInvoice),
-  });
+  const totalBudget = Number(dashboard?.total_budget_original ?? 0);
+  const totalRevised = Number(dashboard?.total_budget_revised ?? 0);
+  const totalActual = Number(dashboard?.total_actual ?? 0);
+  const totalInvoiced = Number(dashboard?.total_payable ?? 0);
+  const totalReceivable = Number(dashboard?.total_receivable ?? 0);
+  const remaining = (totalRevised || totalBudget) - totalActual;
+  const currency = 'EUR';
 
-  const { data: invoicesReceivable } = useQuery({
-    queryKey: ['finance-invoices', projectId, 'receivable'],
-    queryFn: () =>
-      apiGet<InvoiceWire[]>(`/v1/finance/?project_id=${projectId}&direction=receivable`),
-    select: (d): Invoice[] =>
-      normalizeListResponse<InvoiceWire>(d).map(normaliseInvoice),
-  });
-
-  // ``Number(x ?? 0)`` defends against the API serialising amounts as
-  // strings (DECIMAL → JSON sometimes lands as "850000.00").  Without
-  // the coercion ``s + b.original_budget`` becomes string concatenation
-  // and the dashboard prints "850.000.320.000.018.000.000.000,00 €".
-  const totalBudget = useMemo(
-    () => budgets?.reduce((s, b) => s + Number(b.original_budget ?? 0), 0) ?? 0,
-    [budgets],
-  );
-  const totalActual = useMemo(
-    () => budgets?.reduce((s, b) => s + Number(b.actual ?? 0), 0) ?? 0,
-    [budgets],
-  );
-  const totalInvoiced = useMemo(
-    () => (invoicesPayable ?? []).reduce((s, inv) => s + Number(inv.amount ?? 0), 0),
-    [invoicesPayable],
-  );
-  const totalReceivable = useMemo(
-    () => (invoicesReceivable ?? []).reduce((s, inv) => s + Number(inv.amount ?? 0), 0),
-    [invoicesReceivable],
-  );
-  const remaining = totalBudget - totalActual;
-  const currency = budgets?.[0]?.currency || invoicesPayable?.[0]?.currency || 'EUR';
-
-  if (!budgets?.length && !invoicesPayable?.length && !invoicesReceivable?.length) return null;
+  if (
+    !dashboard ||
+    (totalBudget === 0 &&
+      totalRevised === 0 &&
+      totalInvoiced === 0 &&
+      totalReceivable === 0)
+  ) {
+    return null;
+  }
 
   const cards = [
     {
@@ -831,7 +830,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
     const q = search.toLowerCase();
     return budgets.filter(
       (b) =>
-        b.wbs_code.toLowerCase().includes(q) ||
+        (b.wbs_id ?? '').toLowerCase().includes(q) ||
         b.category.toLowerCase().includes(q),
     );
   }, [budgets, search]);
@@ -846,9 +845,9 @@ function BudgetsTab({ projectId }: { projectId: string }) {
       revised: filtered.reduce((s, b) => s + Number(b.revised_budget ?? 0), 0),
       committed: filtered.reduce((s, b) => s + Number(b.committed ?? 0), 0),
       actual: filtered.reduce((s, b) => s + Number(b.actual ?? 0), 0),
-      forecast: filtered.reduce((s, b) => s + Number(b.forecast ?? 0), 0),
+      forecast: filtered.reduce((s, b) => s + Number(b.forecast_final ?? b.forecast ?? 0), 0),
       variance: filtered.reduce((s, b) => s + Number(b.variance ?? 0), 0),
-      currency: filtered[0]?.currency ?? 'EUR',
+      currency: filtered[0]?.currency_code ?? filtered[0]?.currency ?? 'EUR',
     };
   }, [filtered]);
 
@@ -976,8 +975,8 @@ function BudgetsTab({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
+      {/* Desktop table */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border-light bg-surface-secondary/50">
@@ -1014,47 +1013,51 @@ function BudgetsTab({ projectId }: { projectId: string }) {
                   {t('finance.no_budget_match', { defaultValue: 'No matching budget lines' })}
                 </td>
               </tr>
-            ) : filtered.map((b) => (
-              <tr
-                key={b.id}
-                className="border-b border-border-light hover:bg-surface-secondary/30 transition-colors"
-              >
-                <td className="px-4 py-3 font-mono text-xs text-content-primary">
-                  {b.wbs_code}
-                </td>
-                <td className="px-4 py-3 text-content-secondary">{b.category}</td>
-                <td className="px-4 py-3 text-right">
-                  <MoneyDisplay amount={b.original_budget} currency={b.currency} />
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <MoneyDisplay amount={b.revised_budget} currency={b.currency} />
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <MoneyDisplay amount={b.committed} currency={b.currency} />
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <MoneyDisplay amount={b.actual} currency={b.currency} />
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <MoneyDisplay amount={b.forecast} currency={b.currency} />
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <span
-                    className={
-                      b.variance >= 0
-                        ? 'text-semantic-success font-medium'
-                        : 'text-semantic-error font-medium'
-                    }
-                  >
-                    <MoneyDisplay
-                      amount={b.variance}
-                      currency={b.currency}
-                      colorize
-                    />
-                  </span>
-                </td>
-              </tr>
-            ))}
+            ) : filtered.map((b) => {
+              const rowCurrency = b.currency_code ?? b.currency ?? 'EUR';
+              const forecastValue = b.forecast_final ?? b.forecast ?? 0;
+              return (
+                <tr
+                  key={b.id}
+                  className="border-b border-border-light hover:bg-surface-secondary/30 transition-colors"
+                >
+                  <td className="px-4 py-3 font-mono text-xs text-content-primary">
+                    {b.wbs_id ?? b.wbs_code ?? ''}
+                  </td>
+                  <td className="px-4 py-3 text-content-secondary">{b.category}</td>
+                  <td className="px-4 py-3 text-right">
+                    <MoneyDisplay amount={b.original_budget} currency={rowCurrency} />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <MoneyDisplay amount={b.revised_budget} currency={rowCurrency} />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <MoneyDisplay amount={b.committed} currency={rowCurrency} />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <MoneyDisplay amount={b.actual} currency={rowCurrency} />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <MoneyDisplay amount={forecastValue} currency={rowCurrency} />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <span
+                      className={
+                        b.variance >= 0
+                          ? 'text-semantic-success font-medium'
+                          : 'text-semantic-error font-medium'
+                      }
+                    >
+                      <MoneyDisplay
+                        amount={b.variance}
+                        currency={rowCurrency}
+                        colorize
+                      />
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
           {totals && (
             <tfoot>
@@ -1088,6 +1091,75 @@ function BudgetsTab({ projectId }: { projectId: string }) {
             </tfoot>
           )}
         </table>
+      </div>
+
+      {/* Mobile card view */}
+      <div className="md:hidden p-4 space-y-3">
+        {filtered.length === 0 ? (
+          <p className="px-2 py-6 text-center text-sm text-content-tertiary">
+            {t('finance.no_budget_match', { defaultValue: 'No matching budget lines' })}
+          </p>
+        ) : filtered.map((b) => {
+          const rowCurrency = b.currency_code ?? b.currency ?? 'EUR';
+          const forecastValue = b.forecast_final ?? b.forecast ?? 0;
+          return (
+            <Card key={b.id} className="p-4">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0">
+                  <span className="text-xs font-mono text-content-tertiary">
+                    {b.wbs_id ?? b.wbs_code ?? ''}
+                  </span>
+                  <h4 className="text-sm font-semibold text-content-primary truncate">
+                    {b.category}
+                  </h4>
+                </div>
+                <span className="text-2xs font-medium text-content-tertiary">
+                  {rowCurrency}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-content-tertiary">
+                    {t('finance.original', { defaultValue: 'Original' })}
+                  </span>
+                  <MoneyDisplay amount={b.original_budget} currency={rowCurrency} />
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-content-tertiary">
+                    {t('finance.committed', { defaultValue: 'Committed' })}
+                  </span>
+                  <MoneyDisplay amount={b.committed} currency={rowCurrency} />
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-content-tertiary">
+                    {t('finance.actual', { defaultValue: 'Actual' })}
+                  </span>
+                  <MoneyDisplay amount={b.actual} currency={rowCurrency} />
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-content-tertiary">
+                    {t('finance.forecast', { defaultValue: 'Forecast' })}
+                  </span>
+                  <MoneyDisplay amount={forecastValue} currency={rowCurrency} />
+                </div>
+                <div className="col-span-2 flex justify-between border-t border-border-light pt-1.5 mt-0.5">
+                  <span className="text-content-secondary font-medium">
+                    {t('finance.variance', { defaultValue: 'Variance' })}
+                  </span>
+                  <span
+                    className={
+                      b.variance >= 0
+                        ? 'text-semantic-success font-medium'
+                        : 'text-semantic-error font-medium'
+                    }
+                  >
+                    <MoneyDisplay amount={b.variance} currency={rowCurrency} colorize />
+                  </span>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
       </div>
     </Card>
 
@@ -1479,6 +1551,7 @@ function InvoicesTab({ projectId }: { projectId: string }) {
               <option value="pending">{t('finance.status_pending', { defaultValue: 'Pending' })}</option>
               <option value="approved">{t('finance.status_approved', { defaultValue: 'Approved' })}</option>
               <option value="paid">{t('finance.status_paid', { defaultValue: 'Paid' })}</option>
+              <option value="cancelled">{t('finance.status_cancelled', { defaultValue: 'Cancelled' })}</option>
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
               <ChevronDown size={14} />
@@ -2296,7 +2369,7 @@ function EVMTab({ projectId }: { projectId: string }) {
         <div className="mt-2 flex flex-wrap gap-3 text-2xs text-content-tertiary">
           <span><strong className="text-content-secondary">SPI</strong> = EV / PV ({t('finance.evm_hint_schedule', { defaultValue: 'schedule efficiency' })})</span>
           <span><strong className="text-content-secondary">CPI</strong> = EV / AC ({t('finance.evm_hint_cost', { defaultValue: 'cost efficiency' })})</span>
-          <span><strong className="text-content-secondary">EAC</strong> = BAC / CPI ({t('finance.evm_hint_forecast', { defaultValue: 'forecast total cost' })})</span>
+          <span><strong className="text-content-secondary">EAC</strong> = AC + (BAC − EV) / CPI ({t('finance.evm_hint_forecast', { defaultValue: 'forecast total cost' })})</span>
         </div>
       </div>
 

@@ -291,6 +291,7 @@ class BudgetCreate(BaseModel):
     project_id: UUID
     wbs_id: str | None = Field(default=None, max_length=36)
     category: str | None = Field(default=None, max_length=100)
+    currency_code: str = Field(default="EUR", max_length=3, examples=["EUR"])
     original_budget: str = Field(default="0", max_length=50)
     revised_budget: str = Field(default="0", max_length=50)
     committed: str = Field(default="0", max_length=50)
@@ -313,6 +314,7 @@ class BudgetUpdate(BaseModel):
 
     wbs_id: str | None = Field(default=None, max_length=36)
     category: str | None = Field(default=None, max_length=100)
+    currency_code: str | None = Field(default=None, max_length=3)
     original_budget: str | None = Field(default=None, max_length=50)
     revised_budget: str | None = Field(default=None, max_length=50)
     committed: str | None = Field(default=None, max_length=50)
@@ -339,6 +341,7 @@ class BudgetResponse(BaseModel):
     project_id: UUID
     wbs_id: str | None = None
     category: str | None = None
+    currency_code: str = "EUR"
     # Phase 2d: the ORM now hands us ``Decimal`` values (see MoneyType
     # on ``ProjectBudget``). We still emit strings on the wire so the
     # API contract is unchanged. ``mode="before"`` runs the coercion
