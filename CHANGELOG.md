@@ -5,6 +5,11 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.11] — 2026-05-06
+
+### Fixed
+- "Navigation Sidebar" tour bubble no longer ambushes returning users on every page (BOQ, Dashboard, Projects, Validation…). The auto-start gate now also short-circuits when `oe_onboarding_completed === 'true'`, which the dashboard stamps as soon as it confirms the workspace has projects. Fresh installs still see the tour; demo-data and any new browser on a populated workspace skip it.
+
 ## [2.9.10] — 2026-05-06
 
 ### Fixed

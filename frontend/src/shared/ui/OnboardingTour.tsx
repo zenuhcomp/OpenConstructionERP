@@ -194,11 +194,20 @@ export function OnboardingTour({
     typeof window !== 'undefined' &&
     localStorage.getItem(ONBOARDING_SKIP_KEY) === '1';
 
+  // Returning users: the dashboard sets ``oe_onboarding_completed`` once
+  // we've confirmed the workspace has projects.  Treat that as an
+  // implicit tour-dismiss so admins on a populated workspace don't get
+  // the "Navigation Sidebar" balloon every time they open a new browser.
+  const onboardingDone =
+    typeof window !== 'undefined' &&
+    localStorage.getItem('oe_onboarding_completed') === 'true';
+
   // Determine if tour should auto-start
   const shouldStart =
     forceShow ||
     (!isBlockedRoute &&
       !isQaSkipped &&
+      !onboardingDone &&
       localStorage.getItem(ONBOARDING_STORAGE_KEY) === null);
 
   const [active, setActive] = useState(shouldStart);
