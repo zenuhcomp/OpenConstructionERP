@@ -33,6 +33,9 @@ def _make_service() -> ProcurementService:
     service.session = SimpleNamespace()
     service.po_repo = _StubPORepo()
     service.po_item_repo = _StubPOItemRepo()
+    # Wire the repos so po_repo.get() reflects newly inserted items
+    # (mirrors the real selectinload(items) eager-load).
+    service.po_repo._item_repo = service.po_item_repo
     service.gr_repo = _StubGRRepo()
     service.gr_item_repo = _StubGRItemRepo()
     return service
@@ -42,6 +45,7 @@ class _StubPORepo:
     def __init__(self) -> None:
         self.rows: dict[uuid.UUID, Any] = {}
         self._counter = 0
+        self._item_repo: _StubPOItemRepo | None = None
 
     async def create(self, po: Any) -> Any:
         if getattr(po, "id", None) is None:
@@ -57,7 +61,12 @@ class _StubPORepo:
         return po
 
     async def get(self, po_id: uuid.UUID) -> Any:
-        return self.rows.get(po_id)
+        po = self.rows.get(po_id)
+        # Mirror the real repository's selectinload(items) so service-level
+        # reload-after-insert behaviour can be observed in unit tests.
+        if po is not None and self._item_repo is not None:
+            po.items = [it for it in self._item_repo.rows.values() if it.po_id == po_id]
+        return po
 
     async def list(
         self,
@@ -213,6 +222,42 @@ async def test_create_po_with_items() -> None:
     po = await svc.create_po(data)
     # Items are created in the item repo
     assert len(svc.po_item_repo.rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_create_po_persists_items_and_reaggregates_totals() -> None:
+    """BUG-015: items[] in body must persist as PO line rows, the returned PO
+    must expose them, and amount_subtotal must equal Σ(quantity × unit_rate)
+    even when the caller did not provide explicit subtotal/line amounts."""
+    svc = _make_service()
+    data = POCreate(
+        project_id=PROJECT_ID,
+        po_number="PO-QA-001",
+        items=[
+            POItemCreate(description="Cement", quantity="100", unit="ton", unit_rate="120"),
+            POItemCreate(description="Sand", quantity="50", unit="ton", unit_rate="40"),
+        ],
+    )
+
+    po = await svc.create_po(data)
+
+    # Both lines persisted with the correct PO FK
+    assert len(svc.po_item_repo.rows) == 2
+    persisted = list(svc.po_item_repo.rows.values())
+    assert all(it.po_id == po.id for it in persisted)
+    by_desc = {it.description: it for it in persisted}
+    assert by_desc["Cement"].quantity == "100"
+    assert by_desc["Cement"].unit_rate == "120"
+    assert by_desc["Cement"].amount == "12000"
+    assert by_desc["Sand"].amount == "2000"
+
+    # Aggregated totals: 100*120 + 50*40 = 14000, tax=0
+    assert po.amount_subtotal == "14000"
+    assert po.amount_total == "14000"
+
+    # Returned PO carries the items collection (no longer dropped)
+    assert len(po.items) == 2
+    assert {it.description for it in po.items} == {"Cement", "Sand"}
 
 
 @pytest.mark.asyncio

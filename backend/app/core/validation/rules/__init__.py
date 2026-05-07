@@ -46,6 +46,32 @@ def _get_positions(context: ValidationContext) -> list[dict[str, Any]]:
     return []
 
 
+def _get_leaf_positions(context: ValidationContext) -> list[dict[str, Any]]:
+    """Leaf-only positions — sections (parent / header rows) are skipped.
+
+    Why: section rows aggregate children and intentionally lack `unit`,
+    `quantity`, and `unit_rate`. Rules that enforce those fields would
+    otherwise emit false-positive errors against every header in the
+    tree, drowning real findings on a fresh user's first validation run.
+
+    Detection: a row is a section if (a) `metadata.type == "section"`
+    (explicit), or (b) any other row in the dataset names this row as
+    its parent (implicit — derived from the parent_id graph). The
+    implicit branch covers seed/import paths that don't stamp the type
+    metadata field.
+    """
+    positions = _get_positions(context)
+    parent_ids: set[str] = {
+        str(p["parent_id"]) for p in positions
+        if p.get("parent_id")
+    }
+    return [
+        pos for pos in positions
+        if (pos.get("type") or "position") != "section"
+        and str(pos.get("id") or "") not in parent_ids
+    ]
+
+
 def _get_locale(context: ValidationContext) -> str:
     """‌⁠‍Pull the active locale from the validation context.
 
@@ -90,7 +116,7 @@ class PositionHasQuantity(ValidationRule):
     async def validate(self, context: ValidationContext) -> list[RuleResult]:
         locale = _get_locale(context)
         results: list[RuleResult] = []
-        for pos in _get_positions(context):
+        for pos in _get_leaf_positions(context):
             qty = pos.get("quantity", 0)
             passed = qty is not None and float(qty) > 0
             if passed:
@@ -132,7 +158,7 @@ class PositionHasUnitRate(ValidationRule):
     async def validate(self, context: ValidationContext) -> list[RuleResult]:
         locale = _get_locale(context)
         results: list[RuleResult] = []
-        for pos in _get_positions(context):
+        for pos in _get_leaf_positions(context):
             rate = pos.get("unit_rate", 0)
             passed = rate is not None and float(rate) > 0
             if passed:
@@ -933,7 +959,7 @@ class EmptyUnit(ValidationRule):
     async def validate(self, context: ValidationContext) -> list[RuleResult]:
         locale = _get_locale(context)
         results: list[RuleResult] = []
-        for pos in _get_positions(context):
+        for pos in _get_leaf_positions(context):
             unit = (pos.get("unit") or "").strip()
             passed = len(unit) > 0
             if passed:

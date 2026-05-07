@@ -211,7 +211,22 @@ class CostAutocompleteItem(BaseModel):
 class CostSearchQuery(BaseModel):
     """Query parameters for cost item search."""
 
-    q: str | None = Field(default=None, description="Text search on code and description")
+    q: str | None = Field(
+        default=None,
+        description=(
+            "Free-text search — matches substring (ILIKE) against code OR "
+            "description. Canonical param. Aliases ``search`` and ``query`` "
+            "are silently mapped to this at the API boundary."
+        ),
+    )
+    name: str | None = Field(
+        default=None,
+        description="Substring filter against code only (the catalog 'name').",
+    )
+    description: str | None = Field(
+        default=None,
+        description="Substring filter against description only.",
+    )
     unit: str | None = None
     source: str | None = None
     region: str | None = Field(default=None, description="Filter by region (e.g. DE_BERLIN)")

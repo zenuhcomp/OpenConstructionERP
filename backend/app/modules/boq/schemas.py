@@ -166,8 +166,16 @@ class BOQResponse(BaseModel):
 
 
 class BOQListItem(BOQResponse):
-    """BOQ summary returned from list endpoints, includes computed grand_total."""
+    """BOQ summary returned from list endpoints, includes computed grand_total.
 
+    ``grand_total`` is the **final** number a user sees on dashboards: direct
+    cost plus all active markups (and taxes when present).  ``direct_cost_total``
+    breaks out the same number minus markups, so the two figures are always
+    consistent across list / detail / structured endpoints (BUG-008).
+    """
+
+    direct_cost_total: float = 0.0
+    markups_total: float = 0.0
     grand_total: float = 0.0
     position_count: int = 0
 
@@ -503,10 +511,19 @@ class MarkupCalculated(MarkupResponse):
 
 
 class BOQWithPositions(BOQResponse):
-    """BOQ with all its positions and computed grand total."""
+    """BOQ with all its positions and computed grand total.
+
+    ``grand_total`` includes active markups (matches list / structured
+    semantics — BUG-008).  ``direct_cost_total`` and ``markups_total``
+    are exposed alongside for clients that need the breakdown without
+    re-summing markups themselves.
+    """
 
     positions: list[PositionResponse] = Field(default_factory=list)
+    direct_cost_total: float = 0.0
+    markups_total: float = 0.0
     grand_total: float = 0.0
+    position_count: int = 0
 
 
 class SectionResponse(BaseModel):

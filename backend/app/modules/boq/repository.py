@@ -59,9 +59,24 @@ class BOQRepository:
     ) -> dict[uuid.UUID, float]:
         """Compute grand total (direct cost + markups) for each BOQ by ID.
 
+        Convenience wrapper around :meth:`totals_for_boqs` for the
+        majority of callers that only need the grand total — keeps the
+        existing `dict[uuid.UUID, float]` shape.
+        """
+        breakdown = await self.totals_for_boqs(boq_ids)
+        return {bid: t["grand_total"] for bid, t in breakdown.items()}
+
+    async def totals_for_boqs(
+        self,
+        boq_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, dict[str, float]]:
+        """Compute the full money breakdown per BOQ.
+
+        Returns ``{boq_id: {direct_cost, markups_total, grand_total}}``.
+
         First aggregates position totals per BOQ, then applies active markups
         (percentage or fixed) in sort_order to arrive at the final grand total.
-        Returns a mapping of boq_id -> grand_total.
+        Single source of truth for BUG-008 (list and detail must match).
         """
         if not boq_ids:
             return {}
@@ -94,7 +109,7 @@ class BOQRepository:
             markups_by_boq.setdefault(markup.boq_id, []).append(markup)
 
         # Step 3: apply markups to compute grand total per BOQ
-        totals: dict[uuid.UUID, float] = {}
+        breakdown: dict[uuid.UUID, dict[str, float]] = {}
         for boq_id in boq_ids:
             dc = Decimal(str(direct_costs.get(boq_id, 0)))
             running = dc
@@ -105,9 +120,15 @@ class BOQRepository:
                     running += base * pct / Decimal("100")
                 elif m.markup_type == "fixed":
                     running += Decimal(m.fixed_amount or "0")
-            totals[boq_id] = round(float(running), 2)
+            grand_total = round(float(running), 2)
+            direct_cost_value = round(float(dc), 2)
+            breakdown[boq_id] = {
+                "direct_cost": direct_cost_value,
+                "markups_total": round(grand_total - direct_cost_value, 2),
+                "grand_total": grand_total,
+            }
 
-        return totals
+        return breakdown
 
     async def create(self, boq: BOQ) -> BOQ:
         """Insert a new BOQ."""

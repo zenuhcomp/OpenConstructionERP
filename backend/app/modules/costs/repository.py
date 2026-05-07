@@ -164,6 +164,8 @@ class CostItemRepository:
         self,
         *,
         q: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
         unit: str | None = None,
         source: str | None = None,
         region: str | None = None,
@@ -179,7 +181,19 @@ class CostItemRepository:
         """Advanced search with multiple filters and keyset pagination.
 
         Args:
-            q: Text search on code and description.
+            q: Text search on code OR description (canonical free-text param).
+                SQL ``ILIKE '%q%'`` cross-dialect via ``column.ilike()`` —
+                Postgres uses native ILIKE, SQLite uses case-insensitive
+                LIKE because the SQLite LIKE is itself case-insensitive
+                for ASCII by default. Always returns substring matches; the
+                vector layer is a best-effort re-ranker on top, never the
+                only source of recall.
+            name: Substring filter against ``code`` only. CostItem rows
+                have no separate ``name`` column — ``code`` is the catalog
+                identifier clients call "name", so this aliases there.
+            description: Substring filter against ``description`` only.
+                AND-combined with ``q`` and ``name`` so callers can
+                narrow further on a long description.
             unit: Filter by unit (exact match).
             source: Filter by source (exact match).
             region: Filter by region (exact match, e.g. "DE_BERLIN").
@@ -209,6 +223,12 @@ class CostItemRepository:
         if q:
             pattern = f"%{q}%"
             base = base.where(CostItem.code.ilike(pattern) | CostItem.description.ilike(pattern))
+
+        if name:
+            base = base.where(CostItem.code.ilike(f"%{name}%"))
+
+        if description:
+            base = base.where(CostItem.description.ilike(f"%{description}%"))
 
         if unit:
             base = base.where(CostItem.unit == unit)

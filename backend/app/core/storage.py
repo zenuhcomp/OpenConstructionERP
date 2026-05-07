@@ -241,6 +241,27 @@ class StorageBackend(ABC):
     async def put(self, key: str, content: bytes) -> None:
         """Write ``content`` to ``key``, overwriting any existing blob."""
 
+    async def put_stream(self, key: str, src_path: Path) -> None:
+        """Persist the file at ``src_path`` to ``key`` without loading it
+        into memory.
+
+        The default implementation reads ``src_path`` fully and delegates
+        to :meth:`put`.  Subclasses should override with a true streaming
+        implementation when one is available — see
+        :class:`LocalStorageBackend.put_stream` (uses ``shutil.move`` /
+        ``copyfileobj``) and :class:`S3StorageBackend.put_stream`
+        (uses ``upload_fileobj`` for multipart).
+
+        The source file is NOT removed by this method — the caller owns
+        the temp-file lifecycle.
+        """
+
+        def _read() -> bytes:
+            return src_path.read_bytes()
+
+        content = await asyncio.to_thread(_read)
+        await self.put(key, content)
+
     @abstractmethod
     async def get(self, key: str) -> bytes:
         """Read the blob at ``key`` and return its bytes.
@@ -472,6 +493,32 @@ class LocalStorageBackend(StorageBackend):
             path.write_bytes(content)
 
         await asyncio.to_thread(_write)
+
+    async def put_stream(self, key: str, src_path: Path) -> None:
+        """Move/copy ``src_path`` to ``key`` without loading it into memory.
+
+        Uses ``shutil.move`` when source and destination share a device
+        (atomic rename, near-free for multi-GB files), falling back to
+        ``shutil.copyfile`` (chunked under the hood) on cross-device
+        moves.  The source file is consumed — callers must not assume it
+        still exists after this returns.
+        """
+        path = self._path_for(key)
+
+        def _move() -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.move(str(src_path), str(path))
+            except OSError:
+                # Cross-device or permission edge case — fall back to a
+                # plain copy and best-effort cleanup of the source.
+                shutil.copyfile(str(src_path), str(path))
+                try:
+                    src_path.unlink()
+                except OSError:
+                    pass
+
+        await asyncio.to_thread(_move)
 
     async def get(self, key: str) -> bytes:
         path = self._path_for(key)
@@ -831,6 +878,27 @@ class S3StorageBackend(StorageBackend):
         normalised = _normalise_key(key)
         async with self._client_ctx() as client:  # type: ignore[attr-defined]
             await client.put_object(Bucket=self._bucket, Key=normalised, Body=content)
+
+    async def put_stream(self, key: str, src_path: Path) -> None:
+        """Upload ``src_path`` to ``key`` via aioboto3's ``upload_fileobj``.
+
+        ``upload_fileobj`` automatically falls back to multipart upload
+        for large files, so peak memory is bounded by the multipart
+        chunk size (default 8 MB) regardless of source size.
+        """
+        normalised = _normalise_key(key)
+
+        # Open the source synchronously — aioboto3's upload_fileobj wants
+        # a file-like, and the work happens off-loop inside the client.
+        def _open() -> object:
+            return src_path.open("rb")
+
+        handle = await asyncio.to_thread(_open)
+        try:
+            async with self._client_ctx() as client:  # type: ignore[attr-defined]
+                await client.upload_fileobj(handle, self._bucket, normalised)
+        finally:
+            await asyncio.to_thread(handle.close)  # type: ignore[attr-defined]
 
     async def get(self, key: str) -> bytes:
         normalised = _normalise_key(key)

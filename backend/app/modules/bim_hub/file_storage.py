@@ -22,6 +22,7 @@ a single ``STORAGE_BACKEND=s3`` environment variable away.
 from __future__ import annotations
 
 import logging
+import pathlib
 import uuid
 from collections.abc import AsyncIterator
 from typing import Final
@@ -114,6 +115,32 @@ async def save_original_cad(
     key = original_cad_key(project_id, model_id, ext)
     await _backend().put(key, content)
     logger.info("Saved original CAD to key=%s (%d bytes)", key, len(content))
+    return key
+
+
+async def save_original_cad_from_path(
+    project_id: uuid.UUID | str,
+    model_id: uuid.UUID | str,
+    ext: str,
+    src_path: pathlib.Path,
+    *,
+    size: int | None = None,
+) -> str:
+    """Persist an original CAD upload from a file path (streaming).
+
+    Use this instead of :func:`save_original_cad` when the upload is
+    multi-hundred-megabyte (RVT, IFC, PDF) — it avoids loading the file
+    into memory.  ``size`` is purely for the log line; it's read from
+    the path if not provided.
+    """
+    key = original_cad_key(project_id, model_id, ext)
+    await _backend().put_stream(key, src_path)
+    if size is None:
+        try:
+            size = src_path.stat().st_size
+        except OSError:
+            size = -1
+    logger.info("Saved original CAD (streamed) to key=%s (%d bytes)", key, size)
     return key
 
 

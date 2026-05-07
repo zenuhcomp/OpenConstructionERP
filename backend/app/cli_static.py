@@ -111,6 +111,24 @@ def mount_frontend(app: FastAPI) -> None:
         ".webp", ".avif", ".jpg", ".jpeg", ".gif", ".woff", ".woff2",
     }
 
+    # ── Conventional API path aliases ────────────────────────────────────
+    # k8s liveness/readiness probes, openapi-typescript generators, third-
+    # party Swagger UIs — all of these expect ``/health`` and
+    # ``/openapi.json`` at the root, not under ``/api``.  Without these
+    # redirects the SPA fallback below catches them and returns ``index.html``
+    # with HTTP 200, which makes a sick service look healthy to a probe
+    # (BUG-002).  Permanent (308) so caching layers and clients pin the
+    # canonical path going forward.
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/health", include_in_schema=False)
+    async def _health_alias() -> Response:
+        return RedirectResponse(url="/api/health", status_code=308)
+
+    @app.get("/openapi.json", include_in_schema=False)
+    async def _openapi_alias() -> Response:
+        return RedirectResponse(url="/api/openapi.json", status_code=308)
+
     # ── SPA fallback via custom 404 handler ─────────────────────────────
     # Keep a reference to whatever 404 handler was already registered
     # (e.g. FastAPI's default) so we can delegate API 404s to it.

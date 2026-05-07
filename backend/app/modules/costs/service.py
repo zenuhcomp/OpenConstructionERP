@@ -164,6 +164,8 @@ class CostItemService:
         """
         items, total, _ = await self.repo.search(
             q=query.q,
+            name=query.name,
+            description=query.description,
             unit=query.unit,
             source=query.source,
             region=query.region,
@@ -213,6 +215,8 @@ class CostItemService:
 
         items, total, has_more = await self.repo.search(
             q=query.q,
+            name=query.name,
+            description=query.description,
             unit=query.unit,
             source=query.source,
             region=query.region,

@@ -383,7 +383,9 @@ async def list_boqs(
     boqs, _ = await service.list_boqs_for_project(project_id, offset=offset, limit=limit)
     # Compute grand totals + position counts via aggregate queries
     boq_ids = [b.id for b in boqs]
-    totals = await service.boq_repo.grand_totals_for_boqs(boq_ids)
+    # ``totals_for_boqs`` returns the full breakdown so list and detail
+    # endpoints stay in lockstep (BUG-008).
+    breakdown = await service.boq_repo.totals_for_boqs(boq_ids)
 
     # Position counts per BOQ
     from sqlalchemy import func, select
@@ -405,6 +407,7 @@ async def list_boqs(
 
     results: list[BOQListItem] = []
     for b in boqs:
+        money = breakdown.get(b.id, {"direct_cost": 0.0, "markups_total": 0.0, "grand_total": 0.0})
         item = BOQListItem(
             id=b.id,
             project_id=b.project_id,
@@ -414,7 +417,9 @@ async def list_boqs(
             metadata=b.metadata_,
             created_at=b.created_at,
             updated_at=b.updated_at,
-            grand_total=totals.get(b.id, 0.0),
+            direct_cost_total=money["direct_cost"],
+            markups_total=money["markups_total"],
+            grand_total=money["grand_total"],
             position_count=pos_counts.get(b.id, 0),
         )
         results.append(item)
@@ -1477,7 +1482,8 @@ async def bulk_add_positions(
         # bulk-inserting the rest.
         logger.warning(
             "Bulk import: %d/%d rows skipped due to validation errors",
-            len(errors), len(items),
+            len(errors),
+            len(items),
         )
 
     try:
@@ -2002,15 +2008,41 @@ async def validate_boq(
             detail="Project not found for this BOQ",
         )
 
-    # Convert positions to the format expected by validation rules
+    # Convert positions to the format expected by validation rules.
+    #
+    # BUG-011: rules read pos.get("unit"), pos.get("parent_id"),
+    # pos.get("total"), pos.get("type"), pos.get("description") — earlier
+    # versions of this dict omitted those keys, so every leaf-position rule
+    # (boq_quality.empty_unit, .total_mismatch, .duplicate_ordinal etc.)
+    # got `None` and false-positively errored on every row. We now project
+    # the full set of fields the built-in rules depend on. Position "type"
+    # is derived: a row with empty unit + zero qty + zero rate is treated
+    # as a "section" header (matches service._is_section semantics so the
+    # leaf-positions filter skips them).
+    def _row_type(p: object) -> str:
+        unit = (getattr(p, "unit", "") or "").strip().lower()
+        try:
+            qty = float(getattr(p, "quantity", 0) or 0)
+            rate = float(getattr(p, "unit_rate", 0) or 0)
+        except (TypeError, ValueError):
+            qty = rate = 0.0
+        if unit in ("", "section") and qty == 0.0 and rate == 0.0:
+            return "section"
+        return "position"
+
     positions_data = [
         {
             "id": str(pos.id),
+            "parent_id": (str(pos.parent_id) if pos.parent_id else None),
             "ordinal": pos.ordinal,
             "description": pos.description,
+            "unit": pos.unit,
             "quantity": pos.quantity,
             "unit_rate": pos.unit_rate,
+            "total": pos.total,
             "classification": pos.classification,
+            "source": getattr(pos, "source", None),
+            "type": _row_type(pos),
         }
         for pos in boq_data.positions
     ]
@@ -2329,9 +2361,7 @@ async def export_boq_csv(
             _fmt_number(getattr(pos, "confidence", None))
             if getattr(pos, "confidence", None) is not None
             else "",
-            neutralise_formula(
-                getattr(pos, "wbs_code", "") or getattr(pos, "wbs_id", "") or ""
-            ),
+            neutralise_formula(getattr(pos, "wbs_code", "") or getattr(pos, "wbs_id", "") or ""),
             neutralise_formula(
                 ",".join(str(x) for x in cad_ids) if isinstance(cad_ids, list) else ""
             ),
@@ -2367,7 +2397,21 @@ async def export_boq_csv(
 
     # Direct cost subtotal
     writer.writerow(
-        ["", "Direct Cost", "", "", "", _fmt_number(structured.direct_cost), "", "", "", "", "", "", ""]
+        [
+            "",
+            "Direct Cost",
+            "",
+            "",
+            "",
+            _fmt_number(structured.direct_cost),
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ]
     )
 
     # Markup rows — markup.name is user-controlled.
@@ -2649,7 +2693,9 @@ async def export_boq_excel(
         # neutralised before being written. ``number`` columns are recast
         # to ``float`` below, so they bypass ``neutralise_formula``.
         if custom_columns:
-            custom_fields = pos_meta_raw.get("custom_fields", {}) if isinstance(pos_meta_raw, dict) else {}
+            custom_fields = (
+                pos_meta_raw.get("custom_fields", {}) if isinstance(pos_meta_raw, dict) else {}
+            )
             for offset, col_def in enumerate(custom_columns):
                 col_name = col_def.get("name", "")
                 col_type = col_def.get("column_type", "text")
@@ -3410,13 +3456,6 @@ async def import_boq_excel(
             detail="Uploaded file is empty.",
         )
 
-    # Limit file size (10 MB)
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File too large. Maximum size is 10 MB.",
-        )
-
     # BUG-UPLOAD01: validate the actual file content, not just the
     # extension. A .exe renamed to .xlsx would otherwise be handed to
     # openpyxl (parse-time crash, but the bytes still hit our buffers and
@@ -3447,9 +3486,7 @@ async def import_boq_excel(
     import_meta: dict[str, Any] = {}
     try:
         if filename.endswith(".xlsx"):
-            rows, import_meta = await asyncio.to_thread(
-                _parse_rows_from_excel, content
-            )
+            rows, import_meta = await asyncio.to_thread(_parse_rows_from_excel, content)
         else:
             rows = await asyncio.to_thread(_parse_rows_from_csv, content)
     except ValueError as exc:
@@ -3465,9 +3502,7 @@ async def import_boq_excel(
         # corruption) and ``KeyError`` (missing sheet xml entries) on
         # malformed xlsx. Without this catch the request returns 500 with
         # a full traceback — a footgun for log-exposed deployments.
-        logger.warning(
-            "Malformed xlsx upload (%s): %s", type(exc).__name__, exc
-        )
+        logger.warning("Malformed xlsx upload (%s): %s", type(exc).__name__, exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Could not parse file: the xlsx archive is corrupt or truncated.",
@@ -3507,9 +3542,7 @@ async def import_boq_excel(
         except Exception:
             pass
     _rate_samples.sort()
-    _median_rate = (
-        _rate_samples[len(_rate_samples) // 2] if _rate_samples else 0.0
-    )
+    _median_rate = _rate_samples[len(_rate_samples) // 2] if _rate_samples else 0.0
 
     for row_idx, row in enumerate(rows, start=2):  # start=2 because row 1 is header
         try:
@@ -3799,8 +3832,7 @@ async def import_boq_gaeb(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Unsupported file type. Please upload a GAEB XML file "
-                "(.x81, .x83, .x84, or .xml)."
+                "Unsupported file type. Please upload a GAEB XML file (.x81, .x83, .x84, or .xml)."
             ),
         )
 
@@ -3997,7 +4029,9 @@ async def import_boq_gaeb(
                 return (anc.get("ID") or "").strip()
         return ""
 
-    def _walk_and_collect(el: ET.Element, ancestors: list[ET.Element]) -> list[tuple[ET.Element, str]]:
+    def _walk_and_collect(
+        el: ET.Element, ancestors: list[ET.Element]
+    ) -> list[tuple[ET.Element, str]]:
         found: list[tuple[ET.Element, str]] = []
         for child in el:
             if _local(child.tag) == "Item":
@@ -4360,7 +4394,9 @@ async def smart_import(
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(f"Unsupported file type: .{ext}. Supported: xlsx, csv, pdf, jpg, png, tiff, rvt, ifc, dwg, dgn."),
+            detail=(
+                f"Unsupported file type: .{ext}. Supported: xlsx, csv, pdf, jpg, png, tiff, rvt, ifc, dwg, dgn."
+            ),
         )
 
     # ── 1b. Handle missing CAD converter (return early) ────────────────
@@ -4872,13 +4908,10 @@ async def get_resource_summary(
         if not it.available_variants:
             continue
         label_hash = "|".join(
-            (v.get("label") or "").strip()
-            for v in it.available_variants
-            if isinstance(v, dict)
+            (v.get("label") or "").strip() for v in it.available_variants if isinstance(v, dict)
         )
-        already = (
-            (it.resource_code and it.resource_code in seen_codes)
-            or (label_hash and label_hash in seen_hashes)
+        already = (it.resource_code and it.resource_code in seen_codes) or (
+            label_hash and label_hash in seen_hashes
         )
         if already:
             it.available_variants = None
@@ -4987,7 +5020,9 @@ async def enrich_resources(
 
         # Fallback: lookup by description
         if not components:
-            components = await BOQService._lookup_cost_item_components(cost_repo, pos.description or "")
+            components = await BOQService._lookup_cost_item_components(
+                cost_repo, pos.description or ""
+            )
 
         if components:
             resources = []
@@ -4999,7 +5034,8 @@ async def enrich_resources(
                     "unit": c.get("unit", ""),
                     "quantity": float(c.get("quantity", 0)),
                     "unit_rate": float(c.get("unit_rate", 0)),
-                    "total": float(c.get("cost", 0)) or float(c.get("quantity", 0)) * float(c.get("unit_rate", 0)),
+                    "total": float(c.get("cost", 0))
+                    or float(c.get("quantity", 0)) * float(c.get("unit_rate", 0)),
                 }
                 resources.append(res)
 
@@ -5359,7 +5395,9 @@ async def get_boq_statistics(
 )
 async def get_sensitivity(
     boq_id: uuid.UUID,
-    variation_pct: float = Query(default=10.0, gt=0.0, le=100.0, description="Cost variation percentage"),
+    variation_pct: float = Query(
+        default=10.0, gt=0.0, le=100.0, description="Cost variation percentage"
+    ),
     top_n: int = Query(default=15, ge=1, le=50, description="Number of top positions to return"),
     service: BOQService = Depends(_get_service),
 ) -> SensitivityResponse:
@@ -5478,9 +5516,15 @@ def _pert_sample(low: float, mode: float, high: float) -> float:
 )
 async def get_cost_risk(
     boq_id: uuid.UUID,
-    iterations: int = Query(default=1000, ge=100, le=10000, description="Number of Monte Carlo iterations"),
-    optimistic_pct: float = Query(default=15.0, ge=0.0, le=50.0, description="Optimistic cost reduction %"),
-    pessimistic_pct: float = Query(default=25.0, ge=0.0, le=100.0, description="Pessimistic cost increase %"),
+    iterations: int = Query(
+        default=1000, ge=100, le=10000, description="Number of Monte Carlo iterations"
+    ),
+    optimistic_pct: float = Query(
+        default=15.0, ge=0.0, le=50.0, description="Optimistic cost reduction %"
+    ),
+    pessimistic_pct: float = Query(
+        default=25.0, ge=0.0, le=100.0, description="Pessimistic cost increase %"
+    ),
     service: BOQService = Depends(_get_service),
 ) -> CostRiskResponse:
     """Run a Monte Carlo cost risk simulation for a BOQ.
@@ -5678,9 +5722,9 @@ class CustomColumnCreate(BaseModel):
     # the hint (rather than a precomputed value) keeps section subtotals
     # and live-editing of resources working without an invalidation step.
     derived: Literal["resource_sum", "percentage_of_unit_rate"] | None = None
-    resource_role: Literal[
-        "material", "labor", "equipment", "operator", "subcontractor", "other"
-    ] | None = None
+    resource_role: (
+        Literal["material", "labor", "equipment", "operator", "subcontractor", "other"] | None
+    ) = None
 
 
 @router.post(
@@ -5702,7 +5746,16 @@ async def add_custom_column(
     if not name or not name.isidentifier():
         raise HTTPException(400, "Invalid column name — use alphanumeric + underscore")
 
-    reserved = {"ordinal", "description", "unit", "quantity", "unit_rate", "total", "id", "parent_id"}
+    reserved = {
+        "ordinal",
+        "description",
+        "unit",
+        "quantity",
+        "unit_rate",
+        "total",
+        "id",
+        "parent_id",
+    }
     if name in reserved:
         raise HTTPException(400, f"Column name '{name}' is reserved")
 
@@ -6155,19 +6208,13 @@ async def boq_position_similar(
     from app.modules.boq.models import Position
     from app.modules.boq.vector_adapter import boq_position_adapter
 
-    stmt = (
-        select(Position)
-        .options(selectinload(Position.boq))
-        .where(Position.id == position_id)
-    )
+    stmt = select(Position).options(selectinload(Position.boq)).where(Position.id == position_id)
     row = (await session.execute(stmt)).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Position not found")
 
     project_id = (
-        str(row.boq.project_id)
-        if row.boq is not None and row.boq.project_id is not None
-        else None
+        str(row.boq.project_id) if row.boq is not None and row.boq.project_id is not None else None
     )
     hits = await find_similar(
         boq_position_adapter,

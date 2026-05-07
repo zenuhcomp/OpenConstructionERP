@@ -807,12 +807,6 @@ async def upload_bim_data(
             )
         geometry_content = await geometry_file.read()
         if geometry_content:
-            # 200 MB limit for geometry files
-            if len(geometry_content) > 200 * 1024 * 1024:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Geometry file too large. Maximum size is 200 MB.",
-                )
             has_geometry = True
 
     # --- Parse data file ---
@@ -1155,6 +1149,15 @@ async def _process_cad_in_background(
                 model.element_count = element_count
                 model.storey_count = len(result["storeys"])
                 model.bounding_box = result.get("bounding_box")
+                # BUG-006: stamp the conversion-finished moment so audit
+                # reports / Asset Register sorting have something better
+                # than ``created_at`` (which is the upload moment, before
+                # geometry extraction).  ``import_date`` was previously
+                # left null on every ready model.
+                from datetime import UTC as _UTC
+                from datetime import datetime as _dt
+
+                model.import_date = _dt.now(_UTC)
                 if glb_key:
                     model.canonical_file_path = glb_key
                 elif geo_key:
@@ -1417,204 +1420,208 @@ async def upload_cad_file(
             ),
         )
 
-    # Preflight: when the required converter binary isn't installed on
-    # this server, **persist** the upload and create a placeholder model
-    # so the user doesn't have to re-upload after running the install.
-    # The response is HTTP 202 Accepted (the request is good — we'll
-    # finish processing later) rather than 201 Created (we haven't
-    # created any geometry yet).  ``Retry-After`` and a ``Link`` header
-    # point the client at the converter-install endpoint and the model
-    # row that will be re-processed once the binary lands.  Frontend
-    # dispatches on the ``status`` field in the body — see
-    # ``BIMCadUploadResponse`` in ``frontend/src/features/bim/api.ts``.
-    if ext in _NEEDS_CONVERTER_EXTS:
-        from app.modules.boq.cad_import import find_converter
+    # Stream the upload to a temp file in 1 MB chunks instead of buffering
+    # the whole body in memory.  A 500 MB IFC used to cost ~500 MB of heap
+    # in the request handler — on the 2 GB-RAM VPS, two concurrent uploads
+    # were enough to OOM the process.  ``StreamedUpload`` exposes:
+    #   - ``upload.path``    — the spooled temp file
+    #   - ``upload.size``    — bytes written
+    #   - ``upload.head``    — first 64 bytes for magic-byte validation
+    # Storage's ``put_stream`` then ``rename(2)``s the file into place
+    # (single syscall on same-FS local backend; ``upload_fileobj`` with
+    # multipart on S3) — zero additional memory pressure.
+    from app.core.upload_streaming import stream_upload_to_temp
 
-        if find_converter(ext.lstrip(".")) is None:
-            # Read & save the file before responding so the user can
-            # install the converter and trigger a re-process from the UI
-            # without a second upload (BUG-RVT03). No size cap.
-            content = await file.read()
-            if not content:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Uploaded file is empty.",
+    async with stream_upload_to_temp(file, suffix=ext) as upload:
+        if upload.size == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded file is empty.",
+            )
+
+        # Preflight: when the required converter binary isn't installed on
+        # this server, **persist** the upload and create a placeholder model
+        # so the user doesn't have to re-upload after running the install.
+        # The response is HTTP 202 Accepted (the request is good — we'll
+        # finish processing later) rather than 201 Created (we haven't
+        # created any geometry yet).  ``Retry-After`` and a ``Link`` header
+        # point the client at the converter-install endpoint and the model
+        # row that will be re-processed once the binary lands.  Frontend
+        # dispatches on the ``status`` field in the body — see
+        # ``BIMCadUploadResponse`` in ``frontend/src/features/bim/api.ts``.
+        if ext in _NEEDS_CONVERTER_EXTS:
+            from app.modules.boq.cad_import import find_converter
+
+            if find_converter(ext.lstrip(".")) is None:
+                new_model_id = uuid.uuid4()
+                saved_cad_key = await bim_file_storage.save_original_cad_from_path(
+                    project_uuid, new_model_id, ext, upload.path, size=upload.size,
+                )
+                display_name = (name or pathlib.Path(filename).stem).strip() or filename
+                from app.modules.bim_hub.schemas import BIMModelCreate
+
+                # NB: ``error_message`` is set via a follow-up update because
+                # ``BIMModelCreate`` doesn't expose that field — it lives on
+                # ``BIMModelUpdate`` so freshly-created records start clean.
+                # The kwarg here MUST be ``user_id=`` (the service signature) —
+                # passing ``created_by=`` raised a TypeError on every .rvt /
+                # .ifc upload that hit the missing-converter path.
+                pending_model = await service.create_model(
+                    BIMModelCreate(
+                        project_id=project_uuid,
+                        name=display_name,
+                        discipline=discipline,
+                        model_format=ext.lstrip("."),
+                        canonical_file_path=saved_cad_key,
+                        status="needs_converter",
+                    ),
+                    user_id=user_id,
+                )
+                await service.update_model(
+                    pending_model.id,
+                    BIMModelUpdate(
+                        error_message=(
+                            f"{ext.upper().lstrip('.')} converter not installed — "
+                            f"install it from the BIM converter banner, then "
+                            f"click Re-process on this model."
+                        ),
+                    ),
                 )
 
-            new_model_id = uuid.uuid4()
-            saved_cad_key = await bim_file_storage.save_original_cad(
-                project_uuid, new_model_id, ext, content,
-            )
-            display_name = (name or pathlib.Path(filename).stem).strip() or filename
-            from app.modules.bim_hub.schemas import BIMModelCreate
+                logger.info(
+                    "Saved %s upload pending converter — model=%s, key=%s, %d bytes",
+                    ext, new_model_id, saved_cad_key, upload.size,
+                )
 
-            # NB: ``error_message`` is set via a follow-up update because
-            # ``BIMModelCreate`` doesn't expose that field — it lives on
-            # ``BIMModelUpdate`` so freshly-created records start clean.
-            # The kwarg here MUST be ``user_id=`` (the service signature) —
-            # passing ``created_by=`` raised a TypeError on every .rvt /
-            # .ifc upload that hit the missing-converter path.
-            pending_model = await service.create_model(
-                BIMModelCreate(
-                    project_id=project_uuid,
-                    name=display_name,
-                    discipline=discipline,
-                    model_format=ext.lstrip("."),
-                    canonical_file_path=saved_cad_key,
-                    status="needs_converter",
-                ),
-                user_id=user_id,
-            )
-            await service.update_model(
-                pending_model.id,
-                BIMModelUpdate(
-                    error_message=(
-                        f"{ext.upper().lstrip('.')} converter not installed — "
-                        f"install it from the BIM converter banner, then "
-                        f"click Re-process on this model."
-                    ),
-                ),
-            )
+                install_endpoint = (
+                    f"/api/v1/takeoff/converters/{ext.lstrip('.')}/install/"
+                )
+                return JSONResponse(
+                    status_code=status.HTTP_202_ACCEPTED,
+                    content={
+                        "status": "converter_required",
+                        "format": ext.lstrip("."),
+                        "converter_id": ext.lstrip("."),
+                        "message": (
+                            f"{ext.upper().lstrip('.')} files require the "
+                            f"{ext.upper().lstrip('.')} converter, which is not "
+                            f"installed on this server. Your file has been "
+                            f"saved — install the converter and click "
+                            f"Re-process on the model card to finish the upload."
+                        ),
+                        "install_endpoint": install_endpoint,
+                        "model_id": str(new_model_id),
+                        "name": display_name,
+                        "file_size": upload.size,
+                        "element_count": 0,
+                        "error_message": None,
+                    },
+                    headers={
+                        "Retry-After": "60",
+                        "Link": (
+                            f"<{install_endpoint}>; rel=\"install-converter\", "
+                            f"</api/v1/bim_hub/{new_model_id}/retry/>; "
+                            f"rel=\"reprocess-model\""
+                        ),
+                    },
+                )
 
-            logger.info(
-                "Saved %s upload pending converter — model=%s, key=%s, %d bytes",
-                ext, new_model_id, saved_cad_key, len(content),
-            )
-
-            install_endpoint = (
-                f"/api/v1/takeoff/converters/{ext.lstrip('.')}/install/"
-            )
-            return JSONResponse(
-                status_code=status.HTTP_202_ACCEPTED,
-                content={
-                    "status": "converter_required",
-                    "format": ext.lstrip("."),
-                    "converter_id": ext.lstrip("."),
-                    "message": (
-                        f"{ext.upper().lstrip('.')} files require the "
-                        f"{ext.upper().lstrip('.')} converter, which is not "
-                        f"installed on this server. Your file has been "
-                        f"saved — install the converter and click "
-                        f"Re-process on the model card to finish the upload."
-                    ),
-                    "install_endpoint": install_endpoint,
-                    "model_id": str(new_model_id),
-                    "name": display_name,
-                    "file_size": len(content),
-                    "element_count": 0,
-                    "error_message": None,
-                },
-                headers={
-                    "Retry-After": "60",
-                    "Link": (
-                        f"<{install_endpoint}>; rel=\"install-converter\", "
-                        f"</api/v1/bim_hub/{new_model_id}/retry/>; "
-                        f"rel=\"reprocess-model\""
-                    ),
-                },
-            )
-
-    # No upload size cap — per product policy.
-    content = await file.read()
-    if not content:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty.",
-        )
-
-    # Magic-byte validation — filename extensions are attacker-controlled
-    # and we proceed to hand this file to a CAD converter that can be
-    # exploited by unexpected formats. Reject anything that doesn't look
-    # like one of our accepted CAD/BIM containers.
-    from app.core.file_signature import (
-        ALLOWED_CAD_TYPES,
-        SIGNATURE_BYTES_REQUIRED,
-        FileSignatureMismatch,
-    )
-    from app.core.file_signature import (
-        require as _require_sig,
-    )
-
-    try:
-        _require_sig(
-            content[:SIGNATURE_BYTES_REQUIRED],
+        # Magic-byte validation — filename extensions are attacker-controlled
+        # and we proceed to hand this file to a CAD converter that can be
+        # exploited by unexpected formats. Reject anything that doesn't look
+        # like one of our accepted CAD/BIM containers.  The streamed-upload
+        # helper has already kept the first 64 bytes around for us.
+        from app.core.file_signature import (
             ALLOWED_CAD_TYPES,
-            filename=filename,
+            FileSignatureMismatch,
         )
-    except FileSignatureMismatch as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
+        from app.core.file_signature import (
+            require as _require_sig,
+        )
 
-    # Auto-fill model name from filename
-    model_name = name or pathlib.Path(filename).stem
+        try:
+            _require_sig(
+                upload.head,
+                ALLOWED_CAD_TYPES,
+                filename=filename,
+            )
+        except FileSignatureMismatch as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
 
-    # Determine model format from extension (strip the dot)
-    model_format = ext.lstrip(".")
+        # Auto-fill model name from filename
+        model_name = name or pathlib.Path(filename).stem
 
-    # Create BIM model record with processing status
-    from app.modules.bim_hub.schemas import BIMModelCreate
+        # Determine model format from extension (strip the dot)
+        model_format = ext.lstrip(".")
 
-    model_data = BIMModelCreate(
-        project_id=uuid.UUID(project_id),
-        name=model_name,
-        discipline=discipline,
-        model_format=model_format,
-        status="processing",
-    )
-    model = await service.create_model(model_data, user_id=user_id)
-    model_id = model.id
+        # Create BIM model record with processing status
+        from app.modules.bim_hub.schemas import BIMModelCreate
 
-    # Save CAD file via the configured storage backend — returns the
-    # storage key that the Documents hub cross-link and downstream
-    # diagnostics use to refer back to the stored blob.
-    saved_cad_key = await bim_file_storage.save_original_cad(
-        project_id=project_id,
-        model_id=str(model_id),
-        ext=ext,
-        content=content,
-    )
-
-    logger.info(
-        "CAD file uploaded: %s (%s, %d bytes) -> model %s (key=%s)",
-        filename,
-        ext,
-        len(content),
-        model_id,
-        saved_cad_key,
-    )
-
-    # Cross-link: create Document record so BIM files appear in Documents hub.
-    # Uses the ORM model directly (NOT raw SQL) so timestamps + defaults are
-    # filled by SQLAlchemy / Base mixin and the row stays in sync with the
-    # rest of the documents module if its schema evolves.  Failures are
-    # swallowed because the cross-link is convenience-only — the BIM model
-    # itself is already saved by the time we get here.
-    try:
-        from app.modules.documents.models import Document
-
-        doc = Document(
+        model_data = BIMModelCreate(
             project_id=uuid.UUID(project_id),
-            name=filename,
-            description=f"BIM model: {model_name}",
-            category="drawing",
-            file_size=len(content),
-            mime_type=f"application/{model_format}",
-            file_path=saved_cad_key,
-            version=1,
-            uploaded_by=user_id or "",
-            tags=["bim", model_format, discipline],
-            metadata_={
-                "source_module": "bim_hub",
-                "source_id": str(model_id),
-            },
+            name=model_name,
+            discipline=discipline,
+            model_format=model_format,
+            status="processing",
         )
-        service.session.add(doc)
-        await service.session.flush()
-        logger.info("Cross-linked BIM model %s → document %s", model_id, doc.id)
-    except Exception as exc:
-        logger.warning("Failed to cross-link BIM to documents hub: %s", exc)
+        model = await service.create_model(model_data, user_id=user_id)
+        model_id = model.id
+
+        # Save CAD file via the configured storage backend — returns the
+        # storage key that the Documents hub cross-link and downstream
+        # diagnostics use to refer back to the stored blob.  Streaming
+        # variant: the backend renames the temp file into place rather
+        # than buffering its content.
+        saved_cad_key = await bim_file_storage.save_original_cad_from_path(
+            project_id=project_id,
+            model_id=str(model_id),
+            ext=ext,
+            src_path=upload.path,
+            size=upload.size,
+        )
+
+        logger.info(
+            "CAD file uploaded: %s (%s, %d bytes) -> model %s (key=%s)",
+            filename,
+            ext,
+            upload.size,
+            model_id,
+            saved_cad_key,
+        )
+
+        # Cross-link: create Document record so BIM files appear in Documents hub.
+        # Uses the ORM model directly (NOT raw SQL) so timestamps + defaults are
+        # filled by SQLAlchemy / Base mixin and the row stays in sync with the
+        # rest of the documents module if its schema evolves.  Failures are
+        # swallowed because the cross-link is convenience-only — the BIM model
+        # itself is already saved by the time we get here.
+        try:
+            from app.modules.documents.models import Document
+
+            doc = Document(
+                project_id=uuid.UUID(project_id),
+                name=filename,
+                description=f"BIM model: {model_name}",
+                category="drawing",
+                file_size=upload.size,
+                mime_type=f"application/{model_format}",
+                file_path=saved_cad_key,
+                version=1,
+                uploaded_by=user_id or "",
+                tags=["bim", model_format, discipline],
+                metadata_={
+                    "source_module": "bim_hub",
+                    "source_id": str(model_id),
+                },
+            )
+            service.session.add(doc)
+            await service.session.flush()
+            logger.info("Cross-linked BIM model %s → document %s", model_id, doc.id)
+        except Exception as exc:
+            logger.warning("Failed to cross-link BIM to documents hub: %s", exc)
 
     # Schedule processing OUT of the request path: the upload endpoint now
     # returns 201 + status="processing" in milliseconds, and the actual DDC
@@ -1662,7 +1669,7 @@ async def upload_cad_file(
         "model_id": str(model_id),
         "name": model_name,
         "format": model_format,
-        "file_size": len(content),
+        "file_size": upload.size,
         "status": final_status,
         "element_count": element_count,
         "error_message": model.error_message,

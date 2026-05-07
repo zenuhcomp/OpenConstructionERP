@@ -3195,6 +3195,12 @@ class BOQService:
     async def get_boq_with_positions(self, boq_id: uuid.UUID) -> BOQWithPositions:
         """Get a BOQ with all its positions and computed grand total.
 
+        ``grand_total`` here matches the list-endpoint semantics: it includes
+        active markups (BUG-008 — list returned 25830, detail returned 20500
+        for the same BOQ; clients flipped between the two cosmically and lost
+        trust).  ``direct_cost_total`` exposes the position-sum-only figure
+        for clients that need the breakdown.
+
         Args:
             boq_id: Target BOQ identifier.
 
@@ -3209,14 +3215,23 @@ class BOQService:
 
         # Build position responses with float conversions
         position_responses = []
-        grand_total = Decimal("0")
+        direct_cost = Decimal("0")
+        position_count = 0
 
         for pos in positions:
             position_responses.append(_build_position_response(pos))
-            # Exclude section headers from grand total (sections have no unit)
+            # Exclude section headers from totals + counts (sections have no unit)
             if not _is_section(pos):
                 total_val = _str_to_float(pos.total)
-                grand_total += Decimal(str(total_val))
+                direct_cost += Decimal(str(total_val))
+                position_count += 1
+
+        # Apply active markups so detail matches the list endpoint
+        # (``boq_repo.grand_totals_for_boqs`` does the same arithmetic
+        #  for list-style responses; we share the result here).
+        totals = await self.boq_repo.grand_totals_for_boqs([boq_id])
+        grand_total_with_markups = Decimal(str(totals.get(boq_id, float(direct_cost))))
+        markups_total = grand_total_with_markups - direct_cost
 
         return BOQWithPositions(
             id=boq.id,
@@ -3228,7 +3243,10 @@ class BOQService:
             created_at=boq.created_at,
             updated_at=boq.updated_at,
             positions=position_responses,
-            grand_total=float(grand_total),
+            direct_cost_total=float(direct_cost),
+            markups_total=float(markups_total),
+            grand_total=float(grand_total_with_markups),
+            position_count=position_count,
         )
 
     async def get_boq_structured(self, boq_id: uuid.UUID) -> BOQWithSections:

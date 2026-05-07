@@ -176,12 +176,33 @@ def parse_dxf(file_path: str) -> dict[str, Any]:
         raise ValueError(f"Failed to parse DXF file: {exc}") from exc
 
     # Extract layers
+    #
+    # BUG-005: ``not layer.is_off and not layer.is_frozen`` returned
+    # False for every layer on certain DXF imports (notably layer "0"
+    # on R2018-vintage files).  ezdxf reports ``is_off`` based on the
+    # signed-color encoding which some CAD packages don't honour, so
+    # we now default to visible and only flip to hidden when the
+    # source file *explicitly* marks the layer off.  Pulls each bit
+    # in its own try/except — ezdxf 1.4 occasionally raises on
+    # malformed layer entries, and a single exception used to silently
+    # collapse the whole expression to False (the canvas would then
+    # render empty after import).
     layers: list[dict[str, Any]] = []
     for layer in doc.layers:
+        is_off = False
+        is_frozen = False
+        try:
+            is_off = bool(layer.is_off)
+        except Exception:  # noqa: BLE001 — defensive: see comment above
+            pass
+        try:
+            is_frozen = bool(layer.is_frozen)
+        except Exception:  # noqa: BLE001
+            pass
         layers.append({
             "name": layer.dxf.name,
             "color": _aci_to_hex(layer.color),
-            "visible": not layer.is_off and not layer.is_frozen,
+            "visible": not (is_off or is_frozen),
             "entity_count": 0,
         })
 
@@ -301,11 +322,28 @@ def generate_svg_thumbnail(file_path: str) -> str:
         doc = ezdxf.readfile(file_path)
         msp = doc.modelspace()
 
+        # ezdxf 1.4 reorganised the drawing add-on: the SVG bytes now come
+        # from ``backend.get_string()`` (or its xml-tree variant), not
+        # ``frontend.out`` — that attribute was removed when the backend
+        # registry replaced the legacy ``Frontend.out`` slot (BUG-014).
+        # Fall through to the placeholder branch only on real errors —
+        # don't let a single AttributeError silently downgrade the
+        # thumbnail for every drawing.
         ctx = RenderContext(doc)
-        frontend = Frontend(ctx, ezdxf_svg.SVGBackend())
-        frontend.draw_layout(msp)
-        svg_content = frontend.out.get_string()
-        return svg_content
+        backend = ezdxf_svg.SVGBackend()
+        Frontend(ctx, backend).draw_layout(msp)
+        if hasattr(backend, "get_string"):
+            return backend.get_string()
+        # ezdxf 1.5+ — backend exposes ``get_xml_root()`` instead; fall
+        # back to that and serialise via the stdlib.
+        if hasattr(backend, "get_xml_root"):
+            from xml.etree import ElementTree as _ET
+
+            return _ET.tostring(backend.get_xml_root(), encoding="unicode")
+        raise RuntimeError(
+            "SVGBackend exposes neither get_string nor get_xml_root; "
+            "ezdxf API may have shifted again — bump the dependency pin."
+        )
     except Exception as exc:
         # Fallback: generate a minimal placeholder SVG
         logger.exception("SVG generation failed, returning placeholder: %s", exc)

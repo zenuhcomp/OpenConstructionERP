@@ -447,7 +447,37 @@ async def create_cost_item(
 async def search_cost_items(
     user_id: CurrentUserId = None,  # type: ignore[assignment]
     service: CostItemService = Depends(_get_service),
-    q: str | None = Query(default=None, description="Text search on code and description"),
+    q: str | None = Query(
+        default=None,
+        description=(
+            "Free-text search — substring (ILIKE) match against code OR "
+            "description. Canonical param: ``search`` and ``query`` are "
+            "silently aliased to ``q`` at this boundary. SQL ILIKE is "
+            "always evaluated; the vector layer is a best-effort re-rank "
+            "on top, never the only source of recall."
+        ),
+    ),
+    search: str | None = Query(
+        default=None,
+        description="Alias of ``q``. Silently merged when both are passed.",
+    ),
+    query_param: str | None = Query(
+        default=None,
+        alias="query",
+        description="Alias of ``q``. Silently merged when both are passed.",
+    ),
+    name: str | None = Query(
+        default=None,
+        description=(
+            "Substring (ILIKE) filter against code only — CostItem rows "
+            "have no separate name column, so the catalog code IS the "
+            "name. AND-combined with ``q``."
+        ),
+    ),
+    description: str | None = Query(
+        default=None,
+        description="Substring (ILIKE) filter against description only. AND-combined with ``q``.",
+    ),
     unit: str | None = Query(default=None, description="Filter by unit"),
     source: str | None = Query(default=None, description="Filter by source"),
     region: str | None = Query(default=None, description="Filter by region (e.g. DE_BERLIN)"),
@@ -513,8 +543,16 @@ async def search_cost_items(
     to receive a non-null ``total``. The new fields ``next_cursor`` and
     ``has_more`` are additions to the response shape.
     """
+    # Merge canonical ``q`` with the silent aliases ``search`` / ``query``.
+    # First non-empty wins; explicit ``q`` always takes precedence so a
+    # caller that mistakenly sends both ``q=foo&search=bar`` gets ``foo``
+    # rather than a surprise. Empty strings ("") count as absent.
+    canonical_q = q or search or query_param or None
+
     query = CostSearchQuery(
-        q=q,
+        q=canonical_q,
+        name=name,
+        description=description,
         unit=unit,
         source=source,
         region=region,
@@ -536,7 +574,9 @@ async def search_cost_items(
     cached_total: int | None = None
     if (
         cursor is None
-        and not q
+        and not canonical_q
+        and not name
+        and not description
         and not category
         and not classification_path
         and not unit
@@ -1765,13 +1805,6 @@ async def import_cost_file(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file is empty.",
-        )
-
-    # Limit file size (10 MB)
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File too large. Maximum size is 10 MB.",
         )
 
     # Parse rows based on file type

@@ -184,6 +184,9 @@ class ProcurementService:
         """Create a new purchase order with optional line items.
 
         Automatically computes amount_total = amount_subtotal + tax_amount.
+        When ``items`` are supplied, ``amount_subtotal`` is re-aggregated as
+        ``sum(quantity * unit_rate)`` so the PO totals always agree with the
+        line items the caller actually persisted (BUG-015).
         """
         # Validate initial status
         if data.status not in _VALID_PO_STATUSES:
@@ -194,6 +197,23 @@ class ProcurementService:
                     f"Allowed: {', '.join(sorted(_VALID_PO_STATUSES))}"
                 ),
             )
+
+        # Re-aggregate subtotal from items when items are supplied. Each item's
+        # own ``amount`` is also normalised to ``quantity * unit_rate`` if the
+        # caller passed the schema default of "0".
+        item_amounts: list[Decimal] = []
+        for item_data in data.items:
+            qty = _parse_decimal(item_data.quantity, "item.quantity")
+            rate = _parse_decimal(item_data.unit_rate, "item.unit_rate")
+            line_total = qty * rate
+            existing = _parse_decimal(item_data.amount, "item.amount")
+            if existing == Decimal("0"):
+                item_data.amount = str(line_total)
+            item_amounts.append(line_total)
+
+        if data.items:
+            aggregated_subtotal = str(sum(item_amounts, Decimal("0")))
+            data.amount_subtotal = aggregated_subtotal
 
         # Server-side total computation
         computed_total = _compute_po_total(data.amount_subtotal, data.tax_amount)
@@ -266,6 +286,15 @@ class ProcurementService:
                 sort_order=item_data.sort_order if item_data.sort_order else idx,
             )
             await self.po_item_repo.create(item)
+
+        # Reload the PO so the freshly inserted line items are populated on the
+        # ``items`` relationship. ``po_repo.create`` refreshed the PO BEFORE the
+        # items were inserted, so without this re-fetch the response would carry
+        # an empty ``items: []`` collection (BUG-015).
+        if data.items:
+            reloaded = await self.po_repo.get(po.id)
+            if reloaded is not None:
+                po = reloaded
 
         await _safe_publish(
             "procurement.po.created",
