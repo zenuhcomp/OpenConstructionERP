@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Button, Card, Badge, EmptyState, Breadcrumb, ConfirmDialog } from '@/shared/ui';
 import SimilarItemsPanel from '@/shared/ui/SimilarItemsPanel';
+import { UserSearchInput } from '@/shared/ui/UserSearchInput';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/shared/lib/api';
 import { getIntlLocale } from '@/shared/lib/formatters';
 import { useToastStore } from '@/stores/useToastStore';
@@ -22,7 +23,8 @@ interface RiskItem {
   id: string; project_id: string; code: string; title: string; description: string;
   category: string; probability: number; impact_cost: number; impact_schedule_days: number;
   impact_severity: string; risk_score: number; status: string; mitigation_strategy: string;
-  contingency_plan: string; owner_name: string; response_cost: number; currency: string;
+  contingency_plan: string; owner_name: string; owner_user_id?: string | null;
+  response_cost: number; currency: string;
   probability_score?: number | null; impact_score_cost?: number | null;
   metadata: Record<string, unknown>; created_at: string; updated_at: string;
 }
@@ -220,7 +222,7 @@ const textareaCls = 'w-full rounded-lg border border-border bg-surface-primary p
 
 /* ── Create Dialog ─────────────────────────────────────────────────────── */
 
-const INITIAL_RISK_FORM = { title: '', description: '', category: 'technical', probability: 0.5, impactSeverity: 'medium', impactCost: 0, scheduleDays: 0, ownerName: '' };
+const INITIAL_RISK_FORM = { title: '', description: '', category: 'technical', probability: 0.5, impactSeverity: 'medium', impactCost: 0, scheduleDays: 0, ownerName: '', ownerUserId: '' };
 
 function CreateDialog({ projectId, currency, onClose, onCreated }: { projectId: string; currency: string; onClose: () => void; onCreated: () => void }) {
   const { t } = useTranslation();
@@ -229,7 +231,19 @@ function CreateDialog({ projectId, currency, onClose, onCreated }: { projectId: 
   const set = (k: string, v: unknown) => setF((p) => ({ ...p, [k]: v }));
 
   const mut = useMutation({
-    mutationFn: () => apiPost<RiskItem>('/v1/risk/', { project_id: projectId, title: f.title, description: f.description, category: f.category, probability: f.probability, impact_severity: f.impactSeverity, impact_cost: f.impactCost, impact_schedule_days: f.scheduleDays, owner_name: f.ownerName, currency }),
+    mutationFn: () => apiPost<RiskItem>('/v1/risk/', {
+      project_id: projectId,
+      title: f.title,
+      description: f.description,
+      category: f.category,
+      probability: f.probability,
+      impact_severity: f.impactSeverity,
+      impact_cost: f.impactCost,
+      impact_schedule_days: f.scheduleDays,
+      owner_name: f.ownerName,
+      owner_user_id: f.ownerUserId || undefined,
+      currency,
+    }),
     onSuccess: () => { onCreated(); onClose(); addToast({ type: 'success', title: t('risk.created', { defaultValue: 'Risk created' }) }); },
     onError: (e: Error) => addToast({ type: 'error', title: t('common.error', { defaultValue: 'Error' }), message: e.message }),
   });
@@ -280,7 +294,12 @@ function CreateDialog({ projectId, currency, onClose, onCreated }: { projectId: 
           </div>
           <div>
             <label htmlFor="risk-owner" className="block text-sm font-medium text-content-primary mb-1.5">{t('risk.owner', { defaultValue: 'Risk Owner' })}</label>
-            <input id="risk-owner" value={f.ownerName} onChange={(e) => set('ownerName', e.target.value)} className={inputCls} />
+            <UserSearchInput
+              value={f.ownerUserId}
+              displayValue={f.ownerName}
+              onChange={(uid, name) => setF((p) => ({ ...p, ownerUserId: uid, ownerName: name }))}
+              placeholder={t('risk.owner_placeholder', { defaultValue: 'Search team members...' })}
+            />
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-3">

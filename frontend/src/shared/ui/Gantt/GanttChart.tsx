@@ -53,6 +53,7 @@ export interface GanttProps {
   endDate?: string;
   onActivityClick?: (id: string) => void;
   onActivityDrag?: (id: string, newStart: string, newEnd: string) => void;
+  onActivityResize?: (id: string, newStart: string, newEnd: string) => void | Promise<void>;
   className?: string;
   showBaseline?: boolean;
   showDependencies?: boolean;
@@ -67,6 +68,7 @@ const BAR_Y_OFFSET = (ROW_HEIGHT - BAR_HEIGHT) / 2;
 const BASELINE_HEIGHT = 6;
 const MILESTONE_SIZE = 10;
 const MIN_BAR_WIDTH = 4;
+const RESIZE_HANDLE_WIDTH = 7;
 
 /* ── Date formatting helpers ────────────────────────────────────── */
 
@@ -95,6 +97,7 @@ export function GanttChart({
   endDate: endDateProp,
   onActivityClick,
   onActivityDrag,
+  onActivityResize,
   className = '',
   showBaseline = false,
   showDependencies = true,
@@ -115,6 +118,17 @@ export function GanttChart({
     origStart: Date;
     origEnd: Date;
     currentOffsetDays: number;
+  } | null>(null);
+
+  // Resize state (edge-drag for duration). Independent of dragState so both
+  // can coexist defensively, though only one is ever active at a time.
+  const [resizeState, setResizeState] = useState<{
+    activityId: string;
+    edge: 'left' | 'right';
+    startMouseX: number;
+    origStart: Date;
+    origEnd: Date;
+    currentDeltaDays: number;
   } | null>(null);
 
   /* ── Compute timeline range ─────────────────────────────────── */
@@ -283,6 +297,83 @@ export function GanttChart({
     };
   }, [dragState, onActivityDrag, viewMode, timelineStart]);
 
+  /* ── Resize handlers ────────────────────────────────────────── */
+
+  const handleResizeMouseDown = useCallback(
+    (e: ReactMouseEvent, activityId: string, edge: 'left' | 'right') => {
+      if (!onActivityResize) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const a = activities.find((act) => act.id === activityId);
+      if (!a) return;
+
+      setResizeState({
+        activityId,
+        edge,
+        startMouseX: e.clientX,
+        origStart: new Date(a.start),
+        origEnd: new Date(a.end),
+        currentDeltaDays: 0,
+      });
+    },
+    [activities, onActivityResize],
+  );
+
+  useEffect(() => {
+    if (!resizeState) return;
+
+    const handleMouseMove = (e: globalThis.MouseEvent) => {
+      const dx = e.clientX - resizeState.startMouseX;
+      const anchor = resizeState.edge === 'left' ? resizeState.origStart : resizeState.origEnd;
+      const newDate = pxToDate(
+        dateToPx(anchor, viewMode, timelineStart) + dx,
+        viewMode,
+        timelineStart,
+      );
+      let deltaDays = daysBetween(anchor, newDate);
+
+      // Clamp so the bar stays at least 1 day wide.
+      if (resizeState.edge === 'left') {
+        const maxDelta = daysBetween(resizeState.origStart, resizeState.origEnd) - 1;
+        if (deltaDays > maxDelta) deltaDays = maxDelta;
+      } else {
+        const minDelta = -(daysBetween(resizeState.origStart, resizeState.origEnd) - 1);
+        if (deltaDays < minDelta) deltaDays = minDelta;
+      }
+
+      setResizeState((prev) => (prev ? { ...prev, currentDeltaDays: deltaDays } : null));
+    };
+
+    const handleMouseUp = () => {
+      if (resizeState.currentDeltaDays !== 0 && onActivityResize) {
+        const newStart =
+          resizeState.edge === 'left'
+            ? addDays(resizeState.origStart, resizeState.currentDeltaDays)
+            : resizeState.origStart;
+        const newEnd =
+          resizeState.edge === 'right'
+            ? addDays(resizeState.origEnd, resizeState.currentDeltaDays)
+            : resizeState.origEnd;
+        onActivityResize(resizeState.activityId, toISO(newStart), toISO(newEnd));
+      }
+      setResizeState(null);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setResizeState(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [resizeState, onActivityResize, viewMode, timelineStart]);
+
   /* ── Render helpers ─────────────────────────────────────────── */
 
   const renderBar = useCallback(
@@ -297,7 +388,30 @@ export function GanttChart({
       const dragOffset = isDragging
         ? dateToPx(addDays(dragState.origStart, dragState.currentOffsetDays), viewMode, timelineStart) - x
         : 0;
-      const effectiveX = x + dragOffset;
+
+      // Resize preview: shift left edge or right edge while dragging that handle.
+      const isResizing = resizeState?.activityId === a.id;
+      let resizeLeftShift = 0;
+      let resizeWidthDelta = 0;
+      if (isResizing && resizeState) {
+        const previewDate =
+          resizeState.edge === 'left'
+            ? addDays(resizeState.origStart, resizeState.currentDeltaDays)
+            : addDays(resizeState.origEnd, resizeState.currentDeltaDays);
+        const anchor = resizeState.edge === 'left' ? resizeState.origStart : resizeState.origEnd;
+        const shift =
+          dateToPx(previewDate, viewMode, timelineStart) -
+          dateToPx(anchor, viewMode, timelineStart);
+        if (resizeState.edge === 'left') {
+          resizeLeftShift = shift;
+          resizeWidthDelta = -shift;
+        } else {
+          resizeWidthDelta = shift;
+        }
+      }
+
+      const effectiveX = x + dragOffset + resizeLeftShift;
+      const effectiveWidth = Math.max(width + resizeWidthDelta, MIN_BAR_WIDTH);
 
       const fillColor = a.color || (isCritical ? '#ef4444' : '#3b82f6');
       const bgColor = a.color
@@ -380,6 +494,7 @@ export function GanttChart({
 
       // Standard task bar
       const barY = y + BAR_Y_OFFSET;
+      const progressDrawWidth = (a.progress / 100) * effectiveWidth;
 
       return (
         <g
@@ -404,16 +519,16 @@ export function GanttChart({
           <rect
             x={effectiveX}
             y={barY}
-            width={width}
+            width={effectiveWidth}
             height={BAR_HEIGHT}
             rx={4}
             fill={bgColor}
             stroke={isCritical ? '#ef4444' : 'none'}
             strokeWidth={isCritical ? 2 : 0}
-            className={`${onActivityDrag ? 'cursor-grab' : onActivityClick ? 'cursor-pointer' : ''} ${isDragging ? 'opacity-70' : ''}`}
+            className={`${onActivityDrag ? 'cursor-grab' : onActivityClick ? 'cursor-pointer' : ''} ${isDragging || isResizing ? 'opacity-70' : ''}`}
             onMouseDown={(e) => handleBarMouseDown(e, a.id)}
             onClick={() => {
-              if (!isDragging) onActivityClick?.(a.id);
+              if (!isDragging && !isResizing) onActivityClick?.(a.id);
             }}
           />
 
@@ -422,7 +537,7 @@ export function GanttChart({
             <rect
               x={effectiveX}
               y={barY}
-              width={Math.min(progressWidth, width)}
+              width={Math.min(progressDrawWidth, effectiveWidth)}
               height={BAR_HEIGHT}
               rx={4}
               fill={fillColor}
@@ -432,9 +547,9 @@ export function GanttChart({
           )}
 
           {/* Right edge clip for progress (keep rounded corners) */}
-          {a.progress > 0 && a.progress < 100 && progressWidth < width - 4 && (
+          {a.progress > 0 && a.progress < 100 && progressDrawWidth < effectiveWidth - 4 && (
             <rect
-              x={effectiveX + progressWidth - 1}
+              x={effectiveX + progressDrawWidth - 1}
               y={barY}
               width={2}
               height={BAR_HEIGHT}
@@ -445,7 +560,7 @@ export function GanttChart({
           )}
 
           {/* Bar label if wide enough */}
-          {width > 50 && (
+          {effectiveWidth > 50 && (
             <text
               x={effectiveX + 6}
               y={barY + BAR_HEIGHT / 2}
@@ -453,8 +568,8 @@ export function GanttChart({
               className="pointer-events-none select-none fill-current text-[11px] font-medium"
               fill={a.progress > 40 ? '#ffffff' : '#1f2937'}
             >
-              {a.name.length > Math.floor(width / 7)
-                ? a.name.slice(0, Math.floor(width / 7)) + '...'
+              {a.name.length > Math.floor(effectiveWidth / 7)
+                ? a.name.slice(0, Math.floor(effectiveWidth / 7)) + '...'
                 : a.name}
             </text>
           )}
@@ -462,7 +577,7 @@ export function GanttChart({
           {/* BIM link indicator (3D cube icon) */}
           {a.bim_element_ids && a.bim_element_ids.length > 0 && (
             <g
-              transform={`translate(${effectiveX + width - 16}, ${barY + 2})`}
+              transform={`translate(${effectiveX + effectiveWidth - 16}, ${barY + 2})`}
               className="pointer-events-none"
             >
               <rect
@@ -483,6 +598,30 @@ export function GanttChart({
               />
             </g>
           )}
+
+          {/* Edge resize handles (rendered last so they sit above bar fill) */}
+          {onActivityResize && effectiveWidth >= MIN_BAR_WIDTH * 2 && (
+            <>
+              <rect
+                x={effectiveX - RESIZE_HANDLE_WIDTH / 2}
+                y={barY}
+                width={RESIZE_HANDLE_WIDTH}
+                height={BAR_HEIGHT}
+                fill="transparent"
+                style={{ cursor: 'ew-resize' }}
+                onMouseDown={(e) => handleResizeMouseDown(e, a.id, 'left')}
+              />
+              <rect
+                x={effectiveX + effectiveWidth - RESIZE_HANDLE_WIDTH / 2}
+                y={barY}
+                width={RESIZE_HANDLE_WIDTH}
+                height={BAR_HEIGHT}
+                fill="transparent"
+                style={{ cursor: 'ew-resize' }}
+                onMouseDown={(e) => handleResizeMouseDown(e, a.id, 'right')}
+              />
+            </>
+          )}
         </g>
       );
     },
@@ -490,13 +629,16 @@ export function GanttChart({
       showCriticalPath,
       showBaseline,
       dragState,
+      resizeState,
       viewMode,
       timelineStart,
       locale,
       t,
       onActivityClick,
       onActivityDrag,
+      onActivityResize,
       handleBarMouseDown,
+      handleResizeMouseDown,
     ],
   );
 

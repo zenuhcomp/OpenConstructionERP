@@ -115,7 +115,12 @@ class RiskService:
 
     # ── Create ────────────────────────────────────────────────────────────
 
-    async def create_risk(self, data: RiskCreate) -> RiskItem:
+    async def create_risk(
+        self,
+        data: RiskCreate,
+        *,
+        user_id: str | None = None,
+    ) -> RiskItem:
         """Create a new risk item with auto-generated code."""
         count = await self.repo.count_for_project(data.project_id)
         code = f"R-{count + 1:03d}"
@@ -145,6 +150,7 @@ class RiskService:
             mitigation_strategy=data.mitigation_strategy,
             contingency_plan=data.contingency_plan,
             owner_name=data.owner_name,
+            owner_user_id=data.owner_user_id,
             response_cost=str(data.response_cost),
             currency=data.currency,
             metadata_=data.metadata,
@@ -160,6 +166,18 @@ class RiskService:
                 "title": data.title,
             },
         )
+        if data.owner_user_id is not None:
+            await _safe_publish(
+                "risk.assigned",
+                {
+                    "risk_id": str(item.id),
+                    "project_id": str(data.project_id),
+                    "code": code,
+                    "title": data.title,
+                    "owner_user_id": str(data.owner_user_id),
+                    "assigned_by": user_id or "",
+                },
+            )
         return item
 
     # ── Read ──────────────────────────────────────────────────────────────
@@ -204,6 +222,8 @@ class RiskService:
         self,
         risk_id: uuid.UUID,
         data: RiskUpdate,
+        *,
+        user_id: str | None = None,
     ) -> RiskItem:
         """Update risk item fields. Recalculates risk_score if needed."""
         item = await self.get_risk(risk_id)
@@ -232,6 +252,13 @@ class RiskService:
             if key in fields:
                 fields[key] = str(fields[key])
 
+        # Snapshot owner before update so we can detect (re)assignment.
+        old_owner = str(item.owner_user_id) if item.owner_user_id else None
+        new_owner = fields.get("owner_user_id")
+        code_s = item.code
+        title_s = item.title
+        project_id_s = str(item.project_id)
+
         await self.repo.update_fields(risk_id, **fields)
         await self.session.refresh(item)
 
@@ -240,10 +267,26 @@ class RiskService:
             "risk.risk.updated",
             {
                 "risk_id": str(risk_id),
-                "project_id": str(item.project_id),
+                "project_id": project_id_s,
                 "changes": list(fields.keys()),
             },
         )
+        if (
+            "owner_user_id" in fields
+            and new_owner is not None
+            and str(new_owner) != old_owner
+        ):
+            await _safe_publish(
+                "risk.assigned",
+                {
+                    "risk_id": str(risk_id),
+                    "project_id": project_id_s,
+                    "code": code_s,
+                    "title": title_s,
+                    "owner_user_id": str(new_owner),
+                    "assigned_by": user_id or "",
+                },
+            )
         return item
 
     # ── Delete ────────────────────────────────────────────────────────────

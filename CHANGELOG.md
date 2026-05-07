@@ -5,6 +5,27 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.18] — 2026-05-07
+
+### Added (Procurement — 3-way invoice match)
+
+- **`create_invoice_from_po` now refuses to bill for items that haven't been received.** Previously copied PO line items verbatim into a new Invoice with no link to confirmed Goods Receipts — overbilling unblocked. New helper `procurement/service._validate_3way_match` sums `quantity_received` over confirmed-status GRs per `po_item_id`; for each proposed Invoice line it compares against `received_qty` and reports per-line violations. The route raises `HTTP 422` with structured `{message, errors: [...]}` when invoice qty exceeds received qty.
+- **`force=true` query param overrides the match** for service-only POs (no goods to physically receive). When set, the invoice is persisted with `metadata_["force_3way_match"] = True` and a structured `logger.warning` is emitted with `{po_id, user_id, violations}` for audit aggregation.
+- **`no_confirmed_grs` sentinel reason** when a PO has zero confirmed GRs and the invoice has any positive qty — lets the FE render the precise "service-only PO? pass force=true" message.
+- All 19 existing procurement tests still pass; synthetic 6-case helper test added (over-qty / clean-match / no-GR / free-text skip / no-items / zero-qty).
+
+### Added (Risk — owner picker + assignment notification)
+
+- **`Risk.owner_user_id`** — proper FK to `oe_users_user` (nullable, indexed, `ON DELETE SET NULL`). Replaces the free-text `owner_name` for new rows; legacy data still renders via the fallback so nothing was lost. Migration `v2918_risk_owner_user_id.py` is inspector-guarded and reversible (uses `batch_alter_table` for SQLite compatibility).
+- **`risk.assigned` event fires on new or changed owner.** `risk/service.py` publishes `{risk_id, project_id, code, title, owner_user_id, assigned_by}` after create/update. New subscriber `_on_risk_assigned` in `notifications/events.py` produces an in-app notification "You were assigned risk {{code}}: {{title}}". Mirrors the v2.9.16 pattern for `rfi.assigned`.
+- **Frontend picker.** `RiskRegisterPage.tsx` swapped the free-text `<input>` for the existing `UserSearchInput` (avatar + name + role + email search). On selection, `owner_user_id` is sent as UUID and the resolved display name is mirrored into `owner_name` so the list-row column keeps working uniformly across picker-sourced and legacy rows.
+
+### Added (Schedule — Gantt drag-to-resize)
+
+- **Edge handles on every standard task bar.** Two transparent 7 px `ew-resize` zones (left + right) on each Gantt bar; left handle moves `start_date`, right handle moves `end_date`. Snap-to-day via the existing `pxToDate`; clamped to keep `end_date >= start_date + 1 day`. Group and milestone bars are unaffected. Esc cancels the in-flight resize and reverts the preview.
+- **`onActivityResize?: (id, newStart, newEnd) => void` prop** added to `GanttChart`. Existing `onActivityMove` (drag-to-translate) untouched; resize is purely additive.
+- **`SchedulePage` wires it through React Query.** New `resizeActivity` mutation calls `scheduleApi.updateActivity(id, {start_date, end_date})`, optimistically updates the cached `['gantt', schedule.id]` payload, snapshots and reverts on error, and invalidates on settled. Confirmed against `schedule/schemas.py:46-47` that the Activity schema uses `start_date`/`end_date` (not `planned_*` — those belong to `WorkOrder`).
+
 ## [2.9.17] — 2026-05-07
 
 ### Added (Procurement → Finance commitment flow)

@@ -34,7 +34,7 @@ from app.modules.procurement.schemas import (
     POUpdate,
     ProcurementStatsResponse,
 )
-from app.modules.procurement.service import ProcurementService
+from app.modules.procurement.service import ProcurementService, _validate_3way_match
 
 router = APIRouter()
 
@@ -271,14 +271,24 @@ async def create_invoice_from_po(
     po_id: uuid.UUID,
     user_id: CurrentUserId,
     session: SessionDep,
+    force: bool = Query(False, alias="force"),
     service: ProcurementService = Depends(_get_service),
 ) -> dict:
     """Create a payable invoice pre-filled from PO line items.
 
     Copies the PO's vendor, amounts, and line items into a new draft invoice
     in the finance module.
+
+    Runs a 3-way match (PO ↔ GR ↔ Invoice): each invoice line's quantity must
+    not exceed the sum of confirmed goods-receipt quantities for the matching
+    PO line, otherwise a 422 is raised.
+
+    Pass ``force=true`` to bypass the 3-way match (e.g. service-only POs with
+    no goods to physically receive). The override is audit-logged.
     """
     import logging as _logging
+
+    from fastapi import HTTPException
 
     _log = _logging.getLogger(__name__)
 
@@ -291,6 +301,42 @@ async def create_invoice_from_po(
 
         # Generate invoice number from PO number
         invoice_number = f"INV-{po.po_number}"
+
+        po_items = po.items or []
+        proposed_lines = [
+            {
+                "ordinal": idx,
+                "po_item_id": item.id,
+                "quantity": item.quantity,
+                "description": item.description,
+            }
+            for idx, item in enumerate(po_items)
+        ]
+
+        violations = _validate_3way_match(po, proposed_lines)
+        if violations and not force:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": (
+                        "3-way match failed: invoice quantity exceeds confirmed "
+                        "goods-receipt quantity for one or more lines. "
+                        "Pass force=true to override."
+                    ),
+                    "errors": violations,
+                },
+            )
+        if violations and force:
+            _log.warning(
+                "3-way match override on PO %s",
+                po.po_number,
+                extra={
+                    "po_id": str(po_id),
+                    "user_id": str(user_id),
+                    "force_3way_match": True,
+                    "violations": violations,
+                },
+            )
 
         invoice = Invoice(
             project_id=po.project_id,
@@ -310,13 +356,12 @@ async def create_invoice_from_po(
                 "source": "procurement",
                 "po_id": str(po_id),
                 "po_number": po.po_number,
+                "force_3way_match": bool(force and violations),
             },
         )
         session.add(invoice)
         await session.flush()
 
-        # Copy PO line items to invoice line items
-        po_items = po.items or []
         for idx, item in enumerate(po_items):
             line = InvoiceLineItem(
                 invoice_id=invoice.id,
@@ -347,16 +392,14 @@ async def create_invoice_from_po(
             "amount_total": po.amount_total,
         }
     except ImportError:
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=501,
             detail="Finance module is not available.",
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         _log.exception("Failed to create invoice from PO %s: %s", po_id, exc)
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=500,
             detail="Failed to create invoice from purchase order.",

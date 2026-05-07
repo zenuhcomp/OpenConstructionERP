@@ -36,6 +36,7 @@ class RiskCreate(BaseModel):
     mitigation_strategy: str = Field(default="", max_length=5000)
     contingency_plan: str = Field(default="", max_length=5000)
     owner_name: str = Field(default="", max_length=255)
+    owner_user_id: UUID | None = None
     response_cost: float = Field(default=0.0, ge=0.0)
     currency: str = Field(default="EUR", max_length=10)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -66,6 +67,7 @@ class RiskUpdate(BaseModel):
     mitigation_strategy: str | None = Field(default=None, max_length=5000)
     contingency_plan: str | None = Field(default=None, max_length=5000)
     owner_name: str | None = Field(default=None, max_length=255)
+    owner_user_id: UUID | None = None
     response_cost: float | None = Field(default=None, ge=0.0)
     currency: str | None = Field(default=None, max_length=10)
     metadata: dict[str, Any] | None = None
@@ -91,6 +93,7 @@ class RiskResponse(BaseModel):
     mitigation_strategy: str = ""
     contingency_plan: str = ""
     owner_name: str = ""
+    owner_user_id: UUID | None = None
     response_cost: float = 0.0
     currency: str = "EUR"
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")

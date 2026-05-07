@@ -1120,6 +1120,42 @@ function ScheduleDetail({
     },
   });
 
+  const resizeActivity = useMutation({
+    mutationFn: ({ activityId, start_date, end_date }: { activityId: string; start_date: string; end_date: string }) =>
+      scheduleApi.updateActivity(activityId, { start_date, end_date }),
+    // Optimistic update: patch the cached gantt payload so the bar stays in
+    // its new position while the request flies. Snapshot the previous data
+    // for revert-on-error.
+    onMutate: async ({ activityId, start_date, end_date }) => {
+      const queryKey = ['gantt', schedule.id];
+      await queryClient.cancelQueries({ queryKey });
+      const prev = queryClient.getQueryData<GanttData>(queryKey);
+      if (prev) {
+        queryClient.setQueryData<GanttData>(queryKey, {
+          ...prev,
+          activities: prev.activities.map((a) =>
+            a.id === activityId ? { ...a, start_date, end_date } : a,
+          ),
+        });
+      }
+      return { prev };
+    },
+    onError: (error: Error, _vars, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(['gantt', schedule.id], ctx.prev);
+      addToast({ type: 'error', title: t('toasts.update_failed', { defaultValue: 'Update failed' }), message: error.message });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['gantt', schedule.id] });
+    },
+  });
+
+  const handleActivityResize = useCallback(
+    (id: string, newStart: string, newEnd: string) => {
+      resizeActivity.mutate({ activityId: id, start_date: newStart, end_date: newEnd });
+    },
+    [resizeActivity],
+  );
+
   const resetSchedule = useMutation({
     mutationFn: async () => {
       const activities = ganttData?.activities ?? [];
@@ -1450,6 +1486,7 @@ function ScheduleDetail({
                   showDependencies={true}
                   showCriticalPath={!!cpmResult}
                   todayLine={true}
+                  onActivityResize={handleActivityResize}
                 />
               ) : (
                 <GanttChart

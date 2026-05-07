@@ -80,6 +80,90 @@ def _compute_po_total(subtotal: str, tax: str) -> str:
     return str(s + t)
 
 
+def _validate_3way_match(
+    po: PurchaseOrder,
+    invoice_lines: list[dict],
+) -> list[dict]:
+    """Run 3-way match (PO ↔ GR ↔ Invoice) per PO line.
+
+    For each PO line, sums ``quantity_received`` over GR items belonging to
+    confirmed goods receipts. Any invoice line whose proposed quantity exceeds
+    the matched received quantity is reported.
+
+    ``invoice_lines`` is a list of dicts with keys:
+        - ``po_item_id``: UUID of the PO line being invoiced (None = unmatched)
+        - ``quantity``: proposed invoice quantity (string-decimal)
+        - ``description``: line description (for the error payload)
+        - ``ordinal``: 0-based index in the invoice (for the error payload)
+
+    Returns a list of violation dicts (empty list = clean match). Lines without
+    a ``po_item_id`` are skipped (free-text additions are out of scope).
+    """
+    received_by_po_item: dict[uuid.UUID, Decimal] = {}
+    for gr in po.goods_receipts or []:
+        if gr.status != "confirmed":
+            continue
+        for gr_item in gr.items or []:
+            if gr_item.po_item_id is None:
+                continue
+            try:
+                qty = Decimal(str(gr_item.quantity_received or "0"))
+            except (InvalidOperation, ValueError, TypeError):
+                qty = Decimal("0")
+            received_by_po_item[gr_item.po_item_id] = (
+                received_by_po_item.get(gr_item.po_item_id, Decimal("0")) + qty
+            )
+
+    po_items_by_id = {item.id: item for item in (po.items or [])}
+
+    has_invoice_qty = any(
+        (line.get("po_item_id") is not None
+         and _to_decimal(line.get("quantity")) > Decimal("0"))
+        for line in invoice_lines
+    )
+    if not received_by_po_item and (po.items or []) and has_invoice_qty:
+        return [{
+            "ordinal": None,
+            "po_item_id": None,
+            "description": None,
+            "requested_qty": None,
+            "received_qty": "0",
+            "reason": "no_confirmed_grs",
+            "message": (
+                "No confirmed goods receipts exist for this PO; "
+                "pass force=true to invoice without GR match."
+            ),
+        }]
+
+    violations: list[dict] = []
+    for line in invoice_lines:
+        po_item_id = line.get("po_item_id")
+        if po_item_id is None:
+            continue
+        po_item = po_items_by_id.get(po_item_id)
+        if po_item is None:
+            continue
+        requested = _to_decimal(line.get("quantity"))
+        received = received_by_po_item.get(po_item_id, Decimal("0"))
+        if requested > received:
+            violations.append({
+                "ordinal": line.get("ordinal"),
+                "po_item_id": str(po_item_id),
+                "description": po_item.description,
+                "requested_qty": str(requested),
+                "received_qty": str(received),
+            })
+
+    return violations
+
+
+def _to_decimal(value: object) -> Decimal:
+    try:
+        return Decimal(str(value or "0"))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal("0")
+
+
 class ProcurementService:
     """Business logic for procurement operations."""
 

@@ -54,6 +54,7 @@ def _risk_to_response(item: object) -> RiskResponse:
         mitigation_strategy=item.mitigation_strategy,  # type: ignore[attr-defined]
         contingency_plan=item.contingency_plan,  # type: ignore[attr-defined]
         owner_name=item.owner_name,  # type: ignore[attr-defined]
+        owner_user_id=getattr(item, "owner_user_id", None),
         response_cost=float(item.response_cost),  # type: ignore[attr-defined]
         currency=item.currency,  # type: ignore[attr-defined]
         metadata=getattr(item, "metadata_", {}),  # type: ignore[attr-defined]
@@ -65,13 +66,19 @@ def _risk_to_response(item: object) -> RiskResponse:
 # ── Summary ──────────────────────────────────────────────────────────────────
 
 
-@router.get("/summary/", response_model=RiskSummary)
+@router.get(
+    "/summary/",
+    response_model=RiskSummary,
+    dependencies=[Depends(RequirePermission("risk.read"))],
+)
 async def get_summary(
-    project_id: uuid.UUID = Query(...),
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
+    project_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
     service: RiskService = Depends(_get_service),
 ) -> RiskSummary:
     """‌⁠‍Aggregated risk stats for a project."""
+    await verify_project_access(project_id, user_id, session)
     data = await service.get_summary(project_id)
     return RiskSummary(**data)
 
@@ -79,13 +86,19 @@ async def get_summary(
 # ── Matrix ───────────────────────────────────────────────────────────────────
 
 
-@router.get("/matrix/", response_model=RiskMatrixResponse)
+@router.get(
+    "/matrix/",
+    response_model=RiskMatrixResponse,
+    dependencies=[Depends(RequirePermission("risk.read"))],
+)
 async def get_matrix(
-    project_id: uuid.UUID = Query(...),
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
+    project_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
     service: RiskService = Depends(_get_service),
 ) -> RiskMatrixResponse:
     """5x5 risk matrix data for a project."""
+    await verify_project_access(project_id, user_id, session)
     cells_data = await service.get_matrix(project_id)
     cells = [RiskMatrixCell(**c) for c in cells_data]
     return RiskMatrixResponse(cells=cells)
@@ -103,7 +116,7 @@ async def create_risk(
 ) -> RiskResponse:
     """Create a new risk item."""
     try:
-        item = await service.create_risk(data)
+        item = await service.create_risk(data, user_id=str(user_id) if user_id else None)
         return _risk_to_response(item)
     except HTTPException:
         raise
@@ -118,10 +131,15 @@ async def create_risk(
 # ── List ─────────────────────────────────────────────────────────────────────
 
 
-@router.get("/", response_model=list[RiskResponse])
+@router.get(
+    "/",
+    response_model=list[RiskResponse],
+    dependencies=[Depends(RequirePermission("risk.read"))],
+)
 async def list_risks(
+    user_id: CurrentUserId,
+    session: SessionDep,
     project_id: uuid.UUID = Query(...),
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
     status_filter: str | None = Query(default=None, alias="status"),
@@ -134,6 +152,7 @@ async def list_risks(
     service: RiskService = Depends(_get_service),
 ) -> list[RiskResponse]:
     """List risk items for a project."""
+    await verify_project_access(project_id, user_id, session)
     items, _ = await service.list_risks(
         project_id,
         offset=offset,
@@ -252,7 +271,7 @@ async def update_risk(
     """Update a risk item."""
     existing = await service.get_risk(risk_id)
     await verify_project_access(existing.project_id, str(user_id), session)
-    item = await service.update_risk(risk_id, data)
+    item = await service.update_risk(risk_id, data, user_id=str(user_id) if user_id else None)
     return _risk_to_response(item)
 
 

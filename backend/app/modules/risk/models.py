@@ -36,6 +36,12 @@ class RiskItem(Base):
     mitigation_strategy: Mapped[str] = mapped_column(Text, nullable=False, default="")
     contingency_plan: Mapped[str] = mapped_column(Text, nullable=False, default="")
     owner_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("oe_users_user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     response_cost: Mapped[str] = mapped_column(String(50), nullable=False, default="0")
     currency: Mapped[str] = mapped_column(String(10), nullable=False, default="EUR")
 

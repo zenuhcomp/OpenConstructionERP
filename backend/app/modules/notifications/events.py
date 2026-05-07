@@ -230,6 +230,36 @@ async def _on_rfi_assigned(event: Event) -> None:
         logger.debug("notifications: _on_rfi_assigned failed", exc_info=True)
 
 
+async def _on_risk_assigned(event: Event) -> None:
+    """``risk.assigned`` → notify the new owner."""
+    if not await _can_open_isolated_session():
+        return
+    data = event.data or {}
+    owner_id = data.get("owner_user_id") or data.get("assigned_to")
+    risk_id = data.get("risk_id") or data.get("id")
+    if not owner_id or not risk_id:
+        return
+    try:
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=owner_id,
+                notification_type="risk_assigned",
+                title_key="notifications.risk.assigned",
+                body_key="notifications.risk.assigned",
+                body_context={
+                    "code": data.get("code") or "",
+                    "title": data.get("title") or "",
+                },
+                entity_type="risk",
+                entity_id=str(risk_id),
+                action_url=f"/risk?id={risk_id}",
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("notifications: _on_risk_assigned failed", exc_info=True)
+
+
 async def _on_rfi_responded(event: Event) -> None:
     """``rfi.responded`` → notify the original requester."""
     if not await _can_open_isolated_session():
@@ -526,6 +556,7 @@ _SUBSCRIPTIONS: list[tuple[str, callable]] = [  # type: ignore[type-arg]
     ("cde.container.state_transitioned", _on_cde_state_transitioned),
     ("rfi.assigned", _on_rfi_assigned),
     ("rfi.responded", _on_rfi_responded),
+    ("risk.assigned", _on_risk_assigned),
     ("submittal.submitted", _on_submittal_submitted),
     ("submittal.approved", _on_submittal_approved),
     ("submittal.rejected", _on_submittal_rejected),
