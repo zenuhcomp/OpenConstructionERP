@@ -1930,6 +1930,29 @@ export function BOQEditorPage() {
     [handleUpdateResourceFields],
   );
 
+  /** Per-resource custom-field write. Stores the value at
+   *  ``position.metadata.resources[i].metadata.custom_fields[fieldName]``
+   *  with a deep merge so it doesn't clobber the resource's other fields
+   *  (qty, rate, type, etc) or its own metadata blob. The position-level
+   *  ``unit_rate`` is NOT recomputed — custom fields don't feed into the
+   *  derived rate. */
+  const handleUpdateResourceCustomField = useCallback(
+    (positionId: string, resourceIndex: number, fieldName: string, value: number | string) => {
+      const pos = boq?.positions.find((p) => p.id === positionId);
+      if (!pos) return;
+      const resources = [...((pos.metadata?.resources ?? []) as Array<Record<string, unknown>>)];
+      if (resourceIndex < 0 || resourceIndex >= resources.length) return;
+      const res = { ...resources[resourceIndex] };
+      const resMeta = (res.metadata as Record<string, unknown> | undefined) ?? {};
+      const cf = (resMeta.custom_fields as Record<string, unknown> | undefined) ?? {};
+      res.metadata = { ...resMeta, custom_fields: { ...cf, [fieldName]: value } };
+      resources[resourceIndex] = res;
+      const newMeta = { ...pos.metadata, resources };
+      updateMutation.mutate({ id: positionId, data: { metadata: newMeta } });
+    },
+    [boq?.positions, updateMutation],
+  );
+
   /** Save a resource from a position to the user's catalog. */
   const handleSaveResourceToCatalog = useCallback(
     async (positionId: string, resourceIndex: number) => {
@@ -2441,7 +2464,7 @@ export function BOQEditorPage() {
       connected: boolean;
       engine?: string;
       cost_collection?: { vectors_count: number; points_count: number } | null;
-    }>('/v1/costs/vector/status'),
+    }>('/v1/costs/vector/status/'),
     staleTime: 60_000,
     retry: false,
   });
@@ -3263,6 +3286,7 @@ export function BOQEditorPage() {
           onRemoveResource={handleRemoveResource}
           onUpdateResource={handleUpdateResource}
           onUpdateResourceFields={handleUpdateResourceFields}
+          onUpdateResourceCustomField={handleUpdateResourceCustomField}
           onSaveResourceToCatalog={handleSaveResourceToCatalog}
           onSaveVariantHeaderToCatalog={handleSaveVariantHeaderToCatalog}
           onRepickResourceVariant={handleRepickResourceVariant}

@@ -313,6 +313,10 @@ export interface BOQGridProps {
   onRemoveResource?: (positionId: string, resourceIndex: number) => void;
   onUpdateResource?: (positionId: string, resourceIndex: number, field: string, value: number | string) => void;
   onUpdateResourceFields?: (positionId: string, resourceIndex: number, fields: Record<string, number | string>) => void;
+  /** Per-resource custom-field write — stored at
+   *  ``parent.metadata.resources[i].metadata.custom_fields[fieldName]`` so a
+   *  resource can carry its own supplier / lead time / QC inspector etc. */
+  onUpdateResourceCustomField?: (positionId: string, resourceIndex: number, fieldName: string, value: number | string) => void;
   onSaveResourceToCatalog?: (positionId: string, resourceIndex: number) => void;
   /**
    * Save the variant-header synthetic row to the user's catalog under a
@@ -388,6 +392,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
   onRemoveResource,
   onUpdateResource,
   onUpdateResourceFields,
+  onUpdateResourceCustomField,
   onSaveResourceToCatalog,
   onSaveVariantHeaderToCatalog,
   onOpenCostDbForPosition,
@@ -865,6 +870,25 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
     gridApiRef.current.refreshCells({ columns: calculatedCols, force: true });
   }, [positions, boqVariables, customColumns]);
 
+  /* ── Re-fit columns when count grows (preset applied) ────────────────
+   * Adding a regional preset (GAEB, ÖNORM, MasterFormat, …) drops 5–6
+   * new columns into the grid. Without re-fitting, the cumulative width
+   * exceeds the viewport and forces a horizontal scrollbar. Re-fit only
+   * when the count GROWS so we don't clobber a width the user dragged. */
+  const prevCustomColCount = useRef<number>(customColumns?.length ?? 0);
+  useEffect(() => {
+    const next = customColumns?.length ?? 0;
+    const prev = prevCustomColCount.current;
+    prevCustomColCount.current = next;
+    if (gridApiRef.current && next > prev) {
+      // Two rAFs — AG Grid v32 commits new columnDefs in the next frame,
+      // and sizeColumnsToFit needs them committed to know the new widths.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => gridApiRef.current?.sizeColumnsToFit());
+      });
+    }
+  }, [customColumns]);
+
   /* ── Display-currency refresh (Issue #88) ────────────────────────────
    * When the user flips the active display currency the column-defs
    * memo rebuilds (it depends on `displayCurrency`), but AG Grid keeps
@@ -1291,6 +1315,23 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
         const colName = colId.slice('custom_'.length);
         if (!colName) return;
         if (oldValue === newValue) return;
+        // Resource sub-row: route through the per-resource custom-field
+        // handler so the value lands in
+        // ``parent.metadata.resources[i].metadata.custom_fields[name]``
+        // instead of trying to PATCH the synthetic resource row id
+        // (``${posId}_res_${idx}`` — which the backend doesn't know).
+        if (data._isResource) {
+          const posId = data._parentPositionId as string | undefined;
+          const resIdx = data._resourceIndex as number | undefined;
+          if (!posId || resIdx == null) return;
+          onUpdateResourceCustomField?.(
+            posId,
+            resIdx,
+            colName,
+            newValue as string | number,
+          );
+          return;
+        }
         const meta = (data.metadata as Record<string, unknown>) ?? {};
         const cf = (meta.custom_fields as Record<string, unknown> | undefined) ?? {};
         const customFields = { ...cf, [colName]: newValue };
@@ -1332,7 +1373,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
 
       onUpdatePosition(data.id, update, old);
     },
-    [onUpdatePosition],
+    [onUpdatePosition, onUpdateResourceCustomField],
   );
 
   /* ── Row drag end → reorder sections or positions ────────────── */

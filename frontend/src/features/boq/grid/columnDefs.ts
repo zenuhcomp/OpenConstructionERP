@@ -584,17 +584,17 @@ export function getCustomColumnDefs(
         // Derived columns are computed from position.metadata.resources —
         // never editable. Marking them readOnly lines them up visually
         // with the existing read-only "Total" column.
-        // Resource rows show INHERITED values from the parent position
-        // (text/number custom fields) or per-resource derived values
-        // (resource_sum / percentage_of_unit_rate). Either way the
-        // resource-row cell is read-only — to change a custom field
-        // value, edit the position row.
+        // Resource rows are editable for non-derived custom columns —
+        // values flow into ``parent.metadata.resources[i].metadata.custom_fields[name]``
+        // so each resource can carry its own supplier / lead time / QC status
+        // independent of the parent position. Derived (resource_sum /
+        // percentage_of_unit_rate) and calculated (formula) columns stay
+        // read-only because their value is auto-computed.
         editable: isCalculated || isDerived
           ? false
           : (params) =>
               !params.data?._isSection &&
               !params.data?._isFooter &&
-              !params.data?._isResource &&
               !params.data?._isAddResource,
         // ``cellClass`` is a function so we can mute the styling on
         // resource sub-rows — those cells either inherit from the
@@ -605,15 +605,20 @@ export function getCustomColumnDefs(
         // read-only derived cells.
         cellClass: (params) => {
           const isResourceRow = !!params.data?._isResource;
+          // Resource rows for derived/calculated cells stay muted+italic —
+          // those values are still computed. Non-derived custom cols on
+          // resources are now editable per-resource, so they read like
+          // normal editable cells (no italic, no muted tone).
+          const computedOnResource = isResourceRow && (isCalculated || isDerived);
           if (isNumeric) {
             const tone =
-              isCalculated || isDerived || isResourceRow
+              isCalculated || isDerived || computedOnResource
                 ? 'text-content-secondary'
                 : '';
-            const italic = isResourceRow ? 'italic' : '';
+            const italic = computedOnResource ? 'italic' : '';
             return `text-right tabular-nums text-xs ${tone} ${italic}`.trim();
           }
-          return isResourceRow ? 'text-xs italic text-content-tertiary' : 'text-xs';
+          return computedOnResource ? 'text-xs italic text-content-tertiary' : 'text-xs';
         },
         headerClass: isNumeric ? 'ag-right-aligned-header' : '',
       };
@@ -749,14 +754,33 @@ export function getCustomColumnDefs(
       base.valueGetter = (params) => {
         const data = params.data;
         if (!data) return '';
-        let metaSource: Record<string, unknown> | undefined;
+        // Resource sub-row — try the per-resource value first
+        // (``parent.metadata.resources[i].metadata.custom_fields[name]``),
+        // fall back to the parent position's value so a "globally true"
+        // value (supplier set on the position) still shows on each
+        // resource row that hasn't been overridden.
         if (data._isResource && data._parentPositionId) {
           const parent = positionsById.get(String(data._parentPositionId));
-          metaSource = parent?.metadata as Record<string, unknown> | undefined;
-        } else {
-          metaSource = data.metadata as Record<string, unknown> | undefined;
+          const resIdx = typeof data._resourceIndex === 'number' ? data._resourceIndex : -1;
+          if (resIdx >= 0) {
+            const parentMeta = parent?.metadata as Record<string, unknown> | undefined;
+            const resources = (parentMeta?.resources as Array<Record<string, unknown>> | undefined) ?? [];
+            if (resIdx < resources.length) {
+              const resMeta = resources[resIdx]?.metadata as Record<string, unknown> | undefined;
+              const resCf = resMeta?.custom_fields as Record<string, unknown> | undefined;
+              const resVal = resCf?.[col.name];
+              if (resVal !== undefined && resVal !== null && resVal !== '') {
+                return resVal;
+              }
+            }
+          }
+          const parentMeta = parent?.metadata as Record<string, unknown> | undefined;
+          const parentCf = parentMeta?.custom_fields as Record<string, unknown> | undefined;
+          return parentCf?.[col.name] ?? '';
         }
-        const cf = metaSource?.custom_fields as Record<string, unknown> | undefined;
+        // Position row
+        const meta = data.metadata as Record<string, unknown> | undefined;
+        const cf = meta?.custom_fields as Record<string, unknown> | undefined;
         return cf?.[col.name] ?? '';
       };
       // valueSetter rebuilds `metadata` and `custom_fields` as fresh

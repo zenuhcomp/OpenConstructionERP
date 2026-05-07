@@ -5,6 +5,12 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.27] — 2026-05-07
+
+### Added
+
+- **BOQ custom columns are now editable per-resource, not just per-position.** Previously, supplier / lead time / QC inspector / tender package etc. on a resource sub-row inherited the parent position's value and were read-only — so a position with a concrete supplier and a rebar supplier had to share one "supplier" cell. Resource rows now accept their own value, stored at `position.metadata.resources[i].metadata.custom_fields[name]` via a deep merge that doesn't touch other resource fields. The cell's `valueGetter` reads the per-resource value first and falls back to the position-level value, so a "globally true" position-level value still propagates to resource rows that haven't been overridden. New `onUpdateResourceCustomField` handler in `BOQEditorPage` PATCHes only `metadata` (no `unit_rate` re-derivation — custom fields don't affect price). Derived columns (`resource_sum`, `percentage_of_unit_rate`) and calculated columns stay read-only on resource rows because their values are auto-computed.
+
 ## [2.9.26] — 2026-05-07
 
 ### Fixed
