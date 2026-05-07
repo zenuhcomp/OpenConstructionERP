@@ -254,6 +254,16 @@ class DuckDBPool:
             _CONNECT_ERROR_LOGGER.warn("duckdb_pool.connect", sid, exc)
             raise DuckDBPoolError(f"Failed to open DuckDB connection: {exc}") from exc
 
+        # OOM guard: cap each ad-hoc connection at 512 MB and queries at
+        # 30s. A pathological cascade query against a multi-million-row
+        # snapshot can otherwise exhaust the worker — DuckDB defaults to
+        # 80% of system RAM, which is unsafe for an in-process pool.
+        try:
+            await asyncio.to_thread(conn.execute, "SET memory_limit='512MB'")
+            await asyncio.to_thread(conn.execute, "SET threads TO 2")
+        except Exception:  # pragma: no cover — old DuckDB may reject one of these
+            logger.debug("duckdb_pool.set_limits failed (older DuckDB?)", exc_info=True)
+
         entry = _Entry(conn=conn, project_id=pid, registered_kinds=set())
         await self._register_kinds(entry, sid, pid, missing=list(kinds))
         return entry

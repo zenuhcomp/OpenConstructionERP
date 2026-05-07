@@ -5,7 +5,7 @@ and work orders.  Numeric values (costs, progress) are exposed as floats
 in the API but stored as strings in SQLite-compatible models.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -17,18 +17,33 @@ _INT32_MAX = 2_147_483_647
 _MAX_SCHEDULE_DAYS = 365_000
 
 
-def _validate_date_range(start: str | None, end: str | None) -> None:
-    """‌⁠‍Reject schedules/activities where end_date is before start_date.
+def _parse_iso_date(value: str | None, field_name: str) -> date | None:
+    """Parse a YYYY-MM-DD prefix into a real calendar ``date``.
 
-    Both fields are stored as ISO strings (YYYY-MM-DD or full datetime). The
-    string comparison only works on lexicographic order, which matches
-    chronological order for ISO 8601. Returns silently if either side is None.
+    The Pydantic regex ``^\\d{4}-\\d{2}-\\d{2}$`` is structural — it accepts
+    impossible dates like ``2026-02-30`` or ``2026-13-99``. We re-parse via
+    :func:`datetime.date.fromisoformat` to reject those before they propagate
+    into compute_duration() and yield bogus durations.
     """
-    if not start or not end:
-        return
-    # Compare on first 10 chars (YYYY-MM-DD) to ignore time-of-day diffs
-    if start[:10] > end[:10]:
-        raise ValueError(f"end_date ({end[:10]}) must be on or after start_date ({start[:10]})")
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError as exc:
+        raise ValueError(f"{field_name} ({value[:10]}) is not a valid calendar date") from exc
+
+
+def _validate_date_range(start: str | None, end: str | None) -> None:
+    """‌⁠‍Reject schedules/activities where end_date is before start_date,
+    and reject impossible calendar dates (Feb 30, month 13, etc.).
+    """
+    parsed_start = _parse_iso_date(start, "start_date")
+    parsed_end = _parse_iso_date(end, "end_date")
+    if parsed_start and parsed_end and parsed_start > parsed_end:
+        raise ValueError(
+            f"end_date ({parsed_end.isoformat()}) must be on or after "
+            f"start_date ({parsed_start.isoformat()})"
+        )
 
 
 # ── Schedule schemas ─────────────────────────────────────────────────────────

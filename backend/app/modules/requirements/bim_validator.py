@@ -40,6 +40,12 @@ from app.modules.validation.repository import ValidationReportRepository
 logger = logging.getLogger(__name__)
 
 MAX_RESULTS_PER_REPORT = 5000
+# Hard ceiling on elements pulled into memory for one validation pass.
+# Combined with up-to-N requirements this drives the worst-case loop:
+# 50k × 50 reqs = 2.5M evals — already several seconds of CPU. Beyond
+# this we surface a "model too large for synchronous validation" error
+# rather than blocking the worker for minutes.
+MAX_ELEMENTS_PER_VALIDATION = 50_000
 
 
 def _split_attribute(attribute: str) -> tuple[str | None, str]:
@@ -152,8 +158,18 @@ async def validate_requirement_set_against_model(
         raise ValueError(msg)
 
     elements, total_elements = await elem_repo.list_for_model(
-        model_id, offset=0, limit=1_000_000
+        model_id, offset=0, limit=MAX_ELEMENTS_PER_VALIDATION + 1,
     )
+    elements_truncated = False
+    if total_elements > MAX_ELEMENTS_PER_VALIDATION:
+        # We still validate, but only against the first N elements; the
+        # report flags this so the user knows the scope is partial.
+        elements = elements[:MAX_ELEMENTS_PER_VALIDATION]
+        elements_truncated = True
+        logger.warning(
+            "validate_requirement_set: model %s has %d elements; capping at %d",
+            model_id, total_elements, MAX_ELEMENTS_PER_VALIDATION,
+        )
 
     passed_count = 0
     warning_count = 0
@@ -313,6 +329,9 @@ async def validate_requirement_set_against_model(
             "requirements_skipped": not_applicable,
             "info_count": info_count,
             "truncated": truncated,
+            "elements_truncated": elements_truncated,
+            "elements_validated": len(elements),
+            "elements_cap": MAX_ELEMENTS_PER_VALIDATION,
         },
     )
     await report_repo.create(db_report)

@@ -704,6 +704,8 @@ async def advisor_chat(
     body: dict,
     session: SessionDep,
     user_id: CurrentUserId,
+    response: Response,
+    _remaining: int = Depends(check_ai_rate_limit),
 ) -> dict:
     """AI Cost Advisor — answer questions about costs using the cost database.
 
@@ -715,6 +717,7 @@ async def advisor_chat(
         3. Call AI with context + user question
         4. Return structured answer with source references
     """
+    response.headers["X-RateLimit-Remaining"] = str(_remaining)
     message = body.get("message", "").strip()
     if not message:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message is required")
@@ -843,15 +846,25 @@ async def advisor_chat(
         f"general estimates with a note about accuracy"
     )
 
-    # Build conversation history into prompt for context continuity
+    # Build conversation history into prompt for context continuity.
+    # Hard cap on the assembled history block: 10 messages × 500 chars is
+    # 5 KB upper bound, but small-context providers (Mistral, Cohere) start
+    # rejecting prompts past ~4 KB once you add system + context + project
+    # context. 4000 chars is a conservative ceiling that fits all providers.
     history_text = ""
     if history:
         history_lines = []
+        running_chars = 0
+        HISTORY_CHAR_BUDGET = 4000
         for h in history[-10:]:  # Last 10 messages max
             role = h.get("role", "user")
             content = h.get("content", "")[:500]  # Truncate long messages
             prefix = "User" if role == "user" else "Assistant"
-            history_lines.append(f"{prefix}: {content}")
+            line = f"{prefix}: {content}"
+            if running_chars + len(line) > HISTORY_CHAR_BUDGET:
+                break
+            history_lines.append(line)
+            running_chars += len(line) + 1  # +1 for newline
         if history_lines:
             history_text = "Previous conversation:\n" + "\n".join(history_lines) + "\n\n---\n\n"
 
@@ -882,6 +895,14 @@ async def advisor_chat(
         )
         answer = text
     except (ValueError, Exception) as exc:
+        # Provider error bodies (especially from third-party LLM APIs) can
+        # echo back masked key prefixes, org IDs, or stale CORS headers.
+        # We log the full error for ops, but only show the user a generic
+        # localized fallback — never the upstream message.
+        logger.warning(
+            "advisor_chat: AI call failed for user=%s provider-error=%r",
+            user_id, exc,
+        )
         _err_msgs = {
             "ru": "ИИ не настроен. Пожалуйста, добавьте API-ключ в Настройках.",
             "de": "KI nicht konfiguriert. Bitte fügen Sie Ihren API-Schlüssel in den Einstellungen hinzu.",
@@ -889,7 +910,7 @@ async def advisor_chat(
             "es": "IA no configurada. Agregue su clave API en Configuración.",
         }
         fallback = _err_msgs.get(locale, "AI is not configured. Please set up an AI provider in Settings.")
-        answer = f"{fallback}\n({str(exc)[:100]})"
+        answer = fallback
         used_db = False
 
     # 6. Build source references — only include if items seem relevant

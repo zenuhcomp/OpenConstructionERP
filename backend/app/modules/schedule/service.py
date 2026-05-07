@@ -473,6 +473,71 @@ class ScheduleService:
         """List activities for a schedule ordered by sort_order."""
         return await self.activity_repo.list_for_schedule(schedule_id, offset=offset, limit=limit)
 
+    async def _reject_dependency_cycles(
+        self,
+        *,
+        activity_id: uuid.UUID,
+        schedule_id: uuid.UUID,
+        proposed_predecessors: list[uuid.UUID],
+    ) -> None:
+        """Refuse a proposed dependency edit that would create a cycle.
+
+        Activity-embedded ``dependencies`` are predecessors of *this*
+        activity, i.e. each entry represents an edge ``predecessor -> activity_id``.
+        Adding a cycle would make CPM compute_paths recurse forever.
+
+        For each proposed predecessor P we check that ``activity_id`` is not
+        already reachable from P in the current dependency graph.
+        """
+        if not proposed_predecessors:
+            return
+
+        # Self-reference is the trivial case.
+        if any(p == activity_id for p in proposed_predecessors):
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail="An activity cannot depend on itself.",
+            )
+
+        # Load all activities in the schedule and build adjacency
+        # (predecessor -> {successors}) from each activity's stored deps.
+        existing_activities, _total = await self.activity_repo.list_for_schedule(
+            schedule_id, limit=10_000,
+        )
+        adjacency: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for act in existing_activities:
+            for dep in (act.dependencies or []):
+                try:
+                    pred_id = uuid.UUID(str(dep.get("activity_id")))
+                except (TypeError, ValueError):
+                    continue
+                adjacency.setdefault(pred_id, set()).add(act.id)
+
+        # For every proposed predecessor P, BFS from activity_id through
+        # the current graph; if we land on P, then P depends (transitively)
+        # on activity_id, and adding P -> activity_id would close a cycle.
+        for predecessor in proposed_predecessors:
+            visited: set[uuid.UUID] = set()
+            queue: list[uuid.UUID] = list(adjacency.get(activity_id, set()))
+            while queue:
+                current = queue.pop(0)
+                if current == predecessor:
+                    from fastapi import HTTPException
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Adding this dependency would create a circular "
+                            "reference. Check the dependency chain for cycles."
+                        ),
+                    )
+                if current in visited:
+                    continue
+                visited.add(current)
+                for successor in adjacency.get(current, set()):
+                    if successor not in visited:
+                        queue.append(successor)
+
     async def update_activity(self, activity_id: uuid.UUID, data: ActivityUpdate) -> Activity:
         """Update an activity and recalculate duration if dates changed.
 
@@ -508,6 +573,19 @@ class ScheduleService:
                 d["activity_id"] = str(d["activity_id"])
                 serialized.append(d)
             fields["dependencies"] = serialized
+
+            # Reject self-references and circular dependencies before write.
+            # ``ScheduleRelationship.create_relationship`` enforces this for
+            # the typed-relationship table; the activity-embedded JSON
+            # ``dependencies`` field used to bypass it. Both writers must
+            # apply the same guard or one path becomes a back door.
+            await self._reject_dependency_cycles(
+                activity_id=activity_id,
+                schedule_id=activity.schedule_id,
+                proposed_predecessors=[
+                    uuid.UUID(d["activity_id"]) for d in serialized
+                ],
+            )
 
         if "resources" in fields and fields["resources"] is not None:
             res_list = fields["resources"]

@@ -5,6 +5,24 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.28] — 2026-05-07
+
+### Security
+
+- **AI Cost Advisor chat is now rate-limited.** `POST /api/v1/ai/advisor/chat/` previously had only the `ai.estimate` permission gate; an authenticated caller could hammer the endpoint and burn through their BYO provider quota. Added the same `check_ai_rate_limit` dependency that gates `/quick-estimate`, `/photo-estimate`, and `/file-estimate`, plus the `X-RateLimit-Remaining` response header so the UI can surface remaining quota.
+- **Provider error messages no longer leak into AI chat answers.** The chat fallback used to concatenate `str(exc)[:100]` from a failed LLM call into the user-facing answer string. Provider error bodies sometimes echo masked key prefixes, org IDs, or upstream debug headers. Now the full error is logged for ops, and the user only sees the localised "AI is not configured" fallback.
+- **AI chat conversation history is hard-capped at 4 KB total.** Combined with the 10-message and 500-char-per-message caps, a malicious caller could still pad prompts past the budget of small-context providers (Mistral, Cohere). Iteration now stops at the first message that would exceed the running 4000-char budget.
+
+### Fixed
+
+- **Schedule activity dates: structural regex no longer accepts impossible calendar dates.** `start_date` / `end_date` matched `^\d{4}-\d{2}-\d{2}$`, which let `2026-02-30` and `2026-13-99` reach `compute_duration` and return bogus durations. Validation now re-parses via `date.fromisoformat()` and rejects on invalid month/day before the value is stored.
+- **Schedule activity-embedded `dependencies` updates now run cycle detection.** `POST /schedules/{id}/relationships/` already rejected circular dependencies, but `PATCH /activities/{id}` accepted a `dependencies: list[ActivityDependency]` payload that bypassed the check entirely — a back door that let CPM compute_paths recurse forever. The same self-reference + BFS cycle test is now applied at the service layer for the activity-JSON path too.
+
+### Changed
+
+- **DuckDB ad-hoc connections are capped at 512 MB and 2 threads.** The dashboards module's per-snapshot DuckDB pool used `duckdb.connect(":memory:")` with the default settings — DuckDB's default `memory_limit` is 80 % of system RAM, so a single bad cascade query against a multi-million-row Parquet could pin a worker. Pool now sets `memory_limit='512MB'` and `threads TO 2` immediately after connect; failures are logged but non-fatal for older DuckDB versions.
+- **BIM requirements validation caps at 50 000 elements per pass.** `validate_requirement_set_against_model` previously fetched up to 1 000 000 elements before iterating `requirements × elements`; for a 100 k-element model × 50 requirements that's 5 M evaluations on the request thread. The repository now stops at `MAX_ELEMENTS_PER_VALIDATION + 1`, the report flags `elements_truncated: true` when the cap kicks in, and a `WARNING` is logged so users can see why the partial scope appeared.
+
 ## [2.9.27] — 2026-05-07
 
 ### Added
