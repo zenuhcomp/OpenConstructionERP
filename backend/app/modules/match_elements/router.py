@@ -35,12 +35,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import CurrentUserId, SessionDep, verify_project_access
 from app.modules.match_elements import schemas
+from app.modules.match_elements.analytics import compute_match_analytics
 from app.modules.match_elements.excel_import import parse_boq_xlsx
 from app.modules.match_elements.models import MatchSession
 from app.modules.match_elements.service import get_service
@@ -514,3 +515,35 @@ async def delete_template(
         await get_service().delete_template(session, template_id)
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
+
+
+# ── Analytics (MAPPING_PROCESS.md §10) ───────────────────────────────────
+
+
+@router.get("/analytics", response_model=schemas.AnalyticsResponse)
+async def get_match_analytics(
+    session: SessionDep,
+    current_user_id: CurrentUserId,
+    days: int = Query(7, ge=1, le=90),
+    project_id: uuid.UUID | None = Query(None),
+    catalog_id: str | None = Query(None, max_length=64),
+) -> schemas.AnalyticsResponse:
+    """Return aggregate match-quality metrics for the last ``days`` days.
+
+    Pass ``project_id`` to scope to a single project (auth-checked the
+    same way as other project routes); omit it for tenant-wide rollup
+    (user must still be authenticated). ``catalog_id`` (e.g.
+    ``cwicr_DE``) further narrows the window when diagnosing one
+    catalogue's recall.
+
+    Always 200 — empty windows return zero-counters with no alerts so
+    the dashboard renders cleanly on a fresh deploy.
+    """
+    if project_id is not None:
+        await verify_project_access(project_id, current_user_id, session)
+    return await compute_match_analytics(
+        session,
+        days=days,
+        project_id=project_id,
+        catalog_id=catalog_id,
+    )

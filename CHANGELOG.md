@@ -5,6 +5,14 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.35] — 2026-05-10
+
+### Added
+
+- v3-§10 production analytics endpoint `GET /api/v1/match_elements/analytics?days=7&project_id=...&catalog_id=...`: rolls up `oe_match_elements_search_log` into KPI tiles (searches / pick rate / mean+p95 score / mean+p95 latency), tier + confidence-band histograms, top-N breakdowns by country / source_type / ifc_class, and three §10 threshold-driven alerts (low top score, picks past rank 4, hard-filter zero-hit). Pure-Python percentile to stay portable across SQLite (dev) and Postgres (prod). 18 unit tests green.
+- `MatchAnalyticsCard` UI on /match-elements: collapsible card above Step 1, alerts pinned at top, expandable drill-down with KPI tiles + bar histograms + per-dimension breakdown tables. Window selector (1d/7d/30d/90d), 60s auto-refresh, soft-fail on endpoint error so the matching workflow keeps working when analytics is unreachable. 30 i18n keys added.
+- `MATCH_ALERT_*` env knobs (`MATCH_ALERT_LOW_SCORE_VALUE` / `_PCT`, `MATCH_ALERT_HIGH_RANK_VALUE` / `_PCT`, `MATCH_ALERT_ZERO_HIT_PCT`, `MATCH_ALERT_MIN_SAMPLE`) for tuning §10 thresholds without a rebuild; defaults match MAPPING_PROCESS.md (low-score 0.3/20%, high-rank 4/20%, zero-hit 10%, min-sample 20).
+
 ## [2.9.34] — 2026-05-10
 
 ### Added

@@ -67,6 +67,7 @@ import {
   type TradeBucket,
 } from './api';
 import { EmbedderStatusCard } from './EmbedderStatusCard';
+import { MatchAnalyticsCard } from './MatchAnalyticsCard';
 import { MatchDetailPanel } from './MatchDetailPanel';
 import { NewSessionFromExcelModal } from './NewSessionFromExcelModal';
 import { NewSessionFromTextModal } from './NewSessionFromTextModal';
@@ -1556,6 +1557,14 @@ export function MatchElementsPage() {
               path before investing time in picking a model. */}
           <div className="mt-4">
             <EmbedderStatusCard />
+          </div>
+
+          {/* §10 production observability — collapsible by default so it
+              doesn't dominate the matching UX, but surfaces alerts (low
+              top score, picked-rank>4, zero-hit with hard filter) right
+              at the top when something needs attention. */}
+          <div className="mt-3">
+            <MatchAnalyticsCard projectId={projectId} />
           </div>
 
           {/* Step 1 — BIM model picker (one card per model in the project) */}

@@ -365,3 +365,76 @@ class BIMModelOption(BaseModel):
     storey_count: int
     status: str
     created_at: datetime | None
+
+
+# ── Analytics (MAPPING_PROCESS.md §10) ───────────────────────────────────
+
+
+AlertSeverity = Literal["info", "warning", "critical"]
+
+
+class AnalyticsAlert(BaseModel):
+    """One §10 production alert.
+
+    The threshold logic lives in the backend so different deploys can tune
+    it via env without a frontend rebuild; the UI just renders ``severity``
+    + ``message`` + the offending ``metric`` next to the ``threshold``.
+    """
+
+    id: str
+    severity: AlertSeverity
+    title: str
+    detail: str
+    metric: float
+    threshold: float
+    spec_ref: str = "MAPPING_PROCESS.md §10"
+
+
+class AnalyticsBreakdown(BaseModel):
+    """One row in a by-dimension breakdown table (country, source_type, ifc_class)."""
+
+    key: str
+    searches: int
+    mean_score: float | None = None
+    pick_rate: float | None = None
+
+
+class AnalyticsResponse(BaseModel):
+    """Aggregate match-quality metrics over the requested window.
+
+    Window is closed on the left, open on the right: ``[now - days, now)``.
+    All percentages are 0.0–1.0 (the UI multiplies by 100). Counters are
+    raw integers; latencies are milliseconds.
+    """
+
+    window_days: int
+    project_id: uuid.UUID | None
+    catalog_id: str | None
+    generated_at: datetime
+    # Top-level totals
+    total_searches: int
+    total_with_pick: int
+    pick_rate: float = 0.0
+    # Score distribution
+    mean_top_score: float | None = None
+    p95_top_score: float | None = None
+    low_score_pct: float = 0.0  # share of rows with top_score < 0.3
+    zero_hit_pct: float = 0.0  # share of rows with hits_count == 0
+    # Tier + reranker usage
+    relax_tier_distribution: dict[str, int] = Field(default_factory=dict)
+    confidence_band_distribution: dict[str, int] = Field(default_factory=dict)
+    bge_rerank_pct: float = 0.0
+    llm_rerank_pct: float = 0.0
+    # Latency
+    mean_took_ms: float | None = None
+    p95_took_ms: float | None = None
+    # Pick analytics (only meaningful when total_with_pick > 0)
+    mean_picked_rank: float | None = None
+    p95_picked_rank: float | None = None
+    high_picked_rank_pct: float = 0.0  # share of picks at rank > 4
+    # Breakdowns — top-N by search volume
+    by_country: list[AnalyticsBreakdown] = Field(default_factory=list)
+    by_source_type: list[AnalyticsBreakdown] = Field(default_factory=list)
+    by_ifc_class: list[AnalyticsBreakdown] = Field(default_factory=list)
+    # Alerts
+    alerts: list[AnalyticsAlert] = Field(default_factory=list)

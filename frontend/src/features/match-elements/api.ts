@@ -603,4 +603,66 @@ export const matchElementsApi = {
       method: 'POST',
       body: JSON.stringify({ group_key: groupKey, action: 'tbd' }),
     }),
+
+  /** §10 dashboard. Aggregate match-quality metrics over the requested
+   *  window. ``project_id`` scopes to one project (auth-checked); omit
+   *  for tenant-wide rollup. ``catalog_id`` further narrows the
+   *  window when diagnosing a single catalogue. */
+  getAnalytics: (
+    params: { days?: number; project_id?: string | null; catalog_id?: string | null } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    qs.set('days', String(params.days ?? 7));
+    if (params.project_id) qs.set('project_id', params.project_id);
+    if (params.catalog_id) qs.set('catalog_id', params.catalog_id);
+    return call<MatchAnalyticsResponse>(`/analytics?${qs.toString()}`);
+  },
 };
+
+// ── §10 analytics (MAPPING_PROCESS.md) ────────────────────────────────
+
+export type AnalyticsAlertSeverity = 'info' | 'warning' | 'critical';
+
+export interface AnalyticsAlert {
+  id: string;
+  severity: AnalyticsAlertSeverity;
+  title: string;
+  detail: string;
+  metric: number;
+  threshold: number;
+  spec_ref: string;
+}
+
+export interface AnalyticsBreakdown {
+  key: string;
+  searches: number;
+  mean_score: number | null;
+  pick_rate: number | null;
+}
+
+export interface MatchAnalyticsResponse {
+  window_days: number;
+  project_id: string | null;
+  catalog_id: string | null;
+  generated_at: string;
+  total_searches: number;
+  total_with_pick: number;
+  pick_rate: number;
+  mean_top_score: number | null;
+  p95_top_score: number | null;
+  low_score_pct: number;
+  zero_hit_pct: number;
+  relax_tier_distribution: Record<string, number>;
+  confidence_band_distribution: Record<string, number>;
+  bge_rerank_pct: number;
+  llm_rerank_pct: number;
+  mean_took_ms: number | null;
+  p95_took_ms: number | null;
+  mean_picked_rank: number | null;
+  p95_picked_rank: number | null;
+  high_picked_rank_pct: number;
+  by_country: AnalyticsBreakdown[];
+  by_source_type: AnalyticsBreakdown[];
+  by_ifc_class: AnalyticsBreakdown[];
+  alerts: AnalyticsAlert[];
+}
