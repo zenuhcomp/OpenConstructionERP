@@ -4683,6 +4683,21 @@ const resource = {
     "match_elements.alert.bulk_confirm_failed": "Bulk confirm failed",
     "match_elements.alert.apply_failed": "Apply to BOQ failed",
     "match_elements.alert.skip_failed": "Skip failed",
+    "projects.team.strip_label": "Project team",
+    "projects.team.empty": "No members yet",
+    "projects.team.add_member": "Add member",
+    "projects.team.remove_member": "Remove member",
+    "projects.team.manage": "Manage",
+    "projects.team.more": "more",
+    "projects.team.more_count": "+{{count}} more",
+    "projects.team.owner": "Owner",
+    "projects.team.modal_members_title": "Project members",
+    "projects.team.modal_add_title": "Add member",
+    "projects.team.user_label": "User",
+    "projects.team.role_label": "Role",
+    "projects.team.role.estimator": "Estimator",
+    "projects.team.role.viewer": "Viewer",
+    "projects.team.role.project_manager": "Project manager",
   }
 } as { translation: Record<string, string> };
 

@@ -51,6 +51,10 @@ from app.modules.projects.file_manager_schemas import (
 from app.modules.projects.file_manager_service import (
     file_tree as fm_file_tree,
 )
+from app.modules.projects.member_schemas import (
+    AddProjectMemberRequest,
+    ProjectMemberResponse,
+)
 from app.modules.projects.file_manager_service import (
     list_project_files as fm_list_files,
 )
@@ -331,6 +335,96 @@ async def duplicate_project(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to duplicate project",
         )
+
+
+# ── Project Members (Team Strip) ───────────────────────────────────────
+# These three endpoints back the avatar strip shown above the tab bar on
+# /projects/{id}. They delegate to ``member_service`` which uses the
+# project's auto-created Default Team as the storage backend so we don't
+# need a new table or migration.
+
+
+@router.get(
+    "/{project_id}/members/",
+    response_model=list[ProjectMemberResponse],
+    summary="List project members",
+    description="Returns every user assigned to this project (owner + invited "
+    "collaborators) with email, full name, and role. Used by the Team Strip "
+    "to render avatar circles + tooltip metadata.",
+)
+@router.get(
+    "/{project_id}/members",
+    response_model=list[ProjectMemberResponse],
+    include_in_schema=False,
+)
+async def list_project_members_endpoint(
+    project_id: uuid.UUID,
+    user_id: CurrentUserId,
+    payload: CurrentUserPayload,
+    session: SessionDep,
+    service: ProjectService = Depends(_get_service),
+) -> list[ProjectMemberResponse]:
+    """List members of a project. Owner / admin only — 403 otherwise."""
+    await _verify_project_owner(service, project_id, user_id, payload)
+    from app.modules.projects.member_service import list_project_members
+
+    return await list_project_members(session, project_id)
+
+
+@router.post(
+    "/{project_id}/members/",
+    response_model=ProjectMemberResponse,
+    status_code=201,
+    summary="Add a project member",
+    description="Add an existing user to the project. 409 if the user is "
+    "already a member; 404 if the user doesn't exist.",
+)
+@router.post(
+    "/{project_id}/members",
+    response_model=ProjectMemberResponse,
+    status_code=201,
+    include_in_schema=False,
+)
+async def add_project_member_endpoint(
+    project_id: uuid.UUID,
+    data: AddProjectMemberRequest,
+    user_id: CurrentUserId,
+    payload: CurrentUserPayload,
+    session: SessionDep,
+    service: ProjectService = Depends(_get_service),
+) -> ProjectMemberResponse:
+    """Add a member to the project."""
+    await _verify_project_owner(service, project_id, user_id, payload)
+    from app.modules.projects.member_service import add_project_member
+
+    return await add_project_member(session, project_id, data)
+
+
+@router.delete(
+    "/{project_id}/members/{member_user_id}/",
+    status_code=204,
+    summary="Remove a project member",
+    description="Remove a user from the project. Cannot remove the project "
+    "owner — use the ownership transfer flow for that.",
+)
+@router.delete(
+    "/{project_id}/members/{member_user_id}",
+    status_code=204,
+    include_in_schema=False,
+)
+async def remove_project_member_endpoint(
+    project_id: uuid.UUID,
+    member_user_id: uuid.UUID,
+    user_id: CurrentUserId,
+    payload: CurrentUserPayload,
+    session: SessionDep,
+    service: ProjectService = Depends(_get_service),
+) -> None:
+    """Remove a member from the project."""
+    await _verify_project_owner(service, project_id, user_id, payload)
+    from app.modules.projects.member_service import remove_project_member
+
+    await remove_project_member(session, project_id, member_user_id)
 
 
 # ── Project Dashboard (cross-module aggregation) ───────────────────────

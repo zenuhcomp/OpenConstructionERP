@@ -45,6 +45,7 @@ import { apiGet, apiPatch, ApiError } from '@/shared/lib/api';
 import clsx from 'clsx';
 import { projectsApi, type Project } from './api';
 import { PhotosTab } from './PhotosTab';
+import { TeamStrip } from './components/TeamStrip';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useRecentStore } from '@/stores/useRecentStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -1504,6 +1505,36 @@ export function ProjectDetailPage() {
 
       {/* ── Phase Ribbon ────────────────────────────────────────────────── */}
       <ProjectPhaseRibbon phase={project.phase ?? null} />
+
+      {/* ── Team Strip ──────────────────────────────────────────────────── */}
+      {/* Horizontal avatar row positioned above the tab bar (see Linear /
+          Asana). Only the owner / admin sees the manage controls — for
+          other authenticated users the strip is read-only. The owner
+          check below leans on the JWT ``sub`` claim because the auth
+          store doesn't keep ``userId`` separately yet. */}
+      <div className="mb-3" data-testid="team-strip-host">
+        <TeamStrip
+          projectId={projectId!}
+          canManage={(() => {
+            const token = useAuthStore.getState().accessToken;
+            if (!token) return false;
+            try {
+              const parts = token.split('.');
+              if (parts.length !== 3) return false;
+              const payload = parts[1]!.replace(/-/g, '+').replace(/_/g, '/');
+              const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+              const json = JSON.parse(atob(padded)) as {
+                sub?: string;
+                role?: string;
+              };
+              if (json.role === 'admin') return true;
+              return !!json.sub && json.sub === project.owner_id;
+            } catch {
+              return false;
+            }
+          })()}
+        />
+      </div>
 
       {/* ── Summary Cards ───────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">

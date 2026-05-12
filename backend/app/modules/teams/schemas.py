@@ -97,14 +97,21 @@ class TeamResponse(BaseModel):
 
 
 class AddMemberRequest(BaseModel):
-    """Add a user to a team."""
+    """Add a user to a team.
+
+    The role whitelist accepts both the legacy team-internal roles
+    (``member`` / ``lead`` — used by the bare /teams endpoints) and the
+    richer project-member role labels (``estimator`` / ``viewer`` /
+    ``project_manager`` / ``owner``) surfaced by the Team Strip on
+    ProjectDetailPage. Anything outside the whitelist is rejected with 422.
+    """
 
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
     user_id: UUID
     role: str = Field(
         default="member",
-        pattern=r"^(member|lead)$",
+        pattern=r"^(member|lead|owner|estimator|viewer|project_manager)$",
     )
 
 
