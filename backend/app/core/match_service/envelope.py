@@ -25,7 +25,7 @@ from app.core.match_service.config import (
 )
 from app.core.translation import TranslationResult
 
-SourceType = Literal["bim", "pdf", "dwg", "photo"]
+SourceType = Literal["bim", "pdf", "dwg", "photo", "text", "boq", "image"]
 ConfidenceBand = Literal["high", "medium", "low"]
 
 

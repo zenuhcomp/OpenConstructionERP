@@ -106,17 +106,29 @@ def get_embedder():
     Uses sentence-transformers (PyTorch) directly.  FastEmbed is skipped
     because its ONNX model cache can become corrupted and hang on
     initialisation on Windows + Anaconda.
+
+    Failure mode: once both primary and fallback models fail to load
+    (offline install, broken HF cache, torch meta-tensor bug), the
+    singleton stays ``None`` and ``_embedder_tried`` flips to ``True``
+    so subsequent calls return ``None`` without re-running the multi-
+    second download cascade. The cost-vector upsert path observed this
+    in v2.9.30 — a stuck background task was hitting both models in a
+    loop ~every second, burning ~10s of CPU per iteration and starving
+    the match-elements request path of the GIL.
     """
     global _embedder_instance, _embedder_tried, _active_model_name
     if _embedder_instance is not None:
         return _embedder_instance
+    # Short-circuit: a prior call exhausted both candidate models.
+    # Without this guard every caller pays the multi-second retry cost.
+    if _embedder_tried:
+        return None
 
     try:
         from sentence_transformers import SentenceTransformer
     except Exception as exc:
-        if not _embedder_tried:
-            logger.warning("sentence-transformers not installed: %s", exc)
-            _embedder_tried = True
+        logger.warning("sentence-transformers not installed: %s", exc)
+        _embedder_tried = True
         return None
 
     primary, dim = _resolve_active_model()
@@ -142,9 +154,8 @@ def get_embedder():
             logger.warning("Failed to load embedding model %s: %s", candidate, exc)
             continue
 
-    if not _embedder_tried:
-        logger.warning("No embedding model could be loaded (tried %s, %s)", primary, fallback_name)
-        _embedder_tried = True
+    logger.warning("No embedding model could be loaded (tried %s, %s)", primary, fallback_name)
+    _embedder_tried = True
     return None
 
 

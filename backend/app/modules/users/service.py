@@ -8,6 +8,7 @@ Stateless service layer. Handles:
 - Role & permission resolution
 """
 
+import asyncio  # noqa: F401 - reload trigger
 import hashlib
 import logging
 import secrets
@@ -17,6 +18,8 @@ from datetime import UTC, datetime, timedelta
 import bcrypt
 from fastapi import HTTPException, status
 from jose import jwt
+from sqlalchemy import update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -135,6 +138,37 @@ def generate_api_key() -> tuple[str, str, str]:
     key_hash = hashlib.sha256(full_key.encode()).hexdigest()
     key_prefix = full_key[:12]
     return full_key, key_hash, key_prefix
+
+
+# ── Audit helpers ─────────────────────────────────────────────────────────
+
+
+async def _audit_last_login(
+    settings: Settings, user_id: uuid.UUID, when: datetime, *, label: str
+) -> None:
+    """Fire-and-forget UPDATE of ``oe_users_user.last_login_at``.
+
+    Runs in a detached session so the user's login response never waits on
+    SQLite write contention (the busy-wait is at C level in aiosqlite and
+    asyncio cancellation can't break it). Any failure is logged but the
+    user has already been issued tokens — losing one timestamp is fine.
+    """
+    from app.database import async_session_factory
+
+    try:
+        async with async_session_factory() as session:
+            await session.execute(
+                update(User)
+                .where(User.id == user_id)
+                .values(last_login_at=when)
+            )
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001 - any failure is acceptable
+        logger.warning(
+            "last_login_at audit write skipped for %s (%s)",
+            label,
+            type(exc).__name__,
+        )
 
 
 # ── Service class ──────────────────────────────────────────────────────────
@@ -373,13 +407,10 @@ class UserService:
             skip_write = (now - prior).total_seconds() < 60.0
 
         if not skip_write:
-            # Update last login
-            await self.user_repo.update_fields(
-                user_id,
-                last_login_at=now,
+            # Fire-and-forget audit update — see demo_login() rationale.
+            asyncio.create_task(
+                _audit_last_login(self.settings, user_id, now, label=user_email)
             )
-            # Re-fetch user to avoid MissingGreenlet on expired attributes
-            user = await self.user_repo.get_by_id(user_id)
 
         access_token = create_access_token(user, self.settings)
         refresh_token = create_refresh_token(user, self.settings)
@@ -429,9 +460,17 @@ class UserService:
             if prior.tzinfo is None:
                 prior = prior.replace(tzinfo=UTC)
             skip_write = (now - prior).total_seconds() < 60.0
+        # Schedule the audit-only ``last_login_at`` write as fire-and-
+        # forget so user-facing latency is decoupled from SQLite write
+        # contention. The aiosqlite driver's busy-wait is at C level and
+        # asyncio.wait_for can't cancel it, so we instead let the UPDATE
+        # run on a detached session in the background. If it fails under
+        # contention, that's logged but never reaches the user. On
+        # Postgres this is a no-op (writes are fast).
         if not skip_write:
-            await self.user_repo.update_fields(user_id, last_login_at=now)
-            user = await self.user_repo.get_by_id(user_id)
+            asyncio.create_task(
+                _audit_last_login(self.settings, user_id, now, label=f"demo:{email}")
+            )
 
         access_token = create_access_token(user, self.settings)
         refresh_token = create_refresh_token(user, self.settings)

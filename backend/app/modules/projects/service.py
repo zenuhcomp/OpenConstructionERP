@@ -701,7 +701,28 @@ async def auto_bind_dominant_catalogue(
 
     row = await get_or_create_match_settings(db, project_id)
     if row.cost_database_id:
-        return row.cost_database_id
+        # Verify the current binding still has rows — a project that
+        # bound to a catalogue which was later unloaded (e.g. dev DB
+        # rebuilt with a different region) otherwise stays pinned to a
+        # zero-row binding and every match returns empty. Re-bind when
+        # the current binding is stale; keep when it's still populated.
+        try:
+            current_count = (
+                await db.execute(
+                    select(func.count(CostItem.id))
+                    .where(CostItem.is_active.is_(True))
+                    .where(CostItem.region == row.cost_database_id)
+                )
+            ).scalar() or 0
+        except Exception:
+            current_count = 1  # defensive: keep current binding on lookup error
+        if current_count > 0:
+            return row.cost_database_id
+        logger.info(
+            "auto_bind_dominant_catalogue: re-binding %s — current %r has 0 rows",
+            project_id, row.cost_database_id,
+        )
+        row.cost_database_id = None
 
     # Resolve the project's preferred catalogue language so we can
     # bias selection toward language-matching candidates first.

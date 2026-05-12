@@ -37,6 +37,7 @@ import {
   ExternalLink,
   FileSpreadsheet,
   FileText,
+  Info,
   Languages,
   Layers,
   Library,
@@ -712,7 +713,7 @@ function CatalogueAdvisor({
   // by rate count. Region prefix match: e.g. project region "US" boosts
   // any catalogue id starting with "US" (USA_NEWYORK, USA_USD, …).
   const recommendations = useMemo(() => {
-    if (!dbsQ.data || !projectLanguage) return [];
+    if (!Array.isArray(dbsQ.data) || !projectLanguage) return [];
     const regionPrefix = (projectRegion || '').slice(0, 2).toUpperCase();
     return [...dbsQ.data]
       .filter((db) => db.ready && (db.language || '').toLowerCase() === projectLanguage)
@@ -731,7 +732,7 @@ function CatalogueAdvisor({
   const showInstallables = showAdvisor && !dbsQ.isLoading && recommendations.length === 0;
   const installablesQ = useQuery({
     enabled: showInstallables,
-    queryKey: ['catalogues-v3'],
+    queryKey: ['catalogues-v3', 'advisor-flat'],
     queryFn: async () => {
       const token = (await import('@/stores/useAuthStore')).useAuthStore
         .getState()
@@ -1352,13 +1353,28 @@ export function MatchElementsPage() {
   const [showTextModal, setShowTextModal] = useState(false);
   const [showExcelModal, setShowExcelModal] = useState(false);
   // Set by the wizard's onComplete the moment a session is created and a
-  // match is kicked off. The MatchProgressCard polls /progress until the
-  // backend flips status to "done", then clears this flag so the regular
-  // results UI takes over. Surviving the brief race between "session
-  // created" and "first progress write reaches the DB" matters — without
-  // this flag we'd flash the empty results pane before the progress card
-  // ever painted.
+  // match is kicked off. The MatchProgressCard takes over the viewport
+  // until the kickoff mutation resolves; clearing this flag hands back
+  // to the regular results UI. Surviving the brief race between "session
+  // created" and "results pane first paint" matters — without this flag
+  // we'd flash the empty results pane before the card ever painted.
   const [matchInFlight, setMatchInFlight] = useState(false);
+  // Drives the MatchProgressCard. ``running`` is the default while the
+  // kickoff is in flight; ``done`` finalises the timeline; ``error``
+  // shows the retry footer with the message captured below. Decoupled
+  // from ``matchInFlight`` so we can keep the card mounted on error
+  // until the user clicks "Try again".
+  const [matchStatus, setMatchStatus] = useState<
+    'running' | 'done' | 'error'
+  >('running');
+  const [matchError, setMatchError] = useState<string | null>(null);
+  // Tracks where the in-flight match came from so the progress card's
+  // "Try again" button can do the right thing: wizard kickoffs send the
+  // user back to Step 4 (clear sessionId), toolbar re-runs stay on the
+  // current session (clear only matchInFlight).
+  const [matchKickoffFrom, setMatchKickoffFrom] = useState<
+    'wizard' | 'toolbar'
+  >('wizard');
 
   // Honour the ?project=<id> deep-link: if the URL names a project that
   // differs from the active one, switch the store. This is what makes
@@ -1412,6 +1428,18 @@ export function MatchElementsPage() {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showAllGroupKeys, setShowAllGroupKeys] = useState(false);
+  // Header info popover — describes what /match-elements does in plain
+  // language. Single boolean toggled by clicking the "(i)" icon next to
+  // the page title; closes on outside-click or Escape.
+  const [infoOpen, setInfoOpen] = useState(false);
+  useEffect(() => {
+    if (!infoOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setInfoOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [infoOpen]);
 
   // Project metadata (region) — needed at the page scope so we can pin the
   // matching catalogue row in CataloguesPanelCard. Shares the React Query
@@ -1443,6 +1471,8 @@ export function MatchElementsPage() {
     setActiveBimModelId(null);
     setSelected(new Set());
     setMatchInFlight(false);
+    setMatchStatus('running');
+    setMatchError(null);
   }, [projectId]);
 
   // ── Sessions for the resume picker ───────────────────────────────────
@@ -1551,11 +1581,14 @@ export function MatchElementsPage() {
               { method },
             ),
       );
-      // Surface the progress card for toolbar-driven re-runs too — same
-      // poll endpoint, same timeline. Without this the user re-runs
-      // "vector" from the toolbar and stares at the existing busy
-      // banner for 30-90s with no per-stage feedback.
+      // Surface the progress card for toolbar-driven re-runs too —
+      // same wall-clock heuristic timeline. Without this the user
+      // re-runs "vector" from the toolbar and stares at the existing
+      // busy banner for 30-90s with no per-stage feedback.
       setMatchInFlight(true);
+      setMatchStatus('running');
+      setMatchError(null);
+      setMatchKickoffFrom('toolbar');
       return matchElementsApi.runMatch(sessionId, {
         method,
         top_k: 10,
@@ -1566,12 +1599,14 @@ export function MatchElementsPage() {
     onSuccess: () => {
       setBusy(null);
       setError(null);
+      setMatchStatus('done');
       qc.invalidateQueries({ queryKey: ['match-groups', sessionId] });
     },
     onError: (e: Error) => {
       setBusy(null);
       setError(e.message);
-      setMatchInFlight(false);
+      setMatchStatus('error');
+      setMatchError(e.message);
     },
   });
 
@@ -1832,6 +1867,108 @@ export function MatchElementsPage() {
             <h1 className="text-base lg:text-lg leading-none font-semibold text-content-primary">
               {t('match_elements.title', 'Match Elements')}
             </h1>
+            {/* Info popover — explains the page in plain language for
+                first-time visitors. Anchored to the title so the user
+                instinctively looks here when they wonder "wait, what
+                does this actually do?". Subtle styling — content-tertiary
+                stroke so it doesn't compete with the workflow indicator
+                — but explicitly button-shaped + aria-labelled so it's
+                discoverable to keyboard / screen-reader users too. */}
+            <div className="relative inline-block">
+              <button
+                type="button"
+                onClick={() => setInfoOpen((v) => !v)}
+                aria-expanded={infoOpen}
+                aria-label={t(
+                  'match_elements.info.button_aria',
+                  'How matching works',
+                )}
+                title={t(
+                  'match_elements.info.button_title',
+                  'How matching works',
+                )}
+                className="text-content-tertiary hover:text-content-secondary transition-colors inline-flex items-center justify-center w-5 h-5 rounded-full hover:bg-surface-secondary"
+              >
+                <Info className="w-4 h-4" strokeWidth={2} />
+              </button>
+              {infoOpen && (
+                <>
+                  {/* Click-outside catcher — covers the rest of the page
+                      so any tap dismisses without nuking the click that
+                      triggered it. Lower z-index than the panel so the
+                      panel stays interactive. */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setInfoOpen(false)}
+                    aria-hidden
+                  />
+                  <div
+                    role="dialog"
+                    aria-label={t(
+                      'match_elements.info.dialog_aria',
+                      'How matching works',
+                    )}
+                    className="absolute left-0 top-7 z-50 w-80 rounded-xl border border-border-light bg-surface-primary shadow-xl p-4 text-sm text-content-secondary leading-relaxed"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h3 className="text-sm font-semibold text-content-primary">
+                        {t(
+                          'match_elements.info.title',
+                          'How matching works',
+                        )}
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setInfoOpen(false)}
+                        aria-label={t('common.close', 'Close')}
+                        className="text-content-tertiary hover:text-content-primary -mr-1 -mt-1 w-6 h-6 rounded inline-flex items-center justify-center"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <ul className="space-y-1.5 text-[13px] list-disc list-outside ms-4 marker:text-content-tertiary">
+                      <li>
+                        {t(
+                          'match_elements.info.bullet_upload',
+                          'Upload your BIM model or BoQ.',
+                        )}
+                      </li>
+                      <li>
+                        {t(
+                          'match_elements.info.bullet_extract',
+                          'We extract elements: descriptions, units, quantities, regions, classification.',
+                        )}
+                      </li>
+                      <li>
+                        {t(
+                          'match_elements.info.bullet_search',
+                          'Each element is searched against the selected cost catalogue using vector similarity + lexical hints + region/unit boost.',
+                        )}
+                      </li>
+                      <li>
+                        {t(
+                          'match_elements.info.bullet_shortlist',
+                          'You get a confidence-scored shortlist per element — pick the best, edit quantity if needed.',
+                        )}
+                      </li>
+                      <li>
+                        {t(
+                          'match_elements.info.bullet_save',
+                          'Save the session — you can revisit, edit, and export it as BoQ later.',
+                        )}
+                      </li>
+                    </ul>
+                    <p className="mt-3 pt-2.5 border-t border-border-light text-[12px] text-content-tertiary">
+                      {t(
+                        'match_elements.info.footer',
+                        'Saved sessions live in the list on this page.',
+                      )}
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
             <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold text-indigo-700 dark:text-indigo-200 bg-white/60 dark:bg-surface-primary/40 border border-indigo-200/70 dark:border-indigo-700/40">
               <Sparkles className="w-2.5 h-2.5" />
               {t('match_elements.hero_eyebrow', 'BIM → BOQ')}
@@ -1975,11 +2112,22 @@ export function MatchElementsPage() {
           projectRegion={projectRegion}
           sessions={sessionsQ.data ?? []}
           onComplete={(id) => {
+            // Session exists — mount the progress card on top of the
+            // wizard slot. The wizard continues to await runMatch in
+            // the background; matchStatus stays "running" until the
+            // wizard fires onMatchSuccess or onMatchError below.
             setSessionId(id);
-            // Mark a fresh match as in-flight so the MatchProgressCard
-            // takes over the viewport until the server reports
-            // ``status: "done"``.
             setMatchInFlight(true);
+            setMatchStatus('running');
+            setMatchError(null);
+            setMatchKickoffFrom('wizard');
+          }}
+          onMatchSuccess={() => {
+            setMatchStatus('done');
+          }}
+          onMatchError={(_id, message) => {
+            setMatchStatus('error');
+            setMatchError(message);
           }}
           onResume={(id) => {
             // Resume path — no kickoff is happening, so don't mount the
@@ -1991,20 +2139,30 @@ export function MatchElementsPage() {
 
       {projectId && sessionId && matchInFlight && (
         <MatchProgressCard
-          sessionId={sessionId}
+          status={matchStatus}
+          errorMessage={matchError}
           onDone={() => {
             setMatchInFlight(false);
+            setMatchStatus('running');
+            setMatchError(null);
             qc.invalidateQueries({ queryKey: ['match-groups', sessionId] });
             qc.invalidateQueries({ queryKey: ['match-session', sessionId] });
             qc.invalidateQueries({ queryKey: ['match-sessions', projectId] });
           }}
-          onError={(msg) => {
+          onRetry={() => {
+            // Wizard kickoffs send the user back to Step 1 of the
+            // wizard (sessionId cleared); toolbar re-runs stay on the
+            // current session and just dismiss the card so the user
+            // can hit the toolbar button again. The wizard remounts
+            // from Step 1 — the user keeps their region context but
+            // re-picks stage / catalogue / source. Lifting picks into
+            // the parent is a later optimisation.
             setMatchInFlight(false);
-            addToast({
-              type: 'error',
-              title: t('match_progress.toast_failed_title', 'Match failed'),
-              message: msg,
-            });
+            setMatchStatus('running');
+            setMatchError(null);
+            if (matchKickoffFrom === 'wizard') {
+              setSessionId(null);
+            }
           }}
         />
       )}

@@ -235,15 +235,51 @@ async def get_match_progress(
 ) -> dict[str, object]:
     """Lightweight progress poll for an in-flight or finished match run.
 
-    Read-only single-row SELECT into the session's ``metadata_["progress"]``
-    bag (populated by :meth:`MatchService.run_match`). The wizard's
-    MatchProgressCard polls this every ~800ms while the match is
-    running and stops as soon as ``status`` flips to ``done`` or
-    ``error``. Always 200 — an idle session returns a neutral payload
-    so the FE never has to special-case 404 vs "no run yet".
+    Read-only — fetches from the process-local in-memory dict the
+    match runner writes to. The wizard's MatchProgressCard polls this
+    every ~800ms while the match is running and stops as soon as
+    ``status`` flips to ``done`` or ``error``. Always 200 — an idle
+    session returns a neutral payload so the FE never has to
+    special-case 404 vs "no run yet".
     """
     await _assert_session_access(session, session_id, current_user_id)
     return await get_service().get_progress(session, session_id)
+
+
+@router.post("/sessions/{session_id}/__debug_set_progress", include_in_schema=False)
+async def debug_set_progress(
+    session_id: uuid.UUID,
+    payload: dict[str, object],
+    session: SessionDep,
+    current_user_id: CurrentUserId,
+) -> dict[str, str]:
+    """Test-only hook to pre-seed the in-memory progress dict.
+
+    Used by ``probe-match-progress-stages.mjs`` to capture the
+    MatchProgressCard at each of the 5 stages even when the real
+    match completes in <2s on the local backend's tiny text fixture.
+    Hidden from the OpenAPI schema (``include_in_schema=False``)
+    because it's not part of the public contract — the only legit
+    caller is the QA probe.
+
+    Safety: the same project-access check the real progress endpoint
+    runs gates this one — a stranger can't poison someone else's
+    session.
+    """
+    await _assert_session_access(session, session_id, current_user_id)
+    from app.modules.match_elements.service import MatchElementsService  # noqa: PLC0415
+
+    MatchElementsService._write_progress(
+        session_id,
+        stage=str(payload.get("stage", "init")),
+        stage_idx=int(payload.get("stage_idx", 1) or 1),
+        groups_done=int(payload.get("groups_done", 0) or 0),
+        groups_total=int(payload.get("groups_total", 0) or 0),
+        started_at=payload.get("started_at"),  # type: ignore[arg-type]
+        status=str(payload.get("status", "running")),
+        error=payload.get("error"),  # type: ignore[arg-type]
+    )
+    return {"ok": "set"}
 
 
 # ── Groups ───────────────────────────────────────────────────────────────

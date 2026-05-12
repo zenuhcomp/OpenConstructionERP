@@ -191,16 +191,26 @@ body {
   right: 0;
 }
 
-/* Invert the off-screen slide animation for RTL */
-[dir='rtl'] .oe-sidebar.-translate-x-full,
-[dir='rtl'] .oe-sidebar.\-translate-x-full {
-  transform: translateX(100%);
+/* Invert the off-screen slide animation for RTL.
+   Scoped to mobile only — the selector's specificity (0,1,2) would
+   otherwise beat Tailwind's `lg:translate-x-0` (0,1,0) on desktop
+   and park the sidebar off-screen in Arabic / Hebrew (GitHub #123). */
+@media (max-width: 1023.98px) {
+  [dir='rtl'] .oe-sidebar.-translate-x-full,
+  [dir='rtl'] .oe-sidebar.\-translate-x-full {
+    transform: translateX(100%);
+  }
 }
 
-/* Main content area: swap padding sides in RTL */
-[dir='rtl'] .lg\:pl-sidebar {
-  padding-left: 0;
-  padding-right: var(--oe-sidebar-width);
+/* Main content area: swap padding sides in RTL.
+   Wrapped in the same `lg` media query Tailwind uses for
+   `lg:pl-sidebar` so mobile RTL doesn't reserve sidebar width
+   while the drawer is closed (#123 follow-up). */
+@media (min-width: 1024px) {
+  [dir='rtl'] .lg\:pl-sidebar {
+    padding-left: 0;
+    padding-right: var(--oe-sidebar-width);
+  }
 }
 
 /* Print helper: swap padding side */

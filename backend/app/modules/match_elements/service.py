@@ -42,13 +42,14 @@ from app.core.match_service.envelope import (
     confidence_band_for,
 )
 from app.modules.match_elements import ifc_labels, schemas, signature
+from app.modules.match_elements.matchers.resources import ResourcesMatcher
+
 # LexicalMatcher was removed in v3 — sparse matching is handled natively
 # inside the Qdrant ranker (BAAI/bge-m3 sparse vector + RRF fusion). The
 # "lexical" method literal is still accepted by the API for back-compat
 # with stored MatchSession rows, but ``_matcher("lexical")`` now raises
 # NotImplementedError so callers get a clean error instead of silently
 # routing into dead code.
-from app.modules.match_elements.matchers.resources import ResourcesMatcher
 from app.modules.match_elements.matchers.vector import VectorMatcher
 from app.modules.match_elements.models import (
     MatchGroup,
@@ -740,8 +741,20 @@ def _envelope_from_group(
     # 1. Human category (translated IFC label) — anchors the embedding.
     ifc_meta = ifc_labels.lookup(sample.category)
     category_label = ifc_meta.en_label
-    parts.append(category_label)
+    # For free-text / BoQ sources the category is a placeholder
+    # ("Text" / generic IFC fallback) and carries no signal — skip it
+    # so the embedding query is dominated by the actual ``raw_text`` /
+    # description rather than a noise word.
+    if source not in {"text", "boq"}:
+        parts.append(category_label)
     # 2. Type / family name — usually the most discriminating signal.
+    # For text / boq sources the ``raw_text`` / ``description`` IS the
+    # user query — include it verbatim so vector search sees the line
+    # the user actually wrote ("Concrete C30/37 wall, 240mm") instead
+    # of a collapsed group label.
+    raw_text = _attr("raw_text", "description")
+    if source in {"text", "boq"} and raw_text:
+        parts.append(raw_text)
     type_name = _attr("type_name", "Type", "Family", "name")
     if type_name and type_name != category_label:
         parts.append(type_name)
@@ -1118,11 +1131,25 @@ class MatchElementsService:
                 spec.project_id, exc,
             )
 
-        # Default group-by — the two attributes that produce stable,
-        # estimable groups across BIM authors.
-        group_by = list(spec.group_by) if spec.group_by else [
-            "ifc_class", "type_name",
-        ]
+        # Default group-by — source-aware:
+        #
+        # * BIM / DWG / image: ``["ifc_class", "type_name"]`` produces
+        #   stable, estimable groups across BIM authors (rows that share
+        #   IfcClass + family name nearly always carry the same rate).
+        # * text / boq: each free-form line / row is semantically its
+        #   own thing — collapsing them under one ``ifc_class:Text``
+        #   bucket would discard every distinct query and run vector
+        #   search on the meaningless rolled-up label, returning zero
+        #   useful matches. Group by ``raw_text`` / ``description``
+        #   instead so the matcher sees per-row signal.
+        if spec.group_by:
+            group_by = list(spec.group_by)
+        elif spec.source == "text":
+            group_by = ["raw_text"]
+        elif spec.source == "boq":
+            group_by = ["description"]
+        else:
+            group_by = ["ifc_class", "type_name"]
         # Sane subtractive default: voids/annotations/grids hidden by
         # default. Caller can pass [] to keep them visible (e.g. a QA
         # session debugging an opening deduction).
@@ -1664,9 +1691,24 @@ class MatchElementsService:
 
     # ── Run match ─────────────────────────────────────────────────────
 
-    @staticmethod
+    # In-memory progress store, keyed by session_id. Deliberately NOT
+    # a DB column: the run-match request holds an open transaction for
+    # the full match duration (30s-3min on big BIM models), and on
+    # SQLite (the dev / single-VPS backend) any concurrent write to
+    # ``MatchSession`` would contend for the global write lock,
+    # deadlocking the server against the collab-lock sweeper and
+    # Qdrant writers. A module-level dict is process-local — same as
+    # the existing rate-limit + tenant caches — which is fine for the
+    # single-worker dev deploy and the typical 1-worker uvicorn prod
+    # install. Multi-worker deploys would degrade to "no progress
+    # poll" gracefully (FE falls back to its legacy spinner); a
+    # follow-up could move this to Redis with the same key shape.
+    _progress: dict[str, dict[str, Any]] = {}
+
+    @classmethod
     def _write_progress(
-        sess: MatchSession,
+        cls,
+        session_id: uuid.UUID,
         *,
         stage: str,
         stage_idx: int,
@@ -1676,12 +1718,9 @@ class MatchElementsService:
         status: str = "running",
         error: str | None = None,
     ) -> None:
-        """Persist a progress snapshot onto the session's metadata bag.
+        """Update the in-memory progress snapshot for the session.
 
-        Cheap — one JSON column update per stage transition. The
-        ``/sessions/{id}/progress`` polling endpoint reads this back so
-        the wizard can paint a real progress timeline while the match
-        runs server-side. Stages mirror the runner's loop boundaries:
+        Stages mirror the runner's loop boundaries:
 
         * ``init``      — session loaded, project context fetched
         * ``elements``  — source adapter iterating BIM/Excel/text rows
@@ -1693,8 +1732,8 @@ class MatchElementsService:
         ``groups_done`` / ``groups_total`` populate the per-stage
         counter rendered in the FE timeline.
         """
-        meta = dict(sess.metadata_ or {})
-        progress = dict(meta.get("progress") or {})
+        key = str(session_id)
+        progress = dict(cls._progress.get(key) or {})
         progress.update(
             {
                 "stage": stage,
@@ -1710,23 +1749,27 @@ class MatchElementsService:
             progress["started_at"] = started_at
         if error is not None:
             progress["error"] = error
-        meta["progress"] = progress
-        sess.metadata_ = meta
+        cls._progress[key] = progress
 
     async def get_progress(
         self, db: AsyncSession, session_id: uuid.UUID,
     ) -> dict[str, Any]:
         """Read the latest progress snapshot for a match session.
 
-        Returns a stable shape even when no match has ever been kicked
-        off so the FE can render a neutral "idle" state without an
-        endpoint shape fork.
+        Reads from the in-memory ``_progress`` dict — see
+        :meth:`_write_progress` for the design rationale (SQLite
+        write-lock contention vs. the long-running match transaction).
+        Returns a stable shape even when no match has ever been
+        kicked off so the FE can render a neutral "idle" state
+        without an endpoint shape fork.
+
+        Auth still flows through ``_assert_session_access`` in the
+        router so a poll for someone else's session returns 404.
+        ``db`` is kept on the signature for symmetry with the rest of
+        the service even though the body doesn't touch it.
         """
-        sess = await db.get(MatchSession, session_id)
-        if sess is None:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=404, detail="Session not found")
-        progress = dict((sess.metadata_ or {}).get("progress") or {})
+        del db  # see docstring — kept for signature symmetry
+        progress = dict(self._progress.get(str(session_id)) or {})
         return {
             "stage": progress.get("stage", "idle"),
             "stage_idx": int(progress.get("stage_idx") or 0),
@@ -1753,15 +1796,16 @@ class MatchElementsService:
         # needs an authoritative "stage 1 / 5 — Loading" row to render
         # the timeline even while we're still doing the project-context
         # fetch. Wrapped in a flush so the next poll sees the change.
+        import time as _time  # noqa: PLC0415 — local import keeps top-of-file clean
+        run_started = _time.perf_counter()
         started_iso = datetime.now(UTC).isoformat()
         self._write_progress(
-            sess,
+            session_id,
             stage="init",
             stage_idx=1,
             started_at=started_iso,
             status="running",
         )
-        await db.flush()
 
         # Load project context once so envelopes/matchers can scope
         # candidate search by the project's expected currency and region
@@ -1784,18 +1828,118 @@ class MatchElementsService:
         # Auto-bind catalogue late: existing sessions created before this
         # check landed don't trigger the create_session path again, so we
         # repeat the bind here. Idempotent — no-op when already bound.
+        bound_catalogue_id: str | None = None
         if spec.method == "vector":
             try:
                 from app.modules.projects.service import (  # noqa: PLC0415
                     auto_bind_dominant_catalogue,
                 )
 
-                await auto_bind_dominant_catalogue(db, sess.project_id)
+                bound_catalogue_id = await auto_bind_dominant_catalogue(
+                    db, sess.project_id,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.info(
                     "match_elements: late auto-bind skipped for %s: %s",
                     sess.project_id, exc,
                 )
+
+            # Stale-binding short-circuit: when ``auto_bind`` returns
+            # ``None`` (no catalogue has rows in the active DB) or the
+            # bound catalogue has 0 active rows, ranking every group
+            # against an empty catalogue burns ~6 s per group on Qdrant
+            # round-trips before returning [] candidates. Surface the
+            # state via progress + a structured log line and skip the
+            # ranker loop entirely so the FE can show a clear CTA.
+            from app.modules.costs.models import CostItem  # noqa: PLC0415
+
+            rows_in_bound = 0
+            if bound_catalogue_id:
+                try:
+                    rows_in_bound = (
+                        await db.execute(
+                            select(func.count(CostItem.id))
+                            .where(CostItem.is_active.is_(True))
+                            .where(CostItem.region == bound_catalogue_id)
+                        )
+                    ).scalar() or 0
+                except Exception:
+                    rows_in_bound = 0
+            if not bound_catalogue_id or rows_in_bound == 0:
+                logger.warning(
+                    "match_elements.run_match: bound catalogue has no rows — "
+                    "session=%s project=%s catalogue=%r rows=%d",
+                    session_id, sess.project_id,
+                    bound_catalogue_id, rows_in_bound,
+                )
+                self._write_progress(
+                    session_id,
+                    stage="done",
+                    stage_idx=5,
+                    groups_done=0,
+                    groups_total=0,
+                    started_at=started_iso,
+                    status="done",
+                    error=f"no_catalogue_rows:{bound_catalogue_id or 'none'}",
+                )
+                total_ms = int(
+                    (_time.perf_counter() - run_started) * 1000
+                )
+                logger.info(
+                    "match_elements.run_match: session=%s method=%s "
+                    "elements=0 groups_total=0 groups_with_candidates=0 "
+                    "candidates=0 catalogue=%r status=no_catalogue_rows "
+                    "total_ms=%d",
+                    session_id, spec.method,
+                    bound_catalogue_id, total_ms,
+                )
+                return []
+
+            # Second short-circuit: SQL has rows but Qdrant collection is
+            # empty / missing / version-mismatched. Without this guard
+            # every group fires a Qdrant search that fails or returns []
+            # — each takes 6+ s of round-trip + retry budget, so a 15-
+            # group run was burning ~100 s producing 0 matches. The
+            # resolver caches result for 30 s, so this probe is cheap.
+            from app.core.match_service.ranker_qdrant import (  # noqa: PLC0415
+                _resolve_catalog_status,
+            )
+            try:
+                _cat_status, _sql_cnt, _vec_cnt = await _resolve_catalog_status(
+                    db, bound_catalogue_id,
+                )
+            except Exception:  # noqa: BLE001
+                _cat_status, _sql_cnt, _vec_cnt = "ok", rows_in_bound, 1
+            if _vec_cnt == 0:
+                logger.warning(
+                    "match_elements.run_match: bound catalogue has no "
+                    "vectors — session=%s project=%s catalogue=%r "
+                    "sql=%d vec=0",
+                    session_id, sess.project_id,
+                    bound_catalogue_id, _sql_cnt,
+                )
+                self._write_progress(
+                    session_id,
+                    stage="done",
+                    stage_idx=5,
+                    groups_done=0,
+                    groups_total=0,
+                    started_at=started_iso,
+                    status="done",
+                    error=f"catalog_not_vectorized:{bound_catalogue_id}",
+                )
+                total_ms = int(
+                    (_time.perf_counter() - run_started) * 1000
+                )
+                logger.info(
+                    "match_elements.run_match: session=%s method=%s "
+                    "elements=0 groups_total=0 groups_with_candidates=0 "
+                    "candidates=0 catalogue=%r status=catalog_not_vectorized "
+                    "total_ms=%d",
+                    session_id, spec.method,
+                    bound_catalogue_id, total_ms,
+                )
+                return []
 
         matcher = self._matcher(spec.method, db)
 
@@ -1803,12 +1947,11 @@ class MatchElementsService:
         # photo). For BIM models this is the per-element fetch + join
         # that can run a few seconds on a 50k-element model.
         self._write_progress(
-            sess,
+            session_id,
             stage="elements",
             stage_idx=2,
             started_at=started_iso,
         )
-        await db.flush()
 
         # Re-read source so we can compose envelopes per group.
         adapter = self._adapter(sess.source, db, sess)
@@ -1820,6 +1963,26 @@ class MatchElementsService:
             use_net_quantities=sess.use_net_quantities,
         )
         by_id = {e.id: e for e in all_elements}
+
+        # Auto-rebuild groups on first run for this session — same guard
+        # ``list_groups`` uses. Without this, the wizard's "create →
+        # immediately run match" path returns an empty result list
+        # because ``create_session`` doesn't seed any :class:`MatchGroup`
+        # rows: it persists the session metadata, then the FE fires
+        # ``POST /sessions/{id}/match`` straight away, the SELECT below
+        # finds zero rows, and the for-loop never executes. Symptom is
+        # exactly what users report — "matching is fast but produces
+        # nothing" / "matching does nothing on TOP / Any stage". Mirrors
+        # ``list_groups``' behaviour at L1502-1508 so the two entry
+        # points are now consistent. Idempotent on subsequent runs
+        # because rebuild_groups preserves confirmed/applied rows and
+        # only re-derives unmatched/suggested ones.
+        existing_group_count = (await db.execute(
+            select(func.count(MatchGroup.id))
+            .where(MatchGroup.session_id == session_id)
+        )).scalar_one()
+        if existing_group_count == 0:
+            await self.rebuild_groups(db, session_id)
 
         target_keys = spec.group_keys
         stmt = select(MatchGroup).where(MatchGroup.session_id == session_id)
@@ -1841,16 +2004,17 @@ class MatchElementsService:
         # bar advances visibly even on small (5-10 group) sessions.
         groups_total = len(rows)
         self._write_progress(
-            sess,
+            session_id,
             stage="ranking",
             stage_idx=3,
             groups_done=0,
             groups_total=groups_total,
             started_at=started_iso,
         )
-        await db.flush()
 
         out: list[schemas.GroupSummary] = []
+        total_candidates = 0
+        groups_with_candidates = 0
         # Throttle the per-group progress flush: at >50 groups, writing
         # JSON + flushing every iteration adds measurable overhead on
         # SQLite (the dev/VPS backend). The 4-group cadence keeps the FE
@@ -1873,7 +2037,17 @@ class MatchElementsService:
                     project_currency=project_currency,
                     project_region=project_region,
                 )
-            except ValueError:
+            except ValueError as exc:
+                # ValueError from envelope construction means the source
+                # type wasn't in :data:`SourceType` (Literal narrows to a
+                # closed set), or a structured field violated its
+                # constraint. Either way, skipping is safer than crashing
+                # the whole match run — but log so we notice if it
+                # regresses.
+                logger.warning(
+                    "run_match: skip group %s — envelope build failed: %s",
+                    grow.group_key, exc,
+                )
                 continue
             try:
                 candidates = await matcher.rank(
@@ -1888,6 +2062,10 @@ class MatchElementsService:
                     spec.method, grow.group_key, exc,
                 )
                 candidates = []
+
+            total_candidates += len(candidates)
+            if candidates:
+                groups_with_candidates += 1
 
             # Persist per-method results.
             methods = dict(grow.methods or {})
@@ -1950,27 +2128,34 @@ class MatchElementsService:
                 )
             )
 
-            # Throttled per-group flush: keeps the polling bar advancing
-            # smoothly without writing on every single tick. The final
-            # update (idx == last) always flushes so the FE doesn't sit
-            # at "47 / 48" when the actual loop is done.
+            # In-memory only counter update — we deliberately avoid
+            # ``await db.flush()`` here. On SQLite, flushing per group
+            # holds the write lock open across the next group's read
+            # of MatchGroup, which deadlocks against the BIM hub's
+            # Qdrant + DB writes happening concurrently. The progress
+            # poll reads the session row via a separate transaction
+            # so the in-memory mutation isn't visible until the final
+            # flush below — but the per-stage transitions (init →
+            # elements → ranking → save → done) already give the FE
+            # enough signal at the boundaries that matter. The
+            # counter inside ranking advances atomically with the
+            # stage flip to ``save``.
             if (idx + 1) % flush_every == 0 or idx == groups_total - 1:
                 self._write_progress(
-                    sess,
+                    session_id,
                     stage="ranking",
                     stage_idx=3,
                     groups_done=idx + 1,
                     groups_total=groups_total,
                     started_at=started_iso,
                 )
-                await db.flush()
 
         # Stage 4: persisting results (auto-confirms, signature
-        # backfills, session activity bump). Briefly held — the bulk of
-        # the DB writes already happened in the per-group flushes above,
-        # so this stage usually flashes by in < 200ms.
+        # backfills, session activity bump). The bulk of the DB writes
+        # already happened in the per-group iterations above; this
+        # stage usually flashes by in < 200ms.
         self._write_progress(
-            sess,
+            session_id,
             stage="save",
             stage_idx=4,
             groups_done=groups_total,
@@ -1985,7 +2170,7 @@ class MatchElementsService:
         # Stage 5: terminal — the FE polling card watches for this to
         # fade out and reveal the results pane.
         self._write_progress(
-            sess,
+            session_id,
             stage="done",
             stage_idx=5,
             groups_done=groups_total,
@@ -1993,7 +2178,27 @@ class MatchElementsService:
             started_at=started_iso,
             status="done",
         )
-        await db.flush()
+        # One observable log line per match run — element_count is the
+        # source-side fanout, candidate_count is what came back from the
+        # ranker stack across all groups, hits_groups tracks how many of
+        # those groups got *any* candidate (a 15-group run that returns
+        # 0 for every group is the user's "матчинг никакой не происходит"
+        # symptom). total_ms is wall-clock — slow runs jump out
+        # immediately when grepping logs.
+        total_ms = int((_time.perf_counter() - run_started) * 1000)
+        logger.info(
+            "match_elements.run_match: session=%s method=%s elements=%d "
+            "groups_total=%d groups_with_candidates=%d candidates=%d "
+            "stage=%s total_ms=%d",
+            session_id,
+            spec.method,
+            len(all_elements),
+            groups_total,
+            groups_with_candidates,
+            total_candidates,
+            getattr(sess, "construction_stage", None) or "(none)",
+            total_ms,
+        )
         return out
 
     # ── Confirm ───────────────────────────────────────────────────────

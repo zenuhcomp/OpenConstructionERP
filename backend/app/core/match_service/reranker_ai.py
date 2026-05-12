@@ -35,7 +35,6 @@ from app.core.match_service.envelope import (
     confidence_band_for,
 )
 
-
 # The LLM rerank tier consumes the BGE-RRF score distribution and shifts
 # scores ~5 points higher (LLMs are more decisive than embeddings). The
 # ``sonnet-rerank`` profile in encoder_profiles.json pins HIGH=0.82,

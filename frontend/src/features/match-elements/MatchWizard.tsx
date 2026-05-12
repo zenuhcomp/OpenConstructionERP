@@ -80,10 +80,20 @@ interface Props {
   projectId: string;
   projectRegion: string | null;
   sessions: SessionSummary[];
-  /** Called after a fresh match has been created and the run-match
-   *  POST fired. The parent renders MatchProgressCard until the
-   *  server reports ``status: "done"``. */
+  /** Called the moment the session has been created and the run-match
+   *  POST has been *kicked off* (not awaited). The parent mounts
+   *  MatchProgressCard immediately so the user sees the timeline; the
+   *  wizard continues to await the matcher in the background and
+   *  reports the outcome via ``onMatchSuccess`` / ``onMatchError``. */
   onComplete: (sessionId: string) => void;
+  /** Called once the background run-match POST resolves successfully —
+   *  the page flips MatchProgressCard to ``status='done'`` and the
+   *  card hands over to the results pane. */
+  onMatchSuccess?: (sessionId: string) => void;
+  /** Called when the background run-match POST fails — the page flips
+   *  MatchProgressCard to ``status='error'`` with this message and
+   *  shows the "Try again" button. */
+  onMatchError?: (sessionId: string, message: string) => void;
   /** Called when the user picks an existing session from the Resume
    *  strip — distinct from ``onComplete`` because no match is being
    *  kicked off, so the parent should NOT mount the progress card.
@@ -1090,6 +1100,8 @@ export function MatchWizard({
   projectRegion,
   sessions,
   onComplete,
+  onMatchSuccess,
+  onMatchError,
   onResume,
 }: Props) {
   const handleResume = onResume ?? onComplete;
@@ -1130,20 +1142,34 @@ export function MatchWizard({
       return session.id;
     },
     onSuccess: (sessionId) => {
+      // Mount the progress card the instant the session exists — the
+      // wall-clock heuristic starts ticking from here. Then await the
+      // actual run-match POST in the background and forward the
+      // outcome to the parent so the card can flip to done / error.
+      onComplete(sessionId);
       matchElementsApi
         .runMatch(sessionId, { method: 'vector', top_k: 10, max_groups: 50 })
+        .then(() => {
+          onMatchSuccess?.(sessionId);
+        })
         .catch((err) => {
-          addToast({
-            type: 'warning',
-            title: t('match_wizard.match_kickoff_warn', 'Session created'),
-            message: t(
-              'match_wizard.match_kickoff_warn_msg',
-              'Session is ready, but auto-match failed: {{error}}. Re-run from the toolbar.',
-              { error: err instanceof Error ? err.message : String(err) },
-            ),
-          });
+          const msg = err instanceof Error ? err.message : String(err);
+          if (onMatchError) {
+            onMatchError(sessionId, msg);
+          } else {
+            // Legacy fallback when the parent doesn't wire the error
+            // callback — keep the user informed via a toast.
+            addToast({
+              type: 'warning',
+              title: t('match_wizard.match_kickoff_warn', 'Session created'),
+              message: t(
+                'match_wizard.match_kickoff_warn_msg',
+                'Session is ready, but auto-match failed: {{error}}. Re-run from the toolbar.',
+                { error: msg },
+              ),
+            });
+          }
         });
-      onComplete(sessionId);
     },
     onError: (err: Error) => {
       addToast({

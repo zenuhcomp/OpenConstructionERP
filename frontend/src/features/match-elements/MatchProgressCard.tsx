@@ -1,60 +1,72 @@
 // DDC-CWICR-OE: DataDrivenConstruction · OpenConstructionERP
 // Copyright (c) 2026 Artem Boiko / DataDrivenConstruction
 /**
- * MatchProgressCard — live timeline UI for an in-flight match run.
+ * MatchProgressCard — beautiful, informative progress card for the
+ * /match-elements wizard. Shown the moment the user clicks "Let's match"
+ * on Step 4 and the kickoff mutation flips to pending; replaces the
+ * generic spinner that previously made the app look frozen for the
+ * 5–30s the backend takes to grind through a vector match.
  *
- * Polls ``GET /api/v1/match_elements/sessions/{id}/progress`` every
- * 800ms while a match is running and renders a 5-stage vertical
- * timeline with check / spin / dim icons + the per-stage counter +
- * elapsed time + estimated remaining. Stops polling immediately on
- * ``status: 'done'`` or ``status: 'error'``; calls ``onDone`` so the
- * parent can swap to the results pane.
+ * Backend has no real-time progress feed for matching — it's a single
+ * synchronous POST — so we mirror the wall-clock heuristic pioneered
+ * by ``GlobalCatalogueInstallIndicator``: rotate stage labels on a
+ * fixed timetable and ramp an indeterminate bar from 5% → 95%, then
+ * flip to 100% the instant the parent reports ``status='done'``.
  *
- * Why polling, not SSE: the run-match endpoint is already synchronous
- * (the request thread holds open for the full match duration), so
- * SSE would either compete for the same connection or require a
- * second worker. A 5-byte JSON poll every 800ms is cheap; the typical
- * match finishes in 30-180s so the user sees 40-200 polls per run.
- *
- * Why ``MatchSession.metadata_["progress"]`` instead of a dedicated
- * progress table: the metadata column already exists, requires no
- * migration, and the data is read-once-discard — no analytics value
- * after the match finishes. A new column would be over-engineering.
- *
- * Graceful degradation: when the endpoint 404s (older backend), the
- * card falls back to an undefined-progress shimmer rather than
- * breaking the wizard.
+ * Pure prop-driven; no polling, no global store. The card knows only
+ * what the parent tells it via ``status`` / ``errorMessage`` / the
+ * three lifecycle callbacks.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
+  Banknote,
   Building2,
   Check,
   Database,
+  Layers,
   Loader2,
-  Save,
+  RefreshCw,
+  Search,
   Sparkles,
   TriangleAlert,
+  X,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { matchElementsApi, type MatchProgress, type MatchStage } from './api';
+
+export type MatchProgressStatus = 'running' | 'done' | 'error';
 
 interface Props {
-  sessionId: string;
-  /** Called once when the polled status flips to ``done``. */
+  /** Driven by the parent mutation. ``running`` is the default while the
+   *  POST is in flight; flip to ``done`` to finalise the timeline + bar
+   *  and trigger ``onDone`` after a brief satisfaction frame, or to
+   *  ``error`` to expose the retry button. */
+  status: MatchProgressStatus;
+  /** Surfaced on the active stage row when ``status === 'error'``. */
+  errorMessage?: string | null;
+  /** Called ~800ms after the parent flips to ``status='done'`` — gives
+   *  the user a moment to see "all green, bar 100%" before the results
+   *  pane swaps in. */
   onDone: () => void;
-  /** Called once when status flips to ``error`` (with the message). */
-  onError?: (message: string) => void;
+  /** Called when the user clicks "Try again" in the error footer. The
+   *  parent is expected to return to Step 4 of the wizard. */
+  onRetry?: () => void;
 }
 
 interface StageDef {
-  id: MatchStage;
-  idx: number;
+  id:
+    | 'load'
+    | 'embed'
+    | 'vector'
+    | 'lexical'
+    | 'rerank'
+    | 'currency';
+  /** Wall-clock seconds at which this stage becomes the "active" one.
+   *  The last stage's range extends to infinity. */
+  startSec: number;
   label: string;
-  blurb: string;
-  Icon: typeof Sparkles;
+  Icon: typeof Layers;
 }
 
 function formatElapsed(ms: number): string {
@@ -66,280 +78,219 @@ function formatElapsed(ms: number): string {
   return `${m}m ${rem.toString().padStart(2, '0')}s`;
 }
 
-/** Estimate seconds remaining from the per-group cadence so far.
- *  Returns null until we have at least 2 groups done and 2s of
- *  history — anything earlier would be wildly inaccurate. */
-function estimateRemaining(
-  startedMs: number,
-  nowMs: number,
-  done: number,
-  total: number,
-): number | null {
-  if (total <= 0 || done < 2) return null;
-  const elapsed = nowMs - startedMs;
-  if (elapsed < 2000) return null;
-  const perGroupMs = elapsed / done;
-  const remainingMs = perGroupMs * (total - done);
-  return Math.round(remainingMs / 1000);
+/** Indeterminate ramp 5% → 95% over ~30s. Smooth ease-out so the bar
+ *  rushes early and slows down — matches user expectation that the
+ *  long tail is "almost done, just finishing up". Flips to 100% the
+ *  instant the parent flips to status='done'. */
+function rampPct(elapsedSec: number): number {
+  if (elapsedSec <= 0) return 5;
+  // Logistic-ish curve: saturates near 95% as time → 60s.
+  const k = elapsedSec / 30; // half-life ~15s
+  const eased = 1 - 1 / (1 + k * 1.6);
+  return Math.min(95, Math.round(5 + eased * 90));
 }
 
-export function MatchProgressCard({ sessionId, onDone, onError }: Props) {
+export function MatchProgressCard({
+  status,
+  errorMessage,
+  onDone,
+  onRetry,
+}: Props) {
   const { t } = useTranslation();
-  const firedDoneRef = useRef(false);
-  const firedErrorRef = useRef(false);
-  // Sticks at the last frame's value so the bar doesn't jitter back
-  // to zero on the brief idle → init transition (server takes one
-  // tick to write the first progress snapshot).
-  const [lastNonIdle, setLastNonIdle] = useState<MatchProgress | null>(null);
-
-  const progressQ = useQuery({
-    queryKey: ['match-progress', sessionId],
-    queryFn: () => matchElementsApi.getProgress(sessionId),
-    // Poll while the match is running; the queryFn body itself
-    // detects the terminal states and short-circuits further polls.
-    refetchInterval: (q) => {
-      const data = q.state.data as MatchProgress | undefined;
-      if (!data) return 800;
-      if (data.status === 'done' || data.status === 'error') return false;
-      return 800;
-    },
-    refetchIntervalInBackground: true,
-    // Don't hammer the endpoint on retries — one fast retry is
-    // enough to absorb a transient 502 mid-deploy.
-    retry: 1,
-    // The data is per-session and short-lived; never serve a stale
-    // poll result from cache when the user re-opens the page.
-    staleTime: 0,
-  });
-
-  // 404 = older backend that predates the progress column. The card
-  // gracefully degrades to a generic "match running…" shimmer rather
-  // than blowing up the wizard.
-  const isUnsupported = useMemo(() => {
-    const err = progressQ.error as Error | null;
-    return err?.message?.startsWith('404 ') ?? false;
-  }, [progressQ.error]);
-
-  const progress: MatchProgress | undefined = progressQ.data;
-
-  // Keep a sticky copy of the most-recent non-idle frame so brief
-  // idle-blink between rest and init transitions doesn't reset the
-  // visible bar to zero. Without this the user sees the timeline
-  // pop back to "Loading…" the instant we cross the done boundary.
-  useEffect(() => {
-    if (progress && progress.status !== 'idle') {
-      setLastNonIdle(progress);
-    }
-  }, [progress]);
-
-  // Fire the parent callback exactly once on terminal status.
-  useEffect(() => {
-    if (!progress) return;
-    if (progress.status === 'done' && !firedDoneRef.current) {
-      firedDoneRef.current = true;
-      // Tiny delay so the user sees the "all checks green" frame
-      // for ~600ms before the results pane swaps in. Plays into the
-      // "satisfying finish" feeling Artem asked for ("красивый").
-      const handle = window.setTimeout(onDone, 600);
-      return () => window.clearTimeout(handle);
-    }
-    if (progress.status === 'error' && !firedErrorRef.current) {
-      firedErrorRef.current = true;
-      onError?.(progress.error || 'Match failed');
-    }
-    return undefined;
-  }, [progress, onDone, onError]);
-
-  const startedAt = useMemo(() => {
-    const iso = progress?.started_at ?? lastNonIdle?.started_at ?? null;
-    return iso ? new Date(iso).getTime() : null;
-  }, [progress, lastNonIdle]);
-
-  // Tick clock so the elapsed counter updates every second even
-  // when the underlying poll only fires every 800ms.
+  const startedAtRef = useRef<number>(Date.now());
   const [now, setNow] = useState<number>(Date.now());
+  const firedDoneRef = useRef(false);
+
+  // Reset the wall-clock the moment the card mounts. Using a ref keeps
+  // the start time stable across re-renders without a useState ceremony.
   useEffect(() => {
-    if (progress?.status === 'done' || progress?.status === 'error') return;
+    startedAtRef.current = Date.now();
+  }, []);
+
+  // 1Hz ticker — drives the elapsed counter and stage rotation. Stops
+  // as soon as status flips terminal so we don't churn timers in the
+  // success / error tail.
+  useEffect(() => {
+    if (status !== 'running') return;
     const handle = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(handle);
-  }, [progress?.status]);
+  }, [status]);
+
+  // Fire onDone exactly once, ~800ms after the parent flips to done.
+  // Gives the user a satisfying "all green, bar full" frame before the
+  // results pane swaps in.
+  useEffect(() => {
+    if (status !== 'done' || firedDoneRef.current) return;
+    firedDoneRef.current = true;
+    const handle = window.setTimeout(onDone, 800);
+    return () => window.clearTimeout(handle);
+  }, [status, onDone]);
 
   const stages: StageDef[] = useMemo(
     () => [
       {
-        id: 'init',
-        idx: 1,
-        label: t('match_progress.stage_init', 'Preparing session'),
-        blurb: t(
-          'match_progress.stage_init_blurb',
-          'Loading project context, region, and catalogue binding',
-        ),
+        id: 'load',
+        startSec: 0,
+        label: t('match_progress.stage_load', {
+          defaultValue: 'Loading BIM elements',
+        }),
+        Icon: Layers,
+      },
+      {
+        id: 'embed',
+        startSec: 2,
+        label: t('match_progress.stage_embed', {
+          defaultValue: 'Building embeddings',
+        }),
         Icon: Sparkles,
       },
       {
-        id: 'elements',
-        idx: 2,
-        label: t('match_progress.stage_elements', 'Loading source elements'),
-        blurb: t(
-          'match_progress.stage_elements_blurb',
-          'Reading BIM elements / Excel rows / pasted text',
-        ),
-        Icon: Building2,
+        id: 'vector',
+        startSec: 5,
+        label: t('match_progress.stage_vector', {
+          defaultValue: 'Vector search (top candidates)',
+        }),
+        Icon: Search,
       },
       {
-        id: 'ranking',
-        idx: 3,
-        label: t('match_progress.stage_ranking', 'Ranking candidates'),
-        blurb: t(
-          'match_progress.stage_ranking_blurb',
-          'Vector search + sparse fusion + region/unit boost + rerank',
-        ),
+        id: 'lexical',
+        startSec: 12,
+        label: t('match_progress.stage_lexical', {
+          defaultValue: 'Lexical + region boost',
+        }),
         Icon: Database,
       },
       {
-        id: 'save',
-        idx: 4,
-        label: t('match_progress.stage_save', 'Persisting results'),
-        blurb: t(
-          'match_progress.stage_save_blurb',
-          'Saving suggestions and auto-confirming high-confidence picks',
-        ),
-        Icon: Save,
+        id: 'rerank',
+        startSec: 20,
+        label: t('match_progress.stage_rerank', {
+          defaultValue: 'Rerank by relevance',
+        }),
+        Icon: Building2,
       },
       {
-        id: 'done',
-        idx: 5,
-        label: t('match_progress.stage_done', 'Done'),
-        blurb: t(
-          'match_progress.stage_done_blurb',
-          'Results are ready — opening the review panel',
-        ),
-        Icon: Check,
+        id: 'currency',
+        startSec: 28,
+        label: t('match_progress.stage_currency', {
+          defaultValue: 'Currency normalization',
+        }),
+        Icon: Banknote,
       },
     ],
     [t],
   );
 
-  const view: MatchProgress = progress ??
-    lastNonIdle ?? {
-      stage: 'init',
-      stage_idx: 1,
-      total_stages: 5,
-      groups_done: 0,
-      groups_total: 0,
-      status: 'running',
-      started_at: null,
-      updated_at: null,
-      error: null,
-    };
+  const elapsedMs = Math.max(0, now - startedAtRef.current);
+  const elapsedSec = Math.floor(elapsedMs / 1000);
 
-  const elapsedMs = startedAt ? Math.max(0, now - startedAt) : 0;
-  const remainingSec =
-    startedAt && view.stage === 'ranking'
-      ? estimateRemaining(startedAt, now, view.groups_done, view.groups_total)
-      : null;
-
-  const overallPct = (() => {
-    // Stage weights: init 5%, elements 10%, ranking 75%, save 5%, done 5%.
-    // The ranking band uses groups_done/groups_total to fill smoothly.
-    if (view.status === 'done') return 100;
-    if (view.stage === 'init') return 3;
-    if (view.stage === 'elements') return 10;
-    if (view.stage === 'save') return 95;
-    if (view.stage === 'ranking') {
-      const inner =
-        view.groups_total > 0 ? view.groups_done / view.groups_total : 0;
-      return 15 + Math.round(inner * 75);
+  // Active stage index — wall-clock heuristic. On done, all stages
+  // are past so we point past the array. On error, the active stage
+  // is the one the wall-clock was on when error hit.
+  const activeIdx = useMemo(() => {
+    if (status === 'done') return stages.length;
+    let idx = 0;
+    for (let i = 0; i < stages.length; i++) {
+      const s = stages[i];
+      if (s && elapsedSec >= s.startSec) idx = i;
     }
-    return 0;
-  })();
+    return idx;
+  }, [elapsedSec, status, stages]);
 
-  const isError = view.status === 'error';
-  const isDone = view.status === 'done';
+  const overallPct = status === 'done' ? 100 : rampPct(elapsedSec);
 
-  if (isUnsupported) {
-    // Graceful fallback for older backends that don't expose
-    // /progress yet — show a plain shimmer so the wizard isn't broken
-    // mid-deploy. Disappears as soon as the parent flips to results.
-    return (
-      <div className="rounded-2xl border border-border bg-surface-primary shadow-sm p-6 max-w-3xl mx-auto mt-4">
-        <div className="flex items-center gap-3 text-content-secondary">
-          <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
-          <span className="text-sm">
-            {t(
-              'match_progress.legacy_running',
-              'Matching is running on the server. This may take 30s–3min depending on the model size.',
-            )}
-          </span>
-        </div>
-      </div>
-    );
-  }
+  const isRunning = status === 'running';
+  const isDone = status === 'done';
+  const isError = status === 'error';
+
+  const headline = useMemo(() => {
+    if (isError) {
+      return t('match_progress.headline_error', {
+        defaultValue: 'Something went wrong',
+      });
+    }
+    if (isDone) {
+      return t('match_progress.headline_done', {
+        defaultValue: 'All done — opening your results',
+      });
+    }
+    if (elapsedSec >= 60) {
+      return t('match_progress.headline_long', {
+        defaultValue:
+          'Almost done — large projects can take a minute',
+      });
+    }
+    return stages[activeIdx]?.label ?? stages[0]?.label ?? '';
+  }, [isError, isDone, elapsedSec, stages, activeIdx, t]);
 
   return (
     <div
       className={clsx(
         'rounded-2xl border bg-surface-primary shadow-sm p-5 sm:p-7 max-w-3xl mx-auto mt-4 transition-opacity duration-500',
         isError ? 'border-rose-200 dark:border-rose-800/60' : 'border-border',
-        isDone && 'opacity-90',
       )}
       data-testid="match-progress-card"
-      data-stage={view.stage}
-      data-status={view.status}
+      data-status={status}
+      data-stage={stages[activeIdx]?.id ?? 'done'}
     >
-      {/* Header — title + elapsed + ETA */}
+      {/* Header — title + elapsed */}
       <header className="flex items-start justify-between gap-3 mb-5">
         <div className="min-w-0 flex-1">
           <h3 className="text-lg font-semibold tracking-tight text-content-primary inline-flex items-center gap-2">
             {isError ? (
               <>
                 <TriangleAlert className="w-5 h-5 text-rose-600" />
-                {t('match_progress.title_error', 'Match failed')}
+                {t('match_progress.title_error', {
+                  defaultValue: 'Match failed',
+                })}
               </>
             ) : isDone ? (
               <>
                 <span className="w-6 h-6 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center shadow-sm shadow-emerald-500/40">
                   <Check className="w-4 h-4" strokeWidth={3} />
                 </span>
-                {t('match_progress.title_done', 'Match complete')}
+                {t('match_progress.title_done', {
+                  defaultValue: 'Match complete',
+                })}
               </>
             ) : (
               <>
                 <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
-                {t('match_progress.title_running', 'Matching in progress')}
+                {t('match_progress.title_running', {
+                  defaultValue: 'Matching in progress',
+                })}
               </>
             )}
           </h3>
-          <p className="text-xs text-content-tertiary mt-1.5">
+          <p className="text-xs text-content-tertiary mt-1.5 max-w-xl">
             {isError
-              ? view.error ?? t('match_progress.subtitle_error', 'See the toast for details.')
+              ? errorMessage ??
+                t('match_progress.subtitle_error', {
+                  defaultValue:
+                    'The matcher couldn’t finish — try again or pick a different catalogue.',
+                })
               : isDone
-              ? t(
-                  'match_progress.subtitle_done',
-                  'All stages green — handing over to the review panel.',
-                )
-              : t(
-                  'match_progress.subtitle_running',
-                  'Polling the server every 800ms. Safe to leave open in a tab.',
-                )}
+              ? t('match_progress.subtitle_done', {
+                  defaultValue:
+                    'All stages green — handing over to the review panel.',
+                })
+              : t('match_progress.subtitle_running', {
+                  defaultValue:
+                    'We’re searching the catalogue with vector + lexical + region signals. Safe to leave open in a tab.',
+                })}
           </p>
         </div>
         <div className="shrink-0 text-right tabular-nums">
           <div className="text-[11px] uppercase tracking-[0.14em] text-content-tertiary font-semibold">
-            {t('match_progress.elapsed', 'Elapsed')}
+            {t('match_progress.elapsed', { defaultValue: 'Elapsed' })}
           </div>
           <div className="text-sm font-semibold text-content-primary">
             {formatElapsed(elapsedMs)}
           </div>
-          {remainingSec !== null && remainingSec > 0 && (
-            <div className="text-[11px] text-content-tertiary mt-0.5">
-              {t('match_progress.eta', '~{{s}}s remaining', { s: remainingSec })}
-            </div>
-          )}
         </div>
       </header>
 
-      {/* Overall bar */}
+      {/* Overall progress bar — smooth indeterminate ramp; pinned at
+          100% on done, paused at current value on error. */}
       <div
         className={clsx(
           'h-1.5 rounded-full mb-5 overflow-hidden',
@@ -348,7 +299,7 @@ export function MatchProgressCard({ sessionId, onDone, onError }: Props) {
       >
         <div
           className={clsx(
-            'h-full rounded-full transition-all duration-500 ease-out',
+            'h-full rounded-full transition-all duration-700 ease-out',
             isError
               ? 'bg-rose-500'
               : isDone
@@ -356,30 +307,52 @@ export function MatchProgressCard({ sessionId, onDone, onError }: Props) {
               : 'bg-gradient-to-r from-indigo-500 to-indigo-700',
           )}
           style={{ width: `${overallPct}%` }}
+          role="progressbar"
           aria-valuenow={overallPct}
           aria-valuemin={0}
           aria-valuemax={100}
-          role="progressbar"
-          aria-label={t('match_progress.overall_aria', 'Overall match progress')}
+          aria-label={t('match_progress.overall_aria', {
+            defaultValue: 'Overall match progress',
+          })}
         />
       </div>
 
-      {/* Vertical timeline */}
-      <ol className="space-y-3.5">
-        {stages.map((s) => {
-          const isCurrent = view.stage === s.id && !isError;
-          const isPast =
-            !isError && view.stage_idx > s.idx;
-          const isFinalStageGreen = isDone && s.id === 'done';
-          const stageBadge = (() => {
-            if (isError && view.stage_idx >= s.idx) {
+      {/* Rotating headline — the current stage label, or the long-tail
+          reassurance message after 60s. Bumped to text-sm and bold so
+          it reads as the focal element when the user scans the card. */}
+      <p
+        className={clsx(
+          'text-sm font-semibold mb-5 transition-colors',
+          isError
+            ? 'text-rose-700 dark:text-rose-300'
+            : isDone
+            ? 'text-emerald-700 dark:text-emerald-300'
+            : 'text-content-primary',
+        )}
+        aria-live="polite"
+      >
+        {headline}
+      </p>
+
+      {/* Vertical timeline — 6 stages. Past stages are emerald + check;
+          active stage is indigo + spinner; pending stages dim down. On
+          error the active row flips to a rose X. */}
+      <ol className="space-y-3">
+        {stages.map((s, i) => {
+          const isPast = !isError && i < activeIdx;
+          const isCurrent = !isError && !isDone && i === activeIdx;
+          const isFinalGreen = isDone;
+          const isErrorRow = isError && i === activeIdx;
+
+          const badge = (() => {
+            if (isErrorRow) {
               return (
                 <span className="w-7 h-7 rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 inline-flex items-center justify-center ring-2 ring-rose-200 dark:ring-rose-800/40">
-                  <TriangleAlert className="w-4 h-4" />
+                  <X className="w-4 h-4" strokeWidth={3} />
                 </span>
               );
             }
-            if (isPast || isFinalStageGreen) {
+            if (isPast || isFinalGreen) {
               return (
                 <span className="w-7 h-7 rounded-full bg-emerald-500 text-white inline-flex items-center justify-center shadow-sm shadow-emerald-500/40">
                   <Check className="w-4 h-4" strokeWidth={3} />
@@ -399,69 +372,79 @@ export function MatchProgressCard({ sessionId, onDone, onError }: Props) {
               </span>
             );
           })();
-          const showCounter =
-            s.id === 'ranking' && (isCurrent || isPast) && view.groups_total > 0;
+
           return (
             <li
               key={s.id}
               className={clsx(
-                'flex items-start gap-3 transition-opacity duration-300',
-                !isCurrent && !isPast && !isFinalStageGreen && 'opacity-50',
+                'flex items-center gap-3 transition-opacity duration-300',
+                !isCurrent && !isPast && !isFinalGreen && !isErrorRow && 'opacity-45',
               )}
               data-stage-row={s.id}
               data-active={isCurrent}
-              data-done={isPast || isFinalStageGreen}
+              data-done={isPast || isFinalGreen}
+              data-error={isErrorRow || undefined}
             >
-              {stageBadge}
-              <div className="min-w-0 flex-1 pt-0.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span
-                    className={clsx(
-                      'text-sm transition-colors',
-                      isCurrent
-                        ? 'font-semibold text-content-primary'
-                        : isPast || isFinalStageGreen
-                        ? 'font-medium text-content-secondary'
-                        : 'text-content-tertiary',
-                    )}
-                  >
-                    {s.label}
-                  </span>
-                  {showCounter && (
-                    <span
-                      className={clsx(
-                        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums',
-                        isCurrent
-                          ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/40'
-                          : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/40',
-                      )}
-                    >
-                      {view.groups_done} / {view.groups_total}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-content-tertiary mt-0.5 leading-snug">
-                  {s.blurb}
-                </p>
-                {/* Per-stage thin bar — only on the active ranking stage,
-                    where group-by-group progress is meaningful. */}
-                {showCounter && isCurrent && view.groups_total > 0 && (
-                  <div className="mt-2 h-1 rounded-full bg-surface-secondary overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-indigo-500 to-indigo-700 transition-all duration-500"
-                      style={{
-                        width: `${Math.round(
-                          (view.groups_done / view.groups_total) * 100,
-                        )}%`,
-                      }}
-                    />
-                  </div>
+              {badge}
+              <span
+                className={clsx(
+                  'text-sm transition-colors',
+                  isErrorRow
+                    ? 'font-semibold text-rose-700 dark:text-rose-300'
+                    : isCurrent
+                    ? 'font-semibold text-content-primary'
+                    : isPast || isFinalGreen
+                    ? 'font-medium text-content-secondary'
+                    : 'text-content-tertiary',
                 )}
-              </div>
+              >
+                {s.label}
+              </span>
             </li>
           );
         })}
       </ol>
+
+      {/* Error footer — message + Try again button. Only mounts on
+          error so it doesn't add weight to the running / done states. */}
+      {isError && (
+        <div className="mt-6 rounded-xl border border-rose-200 dark:border-rose-800/60 bg-rose-50/60 dark:bg-rose-950/20 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold text-rose-900 dark:text-rose-100 mb-0.5">
+              {t('match_progress.error_label', {
+                defaultValue: 'Error details',
+              })}
+            </div>
+            <div className="text-xs text-rose-700 dark:text-rose-300 break-words">
+              {errorMessage ||
+                t('match_progress.error_fallback', {
+                  defaultValue: 'Unknown error',
+                })}
+            </div>
+          </div>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-sm shadow-rose-500/30 hover:shadow-md hover:shadow-rose-500/40 hover:-translate-y-px transition-all"
+            >
+              <RefreshCw className="w-4 h-4" />
+              {t('match_progress.retry', { defaultValue: 'Try again' })}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Hint — running state only. Tells the user what to do if it
+          really does take a long time. */}
+      {isRunning && elapsedSec >= 45 && (
+        <p className="text-[11px] text-content-tertiary mt-5 leading-snug">
+          {t('match_progress.long_hint', {
+            defaultValue:
+              'Still working — first runs on large BIM models take longer because vectors are warming up. Subsequent runs on the same project are much faster.',
+          })}
+        </p>
+      )}
     </div>
   );
 }

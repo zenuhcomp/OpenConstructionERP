@@ -43,7 +43,6 @@ from app.core.match_service.envelope import (
     confidence_band_for,
 )
 
-
 # BGE cross-encoder shares its score distribution with the bge-m3 family
 # the bi-encoder uses, so we re-use that profile key. Operators who swap
 # the cross-encoder for a different model can override via env or by

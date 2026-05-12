@@ -247,28 +247,40 @@ export function CataloguesPanelCard({ preferredRegion }: Props) {
     [startInstall, addToast, t, queryClient],
   );
 
+  // Pull `catalogues` once with an Array.isArray guard so every consumer
+  // (sorted/stats/auto-open effect) receives a real array even when the
+  // cached `data` is a bare list, an envelope, an error body, or null
+  // (cross-version cache rehydrate / queryFn shape drift). Fixes
+  // "p.data.filter is not a function" (#124).
+  const catalogues: Catalogue[] = useMemo(() => {
+    const raw = cataloguesQ.data as unknown;
+    if (Array.isArray(raw)) return raw as Catalogue[];
+    if (raw && typeof raw === 'object' && Array.isArray((raw as { catalogues?: unknown }).catalogues)) {
+      return (raw as { catalogues: Catalogue[] }).catalogues;
+    }
+    return [];
+  }, [cataloguesQ.data]);
+
   // Sort with preferred region first, then by status order, then alpha.
   // Server already pre-sorts by status — we only re-pin the project's
   // expected region so the install path is one scroll away.
   const sorted = useMemo<Catalogue[]>(() => {
-    const list = cataloguesQ.data?.catalogues ?? [];
-    if (!preferredRegion) return list;
-    const idx = list.findIndex((c) => c.region === preferredRegion);
-    if (idx <= 0) return list;
-    const pinned = list[idx];
-    if (!pinned) return list;
-    return [pinned, ...list.slice(0, idx), ...list.slice(idx + 1)];
-  }, [cataloguesQ.data?.catalogues, preferredRegion]);
+    if (!preferredRegion) return catalogues;
+    const idx = catalogues.findIndex((c) => c.region === preferredRegion);
+    if (idx <= 0) return catalogues;
+    const pinned = catalogues[idx];
+    if (!pinned) return catalogues;
+    return [pinned, ...catalogues.slice(0, idx), ...catalogues.slice(idx + 1)];
+  }, [catalogues, preferredRegion]);
 
   const stats = useMemo(() => {
-    const list = cataloguesQ.data?.catalogues ?? [];
     return {
-      loaded: list.filter((c) => c.install_status === 'loaded').length,
-      available: list.filter((c) => c.install_status === 'available').length,
-      coming: list.filter((c) => c.install_status === 'coming_soon').length,
-      total: list.length,
+      loaded: catalogues.filter((c) => c.install_status === 'loaded').length,
+      available: catalogues.filter((c) => c.install_status === 'available').length,
+      coming: catalogues.filter((c) => c.install_status === 'coming_soon').length,
+      total: catalogues.length,
     };
-  }, [cataloguesQ.data?.catalogues]);
+  }, [catalogues]);
 
   const handleToggle = useCallback(() => setOpen((o) => !o), []);
 
@@ -281,14 +293,13 @@ export function CataloguesPanelCard({ preferredRegion }: Props) {
   useEffect(() => {
     if (autoOpenedRef.current) return;
     if (!preferredRegion) return;
-    const list = cataloguesQ.data?.catalogues ?? [];
-    if (list.length === 0) return;
-    const target = list.find((c) => c.region === preferredRegion);
+    if (catalogues.length === 0) return;
+    const target = catalogues.find((c) => c.region === preferredRegion);
     if (target && target.install_status === 'available') {
       setOpen(true);
       autoOpenedRef.current = true;
     }
-  }, [preferredRegion, cataloguesQ.data?.catalogues]);
+  }, [preferredRegion, catalogues]);
 
   // Failure path — keep silent / minimal so a borked endpoint doesn't
   // break the rest of /match-elements.

@@ -166,6 +166,21 @@ def _dynamic_confidence_band(
 # ── Catalogue resolution ─────────────────────────────────────────────────
 
 
+# Short-TTL cache for ``_resolve_catalog_status`` keyed by catalog_id. The
+# resolver does an SQL COUNT against ``oe_costs_item`` (which on the dev
+# SQLite carries 100k+ rows without an index on ``region``) plus a Qdrant
+# ``get_collection`` round-trip — each pair takes ~2–7 s. ``run_match``
+# calls into the ranker once per group, so a 15-group match was paying
+# this cost 15× even though the answer doesn't change across the 30 s the
+# match itself takes. Cache invalidates after 30 s so a fresh
+# ``alembic upgrade`` / catalogue install / vectorise still gets picked up
+# without a backend restart.
+_CATALOG_STATUS_CACHE_TTL_SEC: float = 30.0
+_catalog_status_cache: dict[
+    str | None, tuple[float, tuple[MatchStatus, int, int]]
+] = {}
+
+
 async def _resolve_catalog_status(
     db: AsyncSession,
     catalog_id: str | None,
@@ -181,6 +196,15 @@ async def _resolve_catalog_status(
     ``"catalog_not_vectorized"`` so the UI surfaces a clear next step.
     """
 
+    # Short-TTL process-local cache — see ``_CATALOG_STATUS_CACHE_TTL_SEC``.
+    # Each ``run_match`` iterates groups and calls into ``rank`` per-group;
+    # without this every group repeats the SQL COUNT + Qdrant probe even
+    # though the catalogue state doesn't change between groups.
+    now = time.perf_counter()
+    cached = _catalog_status_cache.get(catalog_id)
+    if cached is not None and now - cached[0] < _CATALOG_STATUS_CACHE_TTL_SEC:
+        return cached[1]
+
     from sqlalchemy import func, select
 
     from app.modules.costs.models import CostItem
@@ -194,7 +218,12 @@ async def _resolve_catalog_status(
             ).scalar() or 0
         except Exception:
             total_loaded = 0
-        return ("no_catalogs_loaded", 0, 0) if total_loaded == 0 else ("no_catalog_selected", 0, 0)
+        result: tuple[MatchStatus, int, int] = (
+            ("no_catalogs_loaded", 0, 0) if total_loaded == 0
+            else ("no_catalog_selected", 0, 0)
+        )
+        _catalog_status_cache[catalog_id] = (now, result)
+        return result
 
     try:
         sql_count = (
@@ -217,12 +246,21 @@ async def _resolve_catalog_status(
             ).scalar() or 0
         except Exception:
             total_loaded = 0
-        return ("no_catalogs_loaded", 0, 0) if total_loaded == 0 else ("no_catalog_selected", 0, 0)
+        result = (
+            ("no_catalogs_loaded", 0, 0) if total_loaded == 0
+            else ("no_catalog_selected", 0, 0)
+        )
+        _catalog_status_cache[catalog_id] = (now, result)
+        return result
 
     vec_count = await _qdrant_vector_count(catalog_id)
     if vec_count == 0:
-        return "catalog_not_vectorized", int(sql_count), 0
-    return "ok", int(sql_count), int(vec_count)
+        result = ("catalog_not_vectorized", int(sql_count), 0)
+        _catalog_status_cache[catalog_id] = (now, result)
+        return result
+    result = ("ok", int(sql_count), int(vec_count))
+    _catalog_status_cache[catalog_id] = (now, result)
+    return result
 
 
 async def _qdrant_vector_count(catalog_id: str) -> int:
@@ -231,6 +269,11 @@ async def _qdrant_vector_count(catalog_id: str) -> int:
     Returns 0 (rather than raising) when Qdrant is unreachable so the
     catalogue resolver can collapse onto ``catalog_not_vectorized`` and
     the UI can render the right CTA.
+
+    Falls back to the versionless name (``cwicr_ru``) when the configured
+    versioned name (``cwicr_ru_v3``) is missing — covers dev installs
+    that ingested before the v3 rename without forcing every operator
+    to flip ``CWICR_COLLECTION_VERSION``.
     """
 
     try:
@@ -238,9 +281,17 @@ async def _qdrant_vector_count(catalog_id: str) -> int:
 
         client = _get_client()
         collection = country_to_collection(catalog_id)
-        info = client.get_collection(collection)
-        # ``points_count`` is exposed on the v1.12+ client; older
-        # versions named it ``vectors_count``. Be tolerant.
+        try:
+            info = client.get_collection(collection)
+        except Exception:
+            # Strip the ``_v?`` suffix and try again. Same logic the
+            # search adapter would benefit from — exposed via the
+            # public helper below.
+            base = collection.rsplit("_v", 1)[0] if "_v" in collection else collection
+            if base != collection:
+                info = client.get_collection(base)
+            else:
+                raise
         return int(getattr(info, "points_count", None) or getattr(info, "vectors_count", 0) or 0)
     except Exception as exc:
         logger.debug("ranker_qdrant: collection count for %s failed: %s", catalog_id, exc)

@@ -232,15 +232,28 @@ def _get_encoder() -> Any:
     and sparse representations in one forward pass. INT8 ONNX path
     (``gpahal/bge-m3-onnx-int8``) is the VPS default — ~700 MB on disk,
     near-FP32 recall on AVX512_VNNI hardware.
+
+    Failure mode: when the model can't load (offline install, missing
+    optional extras, broken HF cache) the singleton is stamped with
+    ``False`` so subsequent calls short-circuit instead of paying the
+    full multi-second download/retry on every match request. Mirrors
+    the pattern :mod:`reranker_bge` uses. The caller raises so /match
+    can surface ``catalog_not_vectorized`` instead of hanging.
     """
 
     global _encoder
+    if _encoder is False:
+        raise RuntimeError(
+            "CWICR encoder previously failed to load; install [semantic] extra "
+            "and restart the backend to retry."
+        )
     if _encoder is not None:
         return _encoder
 
     try:
         from FlagEmbedding import BGEM3FlagModel
     except ImportError as exc:  # pragma: no cover
+        _encoder = False
         raise RuntimeError(
             "FlagEmbedding is not installed; install the [semantic] extra: "
             "pip install openconstructionerp[semantic]"
@@ -256,7 +269,12 @@ def _get_encoder() -> Any:
         model = "gpahal/bge-m3-onnx-int8"
 
     logger.info("CWICR encoder: loading %s (int8=%s)", model, use_int8)
-    _encoder = BGEM3FlagModel(model, use_fp16=not use_int8)
+    try:
+        _encoder = BGEM3FlagModel(model, use_fp16=not use_int8)
+    except Exception as exc:  # noqa: BLE001 — any load failure short-circuits
+        logger.warning("CWICR encoder: load failed (%s) — disabling retries", exc)
+        _encoder = False
+        raise RuntimeError(f"CWICR encoder load failed: {exc}") from exc
     return _encoder
 
 
@@ -476,14 +494,31 @@ async def search(
         )
 
     client = _get_client()
-    response = client.query_points(
-        collection_name=collection,
-        prefetch=prefetch,
-        query=FusionQuery(fusion=Fusion.RRF),
-        with_payload=True,
-        with_vectors=False,
-        limit=limit,
-    )
+    try:
+        response = client.query_points(
+            collection_name=collection,
+            prefetch=prefetch,
+            query=FusionQuery(fusion=Fusion.RRF),
+            with_payload=True,
+            with_vectors=False,
+            limit=limit,
+        )
+    except Exception:
+        # Dev installs that ingested CWICR before the v3 collection
+        # rename keep the bare ``cwicr_<lang>`` collection. Strip the
+        # ``_v?`` tail and retry once so a stale ``CWICR_COLLECTION_VERSION``
+        # doesn't break search on those hosts.
+        base = collection.rsplit("_v", 1)[0] if "_v" in collection else collection
+        if base == collection:
+            raise
+        response = client.query_points(
+            collection_name=base,
+            prefetch=prefetch,
+            query=FusionQuery(fusion=Fusion.RRF),
+            with_payload=True,
+            with_vectors=False,
+            limit=limit,
+        )
 
     hits: list[QdrantHit] = []
     for point in response.points:

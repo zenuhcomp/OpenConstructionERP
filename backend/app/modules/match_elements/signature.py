@@ -30,8 +30,13 @@ import unicodedata
 from typing import Any
 
 _WS_RE = re.compile(r"\s+")
+# Only strip unit suffixes that follow a digit — otherwise word
+# boundaries swallow trailing letters from IFC class names ("element"
+# → "elemen" because "t" was treated as the mass-tonne unit). The
+# lookbehind enforces a preceding digit so "240mm" / "1.5kg" / "3t"
+# still collapse while "IfcFurnishingElement" stays intact.
 _UNIT_SUFFIX_RE = re.compile(
-    r"\s*(mm|cm|m|m2|m3|kg|t|stk|pcs)\b", flags=re.IGNORECASE,
+    r"(?<=\d)\s*(mm|cm|m|m2|m3|kg|t|stk|pcs)\b", flags=re.IGNORECASE,
 )
 
 
