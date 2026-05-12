@@ -5,6 +5,55 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] — 2026-05-12 · v3 milestone
+
+Consolidates the entire v2.x line (100+ patch releases between 2026-04-20 and 2026-05-12) into a stable v3.0.0 milestone. Same codebase as v2.9.42 — new version label, refreshed metadata, framed as the v3 release.
+
+### v3 highlights (cumulative since v2.0.0)
+
+**Cost data & match-making**
+- 42 regional cost catalogues (Europe, Americas, Asia, Africa) — CWICR v3 schema
+- AI vector matching via Qdrant + BGE rerank across 11 classification standards (DIN 276, MasterFormat, NRM, GAEB, UNTEC, VOCI, BC3, GB50500, SEKISAN, GESN, BirimFiyat)
+- Per-encoder + per-language confidence thresholds, language-family region aliases
+- Multi-currency BOQ with live FX rollup
+
+**CAD / BIM (no IfcOpenShell)**
+- DDC `cad2data` pipeline: DWG / DGN / IFC / RVT → canonical JSON
+- PDF + DWG takeoff (PaddleOCR + YOLOv11)
+- BIM Quantity Rules + Requirements DSL
+- BCF I/O (issues / viewpoints / validation reports)
+
+**Project control**
+- File-manager (docs / photos / BIM / DWG / sheets / markups / reports / takeoffs in one place),
+  per-folder ACL, per-file activity log, password-protected share links, bulk operations
+- Finance, Procurement, Tendering, Change Orders, Compliance Docs tracker
+- RFI, Submittals, Transmittals, NCR, Inspections, Meetings, Correspondence, Contacts
+- Tasks, Schedule (Gantt), Risk Register, 5D Cost Model
+- Validation (DIN 276 / NRM / MasterFormat / GAEB), Compliance DSL, 3-way invoice match
+
+**Platform**
+- 71 plug-and-play modules with auto-discovery
+- 21 languages, lazy-loaded chunks
+- Apple-style design system, light + dark, route-aware backdrop variants
+- AGPL-3.0 — open data, open standards, open formats
+
+**Security & quality**
+- IDOR sweep across 73+ endpoints, RBAC scopes
+- MIME hardening, share-link password protection
+- 450+ pytest tests, 1600+ vitest tests, integration coverage on critical modules
+
+### Install
+
+```bash
+pip install openconstructionerp==3.0.0
+# or
+docker compose up
+```
+
+PyPI: https://pypi.org/project/openconstructionerp/3.0.0/
+Demo: https://openconstructionerp.com
+Source: https://github.com/datadrivenconstruction/OpenConstructionERP
+
 ## [2.9.42] — 2026-05-12
 
 ### Added

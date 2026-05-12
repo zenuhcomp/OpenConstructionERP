@@ -1,7 +1,7 @@
 [project]
 name = "openconstructionerp"
-version = "2.9.42"
-description = "Open-source construction cost estimation — BOQ, 4D/5D, AI, CAD/BIM takeoff. After install, run: openestimate"
+version = "3.0.0"
+description = "Open-source construction cost estimation — multi-currency BOQ, AI vector matching, CAD/BIM takeoff without IfcOpenShell, 42 regional catalogues, 21 languages. AGPL-3.0. After install, run: openestimate"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.12"
 authors = [
