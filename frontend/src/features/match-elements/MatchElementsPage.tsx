@@ -794,23 +794,26 @@ function CatalogueAdvisor({
   if (!showAdvisor) return null;
 
   const projLangUpper = projectLanguage.toUpperCase() || '—';
-  const boundCatalogue = readiness?.language_mismatch?.bound_catalogue || readiness?.collection || '';
-  const boundLangUpper = (
-    readiness?.language_mismatch?.bound_language || ''
-  ).toUpperCase();
+  // boundCatalogue / boundLang were surfaced in the v2.9.39 message text
+  // ("Currently using {cat} ({lang})…"). Removed in v2.9.40 — naming the
+  // mismatched catalogue (e.g. RU) on a /match-elements view that is
+  // explicitly trying to steer the user *away* from RU just adds noise.
+  // Recommendations + installables grids below are already filtered to
+  // the project language, so the wrong-language catalogue never appears
+  // as an actionable row.
 
   let title: string;
   let detail: string;
   if (isMismatch) {
     title = t(
       'match_elements.advisor_mismatch_title',
-      'Switch to a {{lang}} catalogue',
+      'Pick a {{lang}} catalogue',
       { lang: projLangUpper },
     );
     detail = t(
       'match_elements.advisor_mismatch_detail',
-      'Currently using {{cat}} ({{boundLang}}). Pick a {{lang}} catalogue below to match your project.',
-      { cat: boundCatalogue || '—', boundLang: boundLangUpper || '—', lang: projLangUpper },
+      'Pick a {{lang}} catalogue below — your project speaks {{lang}}, so matches need to come from a same-language rate book.',
+      { lang: projLangUpper },
     );
   } else if (isMissing) {
     title = t(
@@ -1786,33 +1789,39 @@ export function MatchElementsPage() {
         : 3;
 
   return (
-    <div className="p-4 lg:p-6 max-w-[1600px] mx-auto">
-      {/* Hero — page identity + primary actions, integrated step indicator */}
-      <section className="relative overflow-hidden rounded-2xl border border-indigo-200/60 dark:border-indigo-800/60 bg-gradient-to-br from-indigo-50 via-white to-sky-50 dark:from-indigo-950/40 dark:via-surface-primary dark:to-sky-950/30 mb-4 shadow-sm">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute -right-20 -top-20 w-72 h-72 rounded-full bg-gradient-to-br from-indigo-300/30 to-sky-300/20 dark:from-indigo-500/20 dark:to-sky-500/10 blur-3xl"
-        />
-        <div className="relative px-5 py-4 lg:px-6 lg:py-5 flex items-start justify-between gap-3 flex-wrap">
-          <div className="min-w-0">
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/70 dark:bg-surface-primary/60 border border-indigo-200/70 dark:border-indigo-700/50 text-[10px] uppercase tracking-wider font-semibold text-indigo-700 dark:text-indigo-200 mb-2 backdrop-blur-sm">
-              <Sparkles className="w-3 h-3" />
-              {t('match_elements.hero_eyebrow', 'BIM → BOQ')}
-            </div>
-            <h1 className="text-2xl lg:text-[28px] leading-tight font-semibold flex items-center gap-2.5 text-content-primary">
-              <span className="shrink-0 w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20">
-                <Link2 className="w-5 h-5" />
-              </span>
+    <div className="p-3 lg:p-4 max-w-[1600px] mx-auto">
+      {/* Hero — single compact row. Eyebrow chip + title inline; subtitle
+          dropped (the rest of the page makes the purpose obvious) and the
+          oversized icon + decorative blur removed to claw back ~120px of
+          vertical real-estate that used to push the actual workflow below
+          the fold. */}
+      <section className="rounded-xl border border-indigo-200/60 dark:border-indigo-800/60 bg-gradient-to-r from-indigo-50/80 via-white to-sky-50/60 dark:from-indigo-950/30 dark:via-surface-primary dark:to-sky-950/20 mb-2 shadow-sm">
+        <div className="px-3 py-2 lg:px-4 lg:py-2.5 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="shrink-0 w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-sky-500 text-white inline-flex items-center justify-center shadow-sm">
+              <Link2 className="w-3.5 h-3.5" />
+            </span>
+            <h1 className="text-base lg:text-lg leading-none font-semibold text-content-primary">
               {t('match_elements.title', 'Match Elements')}
             </h1>
-            <p className="text-sm text-content-secondary mt-1 max-w-[60ch]">
-              {t(
-                'match_elements.subtitle',
-                'Map BIM elements to CWICR cost positions. Real geometry, real rates, real BOQ.',
-              )}
-            </p>
+            <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold text-indigo-700 dark:text-indigo-200 bg-white/60 dark:bg-surface-primary/40 border border-indigo-200/70 dark:border-indigo-700/40">
+              <Sparkles className="w-2.5 h-2.5" />
+              {t('match_elements.hero_eyebrow', 'BIM → BOQ')}
+            </span>
+            {projectId && (
+              <div className="hidden md:block flex-1 min-w-0 ms-2">
+                <WorkflowStepIndicator
+                  step={workflowStep}
+                  totalGroups={stepperTotalGroups}
+                  confirmedCount={stepperConfirmedCount}
+                  appliedCount={stepperAppliedCount}
+                  hasModel={!!activeBimModelId}
+                  hasSession={!!sessionId}
+                />
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setTemplatesOpen(true)}
@@ -1820,13 +1829,13 @@ export function MatchElementsPage() {
                 'match_elements.library_title',
                 'Cross-project template library',
               )}
-              className="px-3 py-2 text-sm rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white/80 dark:bg-surface-primary/80 hover:bg-white dark:hover:bg-surface-secondary backdrop-blur-sm inline-flex items-center gap-1.5 font-medium text-content-secondary hover:text-content-primary transition shadow-sm"
+              className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white/80 dark:bg-surface-primary/80 hover:bg-white dark:hover:bg-surface-secondary inline-flex items-center gap-1 font-medium text-content-secondary hover:text-content-primary transition"
               title={t(
                 'match_elements.library_title',
                 'Cross-project template library',
               )}
             >
-              <Library className="w-4 h-4" />
+              <Library className="w-3.5 h-3.5" />
               {t('match_elements.library', 'Library')}
             </button>
             <button
@@ -1839,18 +1848,21 @@ export function MatchElementsPage() {
                 'match_elements.refresh_title',
                 'Refresh — pulls latest BIM elements',
               )}
-              className="p-2 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white/80 dark:bg-surface-primary/80 hover:bg-white dark:hover:bg-surface-secondary backdrop-blur-sm disabled:opacity-40 disabled:cursor-not-allowed shadow-sm transition"
+              className="p-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white/80 dark:bg-surface-primary/80 hover:bg-white dark:hover:bg-surface-secondary disabled:opacity-40 disabled:cursor-not-allowed transition"
               title={t(
                 'match_elements.refresh_title',
                 'Refresh — pulls latest BIM elements',
               )}
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
+        {/* Mobile-only workflow indicator (the desktop one is inline in
+            the hero strip above; on narrow screens we drop it to a second
+            row to avoid wrap-overflow). */}
         {projectId && (
-          <div className="relative px-5 lg:px-6 pb-4">
+          <div className="md:hidden px-3 pb-2">
             <WorkflowStepIndicator
               step={workflowStep}
               totalGroups={stepperTotalGroups}
@@ -1867,103 +1879,108 @@ export function MatchElementsPage() {
 
       {projectId && (
         <>
-          {/* Cost catalogues — surfaces all 30 CWICR v3 regions so the
-              user can install the one matching their project region.
-              Solves the "only Russian candidates" complaint when only
-              cwicr_ru_v3 happens to be loaded. Pinned region row sticks
-              to the top so the matching install path is one click away. */}
-          <div className="mt-4">
+          {/* System-readiness row — three status cards (Catalogues +
+              Embedder + Analytics) share a single horizontal row at lg+,
+              stack vertically on smaller screens. Before this change they
+              consumed ~240px of stacked height before the actual workflow
+              became visible; the grid reclaims that for the matching
+              table itself. */}
+          <div className="mt-2 grid grid-cols-1 lg:grid-cols-3 gap-2">
             <CataloguesPanelCard preferredRegion={projectRegion} />
-          </div>
-
-          {/* Free / open-source language model readiness — sits ABOVE
-              Step 1 because if BGE-M3 is missing, semantic matching
-              simply will not work, and the user should see the install
-              path before investing time in picking a model. */}
-          <div className="mt-3">
             <EmbedderStatusCard />
-          </div>
-
-          {/* §10 production observability — collapsible by default so it
-              doesn't dominate the matching UX, but surfaces alerts (low
-              top score, picked-rank>4, zero-hit with hard filter) right
-              at the top when something needs attention. */}
-          <div className="mt-3">
             <MatchAnalyticsCard projectId={projectId} />
           </div>
 
-          {/* Step 1 — BIM model picker (one card per model in the project) */}
-          <section className="mt-3 p-4 rounded-xl border border-border bg-surface-primary shadow-sm">
-            <div className="flex items-baseline justify-between mb-2.5">
-              <h3 className="text-xs uppercase tracking-wider text-content-tertiary font-semibold flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200 inline-flex items-center justify-center text-[10px] font-bold">
-                  1
+          {/* Steps 1 + 2 — BIM model and session are both "source picking";
+              putting them side-by-side at lg+ lets the user see model
+              choice and current session in one glance and removes ~120px
+              of stacked padding. */}
+          <div className="mt-2 grid grid-cols-1 lg:grid-cols-2 gap-2">
+            {/* Step 1 — BIM model picker */}
+            <section className="p-3 rounded-xl border border-border bg-surface-primary shadow-sm">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="text-xs uppercase tracking-wider text-content-tertiary font-semibold inline-flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200 inline-flex items-center justify-center text-[10px] font-bold">
+                    1
+                  </span>
+                  {t('match_elements.region_bim_models', 'BIM model')}
+                </h3>
+                <span
+                  className="text-[10px] text-content-tertiary truncate"
+                  title={t(
+                    'match_elements.region_bim_models_help',
+                    'Pick the source model — quantities are read from here',
+                  )}
+                >
+                  {t(
+                    'match_elements.region_bim_models_help',
+                    'Pick the source model — quantities are read from here',
+                  )}
                 </span>
-                {t('match_elements.region_bim_models', 'BIM model')}
-              </h3>
-              <span className="text-[11px] text-content-tertiary">
-                {t(
-                  'match_elements.region_bim_models_help',
-                  'Pick the source model — quantities are read from here',
-                )}
-              </span>
-            </div>
-            <BIMModelPicker
-              models={bimModelsQ.data ?? []}
-              activeModelId={activeBimModelId}
-              isLoading={bimModelsQ.isLoading}
-              onSelect={(id) => {
-                setActiveBimModelId(id);
-                if (sessionId && visibleSession?.bim_model_id !== id) {
-                  bindSessionToModelMut.mutate(id);
-                }
-              }}
-            />
-          </section>
+              </div>
+              <BIMModelPicker
+                models={bimModelsQ.data ?? []}
+                activeModelId={activeBimModelId}
+                isLoading={bimModelsQ.isLoading}
+                onSelect={(id) => {
+                  setActiveBimModelId(id);
+                  if (sessionId && visibleSession?.bim_model_id !== id) {
+                    bindSessionToModelMut.mutate(id);
+                  }
+                }}
+              />
+            </section>
 
-          {/* Step 2 — Session resume picker */}
-          <section className="mt-3 p-4 rounded-xl border border-border bg-surface-primary shadow-sm">
-            <div className="flex items-baseline justify-between mb-2.5">
-              <h3 className="text-xs uppercase tracking-wider text-content-tertiary font-semibold flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200 inline-flex items-center justify-center text-[10px] font-bold">
-                  2
+            {/* Step 2 — Session resume picker */}
+            <section className="p-3 rounded-xl border border-border bg-surface-primary shadow-sm">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="text-xs uppercase tracking-wider text-content-tertiary font-semibold inline-flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200 inline-flex items-center justify-center text-[10px] font-bold">
+                    2
+                  </span>
+                  {t('match_elements.region_sessions', 'Matching session')}
+                </h3>
+                <span
+                  className="text-[10px] text-content-tertiary truncate"
+                  title={t(
+                    'match_elements.region_sessions_help',
+                    'Resume an existing run or start a new one',
+                  )}
+                >
+                  {t(
+                    'match_elements.region_sessions_help',
+                    'Resume an existing run or start a new one',
+                  )}
                 </span>
-                {t('match_elements.region_sessions', 'Matching session')}
-              </h3>
-              <span className="text-[11px] text-content-tertiary">
-                {t(
-                  'match_elements.region_sessions_help',
-                  'Resume an existing run or start a new one',
-                )}
-              </span>
-            </div>
-            <SessionPicker
-              projectId={projectId}
-              sessions={sessionsQ.data ?? []}
-              isLoading={sessionsQ.isLoading}
-              activeSessionId={sessionId}
-              onPick={(id) => {
-                setSessionId(id);
-                matchElementsApi.touchSession(id).catch(() => {});
-              }}
-              onCreate={() => createSessionMut.mutate()}
-              onCreateText={() => setShowTextModal(true)}
-              onCreateExcel={() => setShowExcelModal(true)}
-              isCreating={createSessionMut.isPending}
-            />
-          </section>
+              </div>
+              <SessionPicker
+                projectId={projectId}
+                sessions={sessionsQ.data ?? []}
+                isLoading={sessionsQ.isLoading}
+                activeSessionId={sessionId}
+                onPick={(id) => {
+                  setSessionId(id);
+                  matchElementsApi.touchSession(id).catch(() => {});
+                }}
+                onCreate={() => createSessionMut.mutate()}
+                onCreateText={() => setShowTextModal(true)}
+                onCreateExcel={() => setShowExcelModal(true)}
+                isCreating={createSessionMut.isPending}
+              />
+            </section>
+          </div>
 
           {/* Step 3 — Group-by chip-bar (drives how elements are grouped) */}
           {sessionId && visibleSession && (
-            <div className="mt-3 p-4 rounded-xl border border-border bg-surface-primary shadow-sm">
-              <div className="flex items-baseline justify-between mb-2.5">
-                <div className="text-xs uppercase tracking-wider text-content-tertiary font-semibold flex items-center gap-1.5">
-                  <span className="w-5 h-5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200 inline-flex items-center justify-center text-[10px] font-bold">
+            <div className="mt-2 p-3 rounded-xl border border-border bg-surface-primary shadow-sm">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="text-xs uppercase tracking-wider text-content-tertiary font-semibold inline-flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200 inline-flex items-center justify-center text-[10px] font-bold">
                     3
                   </span>
                   {t('match_elements.group_by', 'Group by')}
                 </div>
-                <div className="text-[11px] text-content-tertiary">
+                <div className="text-[10px] text-content-tertiary truncate">
                   {visibleSession.group_by.length === 0
                     ? t(
                         'match_elements.group_by_empty',
@@ -2075,22 +2092,22 @@ export function MatchElementsPage() {
            *   • Match strategy  — threshold + net/gross + stage (drives the matcher)
            *   • Filters        — trade buckets (drives what's visible) */}
           {sessionId && visibleSession && (
-            <section className="mt-3 p-4 rounded-xl border border-border bg-surface-primary shadow-sm">
-              <div className="flex items-baseline justify-between mb-3">
-                <h3 className="text-xs uppercase tracking-wider text-content-tertiary font-semibold flex items-center gap-1.5">
-                  <span className="w-5 h-5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200 inline-flex items-center justify-center text-[10px] font-bold">
+            <section className="mt-2 p-3 rounded-xl border border-border bg-surface-primary shadow-sm">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="text-xs uppercase tracking-wider text-content-tertiary font-semibold inline-flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200 inline-flex items-center justify-center text-[10px] font-bold">
                     4
                   </span>
                   {t('match_elements.region_settings', 'Match settings')}
                 </h3>
-                <span className="text-[11px] text-content-tertiary">
+                <span className="text-[10px] text-content-tertiary truncate">
                   {t(
                     'match_elements.region_settings_help',
                     'Tune how matches are found and what shows up below',
                   )}
                 </span>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-3">
                 <Slider
                   label={t(
                     'match_elements.auto_confirm_threshold',
@@ -2159,8 +2176,8 @@ export function MatchElementsPage() {
                   </p>
                 </div>
               </div>
-              <div className="mt-4 pt-3 border-t border-border-light">
-                <div className="text-xs uppercase tracking-wider text-content-tertiary mb-2 font-medium">
+              <div className="mt-3 pt-2 border-t border-border-light">
+                <div className="text-xs uppercase tracking-wider text-content-tertiary mb-1.5 font-medium">
                   {t('match_elements.trade_filter', 'Filter by trade')}
                 </div>
                 <ChipBar<TradeBucket>
@@ -2182,7 +2199,7 @@ export function MatchElementsPage() {
 
           {/* Status counters */}
           {sessionId && (
-            <div className="flex items-center gap-3 mt-4 mb-3 flex-wrap">
+            <div className="flex items-center gap-1.5 mt-2 mb-2 flex-wrap">
               {(['unmatched', 'suggested', 'confirmed', 'skipped', 'tbd', 'applied'] as const).map(
                 (k) => (
                   <button
@@ -2222,7 +2239,7 @@ export function MatchElementsPage() {
 
           {/* Region 4 — Action toolbar */}
           {sessionId && (
-            <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <div className="flex items-center gap-1.5 mb-2 flex-wrap">
               <button
                 onClick={() => runMatchMut.mutate('vector')}
                 disabled={!sessionId || !!busy}
