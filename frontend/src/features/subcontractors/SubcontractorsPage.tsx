@@ -13,6 +13,10 @@ import {
   Award,
   DollarSign,
   ClipboardList,
+  Pencil,
+  Trash2,
+  ShieldAlert,
+  Save,
 } from 'lucide-react';
 import {
   Button,
@@ -21,6 +25,10 @@ import {
   EmptyState,
   Breadcrumb,
   SkeletonTable,
+  ConfirmDialog,
+  WideModal,
+  WideModalSection,
+  WideModalField,
 } from '@/shared/ui';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
@@ -29,6 +37,9 @@ import { getErrorMessage } from '@/shared/lib/api';
 import {
   listSubcontractors,
   createSubcontractor,
+  updateSubcontractor,
+  deleteSubcontractor,
+  getSubcontractorDashboard,
   listAgreements,
   listWorkPackages,
   listPaymentApplications,
@@ -41,6 +52,7 @@ import {
   type AgreementStatus,
   type PaymentApplication,
   type PaymentApplicationStatus,
+  type CreateSubcontractorPayload,
 } from './api';
 
 type DrawerTab = 'scope' | 'payments' | 'ratings' | 'retention';
@@ -75,8 +87,6 @@ const PAYMENT_VARIANT: Record<
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
-
-const labelCls = 'block text-xs font-medium text-content-secondary mb-1';
 
 function toNum(n: number | string | null | undefined): number {
   if (n === null || n === undefined) return 0;
@@ -241,7 +251,12 @@ export function SubcontractorsPage() {
         <DetailDrawer id={selectedId} onClose={() => setSelectedId(null)} />
       )}
 
-      {createOpen && <CreateModal onClose={() => setCreateOpen(false)} />}
+      {createOpen && (
+        <SubcontractorFormModal
+          mode="create"
+          onClose={() => setCreateOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -335,7 +350,14 @@ function SubcontractorTable({
 
 function DetailDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
+  const addToast = useToastStore((s) => s.addToast);
   const [tab, setTab] = useState<DrawerTab>('scope');
+  // Edit + delete UI state — both gated to the loaded subcontractor so
+  // the header buttons can't fire stale operations against a different id.
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const subQ = useQuery({
     queryKey: ['subcontractors', 'detail', id],
@@ -345,6 +367,17 @@ function DetailDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       ),
   });
   const sub = subQ.data;
+
+  // Dashboard rollup — expired/expiring certs, pending retention, KPI roll-up.
+  // Surfaces compliance state in the header without forcing the user to
+  // click into a tab. Errors are silent (server-side scoring may not yet
+  // exist for very fresh tenants).
+  const dashboardQ = useQuery({
+    queryKey: ['subcontractors', 'dashboard', id],
+    queryFn: () => getSubcontractorDashboard(id),
+    enabled: !!id,
+    retry: false,
+  });
 
   const agreementsQ = useQuery({
     queryKey: ['subcontractors', 'agreements', id],
@@ -366,6 +399,29 @@ function DetailDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 
   const agreements = agreementsQ.data ?? [];
   const firstAgreement = agreements[0];
+  const dashboard = dashboardQ.data;
+
+  const handleDelete = async () => {
+    if (!sub) return;
+    setDeleting(true);
+    try {
+      await deleteSubcontractor(sub.id);
+      addToast({
+        type: 'success',
+        title: t('subcontractors.deleted', {
+          defaultValue: '{{name}} deleted',
+          name: sub.legal_name,
+        }),
+      });
+      qc.invalidateQueries({ queryKey: ['subcontractors'] });
+      setDeleteOpen(false);
+      onClose();
+    } catch (err) {
+      addToast({ type: 'error', title: getErrorMessage(err) });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -374,24 +430,93 @@ function DetailDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         className="relative h-full w-full max-w-2xl overflow-y-auto bg-surface-elevated shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border-light bg-surface-elevated px-5 py-3">
-          <div>
-            <h2 className="text-base font-semibold">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border-light bg-surface-elevated px-5 py-3 gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-semibold truncate">
               {sub?.legal_name || t('common.loading', { defaultValue: 'Loading…' })}
             </h2>
             {sub?.trade_name && (
-              <p className="text-xs text-content-tertiary">{sub.trade_name}</p>
+              <p className="text-xs text-content-tertiary truncate">{sub.trade_name}</p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-          >
-            <X size={16} />
-          </button>
+          {/* Action toolbar — Edit + Delete + Close. Disabled while the
+              subcontractor record is still loading so the buttons cannot
+              fire against an undefined id. Edit reopens the form modal in
+              edit mode; Delete is danger-confirmed. */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setEditOpen(true)}
+              disabled={!sub}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border-light bg-surface-primary px-2.5 py-1.5 text-xs font-medium text-content-secondary hover:text-oe-blue hover:border-oe-blue hover:bg-oe-blue-subtle transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label={t('common.edit', { defaultValue: 'Edit' })}
+            >
+              <Pencil size={12} />
+              {t('common.edit', { defaultValue: 'Edit' })}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeleteOpen(true)}
+              disabled={!sub}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border-light bg-surface-primary px-2.5 py-1.5 text-xs font-medium text-content-secondary hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label={t('common.delete', { defaultValue: 'Delete' })}
+            >
+              <Trash2 size={12} />
+              {t('common.delete', { defaultValue: 'Delete' })}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="ml-1 rounded p-1 hover:bg-surface-secondary"
+              aria-label={t('common.close', { defaultValue: 'Close' })}
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
+
+        {/* Compliance banner — only when expiry or block conditions hit.
+            Shows at the very top of the drawer below the action toolbar
+            so dispatcher cannot miss "this sub is currently blocked
+            because Insurance X expired on Y". */}
+        {dashboard && (dashboard.blocked || dashboard.expired_certificates > 0 || dashboard.expiring_soon_certificates > 0) && (
+          <div
+            className={clsx(
+              'border-b px-5 py-2.5 flex items-start gap-2 text-xs',
+              dashboard.blocked || dashboard.expired_certificates > 0
+                ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200'
+                : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200',
+            )}
+          >
+            <ShieldAlert size={14} className="mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1 space-y-0.5">
+              {dashboard.expired_certificates > 0 && (
+                <p>
+                  {t('subcontractors.expired_certs', {
+                    defaultValue: '{{count}} certificate(s) expired',
+                    count: dashboard.expired_certificates,
+                  })}
+                </p>
+              )}
+              {dashboard.expiring_soon_certificates > 0 && (
+                <p>
+                  {t('subcontractors.expiring_soon_certs', {
+                    defaultValue: '{{count}} certificate(s) expiring within 60 days',
+                    count: dashboard.expiring_soon_certificates,
+                  })}
+                </p>
+              )}
+              {dashboard.blocked && dashboard.block_reasons.length > 0 && (
+                <p className="font-medium">
+                  {t('subcontractors.blocked_label', {
+                    defaultValue: 'Payments blocked:',
+                  })}{' '}
+                  {dashboard.block_reasons.join('; ')}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {sub && (
           <>
@@ -525,6 +650,41 @@ function DetailDrawer({ id, onClose }: { id: string; onClose: () => void }) {
           </>
         )}
       </div>
+
+      {/* Edit modal — only mounts when the user clicks "Edit" AND the
+          subcontractor record has finished loading. Reuses CreateModal
+          in edit mode so the field layout stays consistent. */}
+      {editOpen && sub && (
+        <SubcontractorFormModal
+          mode="edit"
+          existing={sub}
+          onClose={() => setEditOpen(false)}
+        />
+      )}
+      {/* Delete confirmation — destructive action, intentionally requires
+          a second click. The danger-variant ConfirmDialog already handles
+          focus trapping + Escape. */}
+      <ConfirmDialog
+        open={deleteOpen}
+        title={t('subcontractors.delete_title', {
+          defaultValue: 'Delete subcontractor?',
+        })}
+        message={
+          sub
+            ? t('subcontractors.delete_message', {
+                defaultValue:
+                  'Delete "{{name}}"? This removes all agreements, work packages, payment applications, retention entries, certificates and ratings linked to this subcontractor. This action cannot be undone.',
+                name: sub.legal_name,
+              })
+            : ''
+        }
+        confirmLabel={t('common.delete', { defaultValue: 'Delete' })}
+        cancelLabel={t('common.cancel', { defaultValue: 'Cancel' })}
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
     </div>
   );
 }
@@ -935,22 +1095,70 @@ function KV({ label, value }: { label: React.ReactNode; value: React.ReactNode }
   );
 }
 
-/* ─── Create modal ─── */
+/* ─── Form modal (create + edit) ─── */
 
-function CreateModal({ onClose }: { onClose: () => void }) {
+interface SubcontractorFormState {
+  legal_name: string;
+  trade_name: string;
+  tax_id: string;
+  trade_categories: string;
+  country: string;
+  website: string;
+  notes: string;
+  prequalification_status: PrequalStatus;
+}
+
+function _toFormState(existing?: Subcontractor): SubcontractorFormState {
+  return {
+    legal_name: existing?.legal_name ?? '',
+    trade_name: existing?.trade_name ?? '',
+    tax_id: existing?.tax_id ?? '',
+    trade_categories: existing?.trade_categories.join(', ') ?? '',
+    country: existing?.country ?? '',
+    website: existing?.website ?? '',
+    notes: existing?.notes ?? '',
+    prequalification_status: existing?.prequalification_status ?? 'pending',
+  };
+}
+
+function _toPayload(form: SubcontractorFormState): CreateSubcontractorPayload {
+  return {
+    legal_name: form.legal_name.trim(),
+    trade_name: form.trade_name.trim() || undefined,
+    tax_id: form.tax_id.trim() || undefined,
+    country: form.country.trim() || undefined,
+    website: form.website.trim() || undefined,
+    notes: form.notes.trim() || undefined,
+    prequalification_status: form.prequalification_status,
+    trade_categories: form.trade_categories
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  };
+}
+
+interface SubcontractorFormModalProps {
+  mode: 'create' | 'edit';
+  existing?: Subcontractor;
+  onClose: () => void;
+}
+
+function SubcontractorFormModal({
+  mode,
+  existing,
+  onClose,
+}: SubcontractorFormModalProps) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
   const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState<SubcontractorFormState>(() =>
+    _toFormState(existing),
+  );
 
-  const [form, setForm] = useState({
-    legal_name: '',
-    trade_name: '',
-    tax_id: '',
-    trade_categories: '',
-    country: '',
-    notes: '',
-  });
+  // Escape/backdrop dismissal + body scroll lock + initial focus are all
+  // handled by <WideModal>; the `busy` prop disables them during in-flight
+  // submits so users do not accidentally lose unsaved input.
 
   const submit = async () => {
     if (!form.legal_name.trim()) {
@@ -964,23 +1172,51 @@ function CreateModal({ onClose }: { onClose: () => void }) {
     }
     setBusy(true);
     try {
-      await createSubcontractor({
-        legal_name: form.legal_name.trim(),
-        trade_name: form.trade_name.trim() || undefined,
-        tax_id: form.tax_id.trim() || undefined,
-        country: form.country.trim() || undefined,
-        notes: form.notes.trim() || undefined,
-        trade_categories: form.trade_categories
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      });
-      addToast({
-        type: 'success',
-        title: t('subcontractors.created', {
-          defaultValue: 'Subcontractor created',
-        }),
-      });
+      const payload = _toPayload(form);
+      if (mode === 'edit' && existing) {
+        // Diff against the original so server-managed columns (rating,
+        // timestamps, etc.) aren't touched when only the trade name was
+        // changed. Keeps PATCH requests small and audit logs readable.
+        const originalPayload = _toPayload(_toFormState(existing));
+        const diff: Partial<CreateSubcontractorPayload> = {};
+        const originalRecord = originalPayload as unknown as Record<string, unknown>;
+        const newRecord = payload as unknown as Record<string, unknown>;
+        const diffRecord = diff as unknown as Record<string, unknown>;
+        (Object.keys(payload) as (keyof CreateSubcontractorPayload)[]).forEach(
+          (k) => {
+            // trade_categories is an array — JSON-compare instead of strict ===.
+            const a = originalRecord[k];
+            const b = newRecord[k];
+            const eq =
+              Array.isArray(a) && Array.isArray(b)
+                ? JSON.stringify(a) === JSON.stringify(b)
+                : a === b;
+            if (!eq) diffRecord[k] = b;
+          },
+        );
+        if (Object.keys(diff).length === 0) {
+          // Nothing changed — close without surprising the user with a
+          // toast that says "updated" when nothing actually changed.
+          onClose();
+          return;
+        }
+        await updateSubcontractor(existing.id, diff);
+        addToast({
+          type: 'success',
+          title: t('subcontractors.updated', {
+            defaultValue: '{{name}} updated',
+            name: form.legal_name.trim(),
+          }),
+        });
+      } else {
+        await createSubcontractor(payload);
+        addToast({
+          type: 'success',
+          title: t('subcontractors.created', {
+            defaultValue: 'Subcontractor created',
+          }),
+        });
+      }
       qc.invalidateQueries({ queryKey: ['subcontractors'] });
       onClose();
     } catch (err) {
@@ -990,117 +1226,166 @@ function CreateModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const set = <K extends keyof SubcontractorFormState>(
+    key: K,
+    value: SubcontractorFormState[K],
+  ): void => setForm((prev) => ({ ...prev, [key]: value }));
+
+  const isEdit = mode === 'edit';
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      onClick={onClose}
-    >
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">
-            {t('subcontractors.new', { defaultValue: 'New Subcontractor' })}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className={labelCls}>
-              {t('subcontractors.legal_name', { defaultValue: 'Legal name' })} *
-            </label>
-            <input
-              value={form.legal_name}
-              onChange={(e) => setForm({ ...form, legal_name: e.target.value })}
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>
-              {t('subcontractors.trade_name', { defaultValue: 'Trade name' })}
-            </label>
-            <input
-              value={form.trade_name}
-              onChange={(e) => setForm({ ...form, trade_name: e.target.value })}
-              className={inputCls}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>
-                {t('subcontractors.tax_id', { defaultValue: 'Tax ID' })}
-              </label>
-              <input
-                value={form.tax_id}
-                onChange={(e) => setForm({ ...form, tax_id: e.target.value })}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>
-                {t('subcontractors.country_iso', {
-                  defaultValue: 'Country (ISO-2)',
-                })}
-              </label>
-              <input
-                value={form.country}
-                onChange={(e) => setForm({ ...form, country: e.target.value })}
-                className={inputCls}
-                maxLength={2}
-              />
-            </div>
-          </div>
-          <div>
-            <label className={labelCls}>
-              {t('subcontractors.trade_categories', {
-                defaultValue: 'Trade categories (comma-separated)',
-              })}
-            </label>
-            <input
-              value={form.trade_categories}
-              onChange={(e) =>
-                setForm({ ...form, trade_categories: e.target.value })
-              }
-              className={inputCls}
-              placeholder="concrete, steel, mep"
-            />
-          </div>
-          <div>
-            <label className={labelCls}>
-              {t('subcontractors.notes', { defaultValue: 'Notes' })}
-            </label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              rows={3}
-              className={clsx(inputCls, 'h-auto py-2')}
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 mt-5">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      busy={busy}
+      title={
+        isEdit
+          ? t('subcontractors.edit_title', { defaultValue: 'Edit subcontractor' })
+          : t('subcontractors.new', { defaultValue: 'New Subcontractor' })
+      }
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button
             variant="primary"
             onClick={submit}
             loading={busy}
-            icon={busy ? <Loader2 size={14} /> : <Plus size={14} />}
+            icon={
+              busy ? (
+                <Loader2 size={14} />
+              ) : isEdit ? (
+                <Save size={14} />
+              ) : (
+                <Plus size={14} />
+              )
+            }
           >
-            {t('common.create', { defaultValue: 'Create' })}
+            {isEdit
+              ? t('common.save', { defaultValue: 'Save' })
+              : t('common.create', { defaultValue: 'Create' })}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection
+        title={t('subcontractors.section_identity', {
+          defaultValue: 'Identity',
+        })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('subcontractors.legal_name', { defaultValue: 'Legal name' })}
+          required
+          span={2}
+        >
+          <input
+            value={form.legal_name}
+            onChange={(e) => set('legal_name', e.target.value)}
+            className={inputCls}
+            placeholder="Acme Construction Ltd."
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('subcontractors.trade_name', { defaultValue: 'Trade name' })}
+        >
+          <input
+            value={form.trade_name}
+            onChange={(e) => set('trade_name', e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('subcontractors.tax_id', { defaultValue: 'Tax ID' })}
+        >
+          <input
+            value={form.tax_id}
+            onChange={(e) => set('tax_id', e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('subcontractors.country_iso', {
+            defaultValue: 'Country (ISO-2)',
+          })}
+        >
+          <input
+            value={form.country}
+            onChange={(e) => set('country', e.target.value)}
+            className={inputCls}
+            maxLength={2}
+            placeholder="DE / GB / US"
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('subcontractors.website', { defaultValue: 'Website' })}
+        >
+          <input
+            value={form.website}
+            onChange={(e) => set('website', e.target.value)}
+            className={inputCls}
+            placeholder="https://"
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      <WideModalSection
+        title={t('subcontractors.section_qualification', {
+          defaultValue: 'Trades & qualification',
+        })}
+      >
+        <WideModalField
+          label={t('subcontractors.trade_categories', {
+            defaultValue: 'Trade categories (comma-separated)',
+          })}
+          hint={t('subcontractors.trade_categories_hint', {
+            defaultValue:
+              'Free-form labels used for tendering filters — e.g. concrete, steel, mep, finishings.',
+          })}
+        >
+          <input
+            value={form.trade_categories}
+            onChange={(e) => set('trade_categories', e.target.value)}
+            className={inputCls}
+            placeholder="concrete, steel, mep"
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('subcontractors.prequal_status', {
+            defaultValue: 'Prequalification status',
+          })}
+        >
+          <select
+            value={form.prequalification_status}
+            onChange={(e) =>
+              set('prequalification_status', e.target.value as PrequalStatus)
+            }
+            className={inputCls}
+          >
+            {(['pending', 'approved', 'suspended', 'rejected'] as PrequalStatus[]).map(
+              (s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ),
+            )}
+          </select>
+        </WideModalField>
+      </WideModalSection>
+
+      <WideModalSection
+        title={t('subcontractors.section_notes', { defaultValue: 'Notes' })}
+      >
+        <WideModalField label={t('subcontractors.notes', { defaultValue: 'Notes' })}>
+          <textarea
+            value={form.notes}
+            onChange={(e) => set('notes', e.target.value)}
+            rows={3}
+            className={clsx(inputCls, 'h-auto py-2')}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }

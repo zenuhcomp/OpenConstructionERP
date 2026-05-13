@@ -453,6 +453,119 @@ def supported_jurisdictions() -> list[str]:
     return sorted(_DEPOSIT_FORFEITURE_RULES.keys())
 
 
+# ── Residual development appraisal (RICS Red Book) ──────────────────────
+
+
+def compute_residual_appraisal(
+    gross_development_value: Decimal | float | int | str,
+    construction_cost: Decimal | float | int | str,
+    professional_fees_pct: Decimal | float | int | str = Decimal("10"),
+    finance_cost: Decimal | float | int | str = Decimal("0"),
+    sales_costs_pct: Decimal | float | int | str = Decimal("3"),
+    developer_profit_target_pct: Decimal | float | int | str = Decimal("20"),
+    contingency_pct: Decimal | float | int | str = Decimal("5"),
+) -> dict[str, Any]:
+    """Run the residual-valuation method (RICS Red Book — Global, 2025).
+
+    Residual Land Value = GDV − (construction + fees + contingency +
+    finance + sales costs + developer profit).
+
+    Profit on Cost = developer_profit / total_costs.
+    Profit on GDV  = developer_profit / GDV.
+
+    All inputs are coerced through ``Decimal`` so callers may pass floats
+    or strings safely.  All percentages are in points (10 = 10%).
+
+    Returns a dict with land value, profit metrics, and the cost breakdown
+    so callers can render an itemised appraisal sheet.
+
+    Pure: no DB / I/O.
+    """
+    gdv = Decimal(str(gross_development_value or 0))
+    cc = Decimal(str(construction_cost or 0))
+    pf_pct = Decimal(str(professional_fees_pct or 0))
+    fin = Decimal(str(finance_cost or 0))
+    sc_pct = Decimal(str(sales_costs_pct or 0))
+    prof_pct = Decimal(str(developer_profit_target_pct or 0))
+    cont_pct = Decimal(str(contingency_pct or 0))
+
+    professional_fees = (cc * pf_pct / Decimal("100"))
+    contingency = (cc * cont_pct / Decimal("100"))
+    sales_costs = (gdv * sc_pct / Decimal("100"))
+    developer_profit = (gdv * prof_pct / Decimal("100"))
+
+    total_costs_excl_land = (
+        cc + professional_fees + contingency + fin + sales_costs + developer_profit
+    )
+    residual_land_value = gdv - total_costs_excl_land
+
+    q = Decimal("0.01")
+    pct_q = Decimal("0.0001")
+    total_dev_cost = cc + professional_fees + contingency + fin + sales_costs
+    # Profit metrics use the developer-profit line as the numerator.
+    profit_on_cost = (
+        (developer_profit / total_dev_cost) if total_dev_cost > 0 else Decimal("0")
+    )
+    profit_on_gdv = (developer_profit / gdv) if gdv > 0 else Decimal("0")
+
+    viable = residual_land_value >= 0
+
+    return {
+        "gdv": gdv.quantize(q),
+        "construction_cost": cc.quantize(q),
+        "professional_fees": professional_fees.quantize(q),
+        "contingency": contingency.quantize(q),
+        "finance_cost": Decimal(str(fin)).quantize(q),
+        "sales_costs": sales_costs.quantize(q),
+        "developer_profit": developer_profit.quantize(q),
+        "total_costs_excl_land": total_costs_excl_land.quantize(q),
+        "residual_land_value": residual_land_value.quantize(q),
+        "profit_on_cost": profit_on_cost.quantize(pct_q),
+        "profit_on_gdv": profit_on_gdv.quantize(pct_q),
+        "viable": viable,
+        "method": "RICS Red Book Global 2025 — Residual Valuation",
+    }
+
+
+def compute_sales_velocity(
+    sold_units: int,
+    total_units: int,
+    months_on_market: Decimal | float | int | str,
+) -> dict[str, Any]:
+    """Return absorption / velocity metrics for a development.
+
+    Velocity = sold_units / months_on_market  (units / month)
+    Absorption_pct = sold_units / total_units * 100
+    Months_to_sellout = (total_units − sold_units) / velocity
+
+    Pure: no DB.
+    """
+    months = Decimal(str(months_on_market or 0))
+    if total_units <= 0 or months <= 0:
+        return {
+            "velocity_units_per_month": Decimal("0"),
+            "absorption_pct": Decimal("0"),
+            "months_to_sellout": None,
+            "sold_units": sold_units,
+            "total_units": total_units,
+        }
+    velocity = Decimal(sold_units) / months
+    absorption = (Decimal(sold_units) / Decimal(total_units)) * Decimal("100")
+    remaining = total_units - sold_units
+    months_to_sellout = (
+        (Decimal(remaining) / velocity).quantize(Decimal("0.1"))
+        if velocity > 0 and remaining > 0
+        else (Decimal("0") if remaining == 0 else None)
+    )
+    return {
+        "velocity_units_per_month": velocity.quantize(Decimal("0.01")),
+        "absorption_pct": absorption.quantize(Decimal("0.01")),
+        "months_to_sellout": months_to_sellout,
+        "sold_units": sold_units,
+        "total_units": total_units,
+    }
+
+
 # ── Service ─────────────────────────────────────────────────────────────
 
 

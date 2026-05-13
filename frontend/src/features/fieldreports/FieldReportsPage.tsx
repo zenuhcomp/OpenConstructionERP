@@ -25,11 +25,18 @@ import {
   Upload,
   FileDown,
   Loader2,
-  AlertTriangle,
-  HardHat,
-  Thermometer,
 } from 'lucide-react';
-import { Button, Card, Badge, EmptyState, Breadcrumb, ConfirmDialog } from '@/shared/ui';
+import {
+  Button,
+  Card,
+  Badge,
+  EmptyState,
+  Breadcrumb,
+  ConfirmDialog,
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -1164,312 +1171,28 @@ function ReportModal({
     onUpdate,
   ]);
 
+  const inputCls = 'w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary';
+  const textareaCls = 'w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary resize-y';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-12 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-2xl border border-border-light bg-surface-primary shadow-2xl animate-fade-in" role="dialog" aria-label={isEdit ? t('fieldreports.edit_report', { defaultValue: 'Edit Field Report' }) : t('fieldreports.new_report', { defaultValue: 'New Field Report' })}>
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border-light px-6 py-4">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {isEdit
-              ? t('fieldreports.edit_report', { defaultValue: 'Edit Field Report' })
-              : t('fieldreports.new_report', { defaultValue: 'New Field Report' })}
-          </h2>
-          <div className="flex items-center gap-2">
-            {isEdit && report && (
-              <Badge variant={STATUS_BADGE_VARIANT[report.status]}>
-                {t(`fieldreports.status_${report.status}`, { defaultValue: report.status })}
-              </Badge>
-            )}
-            <button onClick={onClose} aria-label={t('common.close', { defaultValue: 'Close' })} className="rounded-lg p-2 text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors">
-              <X size={20} />
-            </button>
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-4 space-y-5">
-          {/* Date + Type */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-content-secondary">
-                {t('fieldreports.report_date', { defaultValue: 'Date' })}
-              </label>
-              <input
-                type="date"
-                value={reportDate}
-                onChange={(e) => setReportDate(e.target.value)}
-                className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-                disabled={isEdit && report?.status === 'approved'}
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-content-secondary">
-                {t('fieldreports.report_type', { defaultValue: 'Report Type' })}
-              </label>
-              <select
-                value={reportType}
-                onChange={(e) => setReportType(e.target.value as ReportType)}
-                className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-                disabled={isEdit && report?.status === 'approved'}
-              >
-                {REPORT_TYPES.map((rt) => (
-                  <option key={rt} value={rt}>
-                    {t(`fieldreports.type_${rt}`, { defaultValue: rt.replace(/_/g, ' ') })}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Weather section */}
-          <fieldset className="rounded-lg border border-border-light p-4">
-            <legend className="flex items-center gap-2 px-2 text-sm font-semibold text-content-primary">
-              <Thermometer size={16} />
-              {t('fieldreports.weather', { defaultValue: 'Weather Conditions' })}
-            </legend>
-            <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="col-span-2 sm:col-span-1">
-                <label className="mb-1 block text-xs text-content-tertiary">
-                  {t('fieldreports.condition', { defaultValue: 'Condition' })}
-                </label>
-                <select
-                  value={weatherCondition}
-                  onChange={(e) => setWeatherCondition(e.target.value as WeatherCondition)}
-                  className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-                >
-                  {WEATHER_CONDITIONS.map((wc) => (
-                    <option key={wc} value={wc}>
-                      {t(`fieldreports.weather_${wc}`, { defaultValue: wc })}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-content-tertiary">
-                  {t('fieldreports.temperature', { defaultValue: 'Temp (\u00B0C)' })}
-                </label>
-                <input
-                  type="number"
-                  value={temperatureC}
-                  onChange={(e) => setTemperatureC(e.target.value)}
-                  placeholder="--"
-                  className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-content-tertiary">
-                  {t('fieldreports.wind', { defaultValue: 'Wind' })}
-                </label>
-                <input
-                  type="text"
-                  value={windSpeed}
-                  onChange={(e) => setWindSpeed(e.target.value)}
-                  placeholder={t('fieldreports.wind_placeholder', { defaultValue: 'e.g. 15 km/h NW' })}
-                  className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-content-tertiary">
-                  {t('fieldreports.humidity_label', { defaultValue: 'Humidity (%)' })}
-                </label>
-                <input
-                  type="number"
-                  value={humidity}
-                  onChange={(e) => setHumidity(e.target.value)}
-                  placeholder="--"
-                  min={0}
-                  max={100}
-                  className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-                />
-              </div>
-            </div>
-          </fieldset>
-
-          {/* Workforce section */}
-          <fieldset className="rounded-lg border border-border-light p-4">
-            <legend className="flex items-center gap-2 px-2 text-sm font-semibold text-content-primary">
-              <HardHat size={16} />
-              {t('fieldreports.workforce_section', { defaultValue: 'Workforce' })}
-            </legend>
-            <div className="mt-2 space-y-2">
-              {workforce.map((entry, idx) => (
-                <div key={`workforce-${entry.trade}-${idx}`} className="flex items-center gap-2">
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      list="trades-list"
-                      value={entry.trade}
-                      onChange={(e) => handleWorkforceChange(idx, 'trade', e.target.value)}
-                      placeholder={t('fieldreports.trade', { defaultValue: 'Trade' })}
-                      className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-                    />
-                  </div>
-                  <div className="w-24">
-                    <input
-                      type="number"
-                      value={entry.count || ''}
-                      onChange={(e) =>
-                        handleWorkforceChange(idx, 'count', parseInt(e.target.value, 10) || 0)
-                      }
-                      placeholder={t('fieldreports.count', { defaultValue: 'Count' })}
-                      min={0}
-                      className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-                    />
-                  </div>
-                  <div className="w-24">
-                    <input
-                      type="number"
-                      value={entry.hours || ''}
-                      onChange={(e) =>
-                        handleWorkforceChange(idx, 'hours', parseFloat(e.target.value) || 0)
-                      }
-                      placeholder={t('fieldreports.hours', { defaultValue: 'Hours' })}
-                      min={0}
-                      step={0.5}
-                      className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-                    />
-                  </div>
-                  <button
-                    onClick={() => handleRemoveWorkforce(idx)}
-                    className="rounded p-1 text-semantic-error/60 hover:text-semantic-error hover:bg-semantic-error-bg"
-                    title={t('common.remove', { defaultValue: 'Remove' })}
-                    aria-label={t('common.remove', { defaultValue: 'Remove' })}
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              ))}
-              <datalist id="trades-list">
-                {COMMON_TRADES.map((trade) => (
-                  <option key={trade} value={trade} />
-                ))}
-              </datalist>
-              <button
-                onClick={handleAddWorkforce}
-                className="flex items-center gap-1.5 text-sm text-oe-blue hover:text-oe-blue/80 transition-colors"
-              >
-                <Plus size={14} />
-                {t('fieldreports.add_trade', { defaultValue: 'Add trade' })}
-              </button>
-            </div>
-          </fieldset>
-
-          {/* Work Performed */}
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-content-secondary">
-              {t('fieldreports.work_performed', { defaultValue: 'Work Performed' })}
-            </label>
-            <textarea
-              value={workPerformed}
-              onChange={(e) => setWorkPerformed(e.target.value)}
-              rows={3}
-              placeholder={t('fieldreports.work_performed_placeholder', {
-                defaultValue: 'Describe work activities completed today...',
-              })}
-              className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary resize-y"
-            />
-          </div>
-
-          {/* Delays */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="sm:col-span-2">
-              <label className="mb-1.5 block text-sm font-medium text-content-secondary">
-                {t('fieldreports.delays_label', { defaultValue: 'Delays' })}
-              </label>
-              <textarea
-                value={delays}
-                onChange={(e) => setDelays(e.target.value)}
-                rows={2}
-                placeholder={t('fieldreports.delays_placeholder', {
-                  defaultValue: 'Describe any delays encountered...',
-                })}
-                className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary resize-y"
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-content-secondary">
-                {t('fieldreports.delay_hours', { defaultValue: 'Delay Hours' })}
-              </label>
-              <input
-                type="number"
-                value={delayHours}
-                onChange={(e) => setDelayHours(e.target.value)}
-                min={0}
-                step={0.5}
-                className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-              />
-            </div>
-          </div>
-
-          {/* Safety Incidents */}
-          <div>
-            <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-content-secondary">
-              <AlertTriangle size={14} className="text-amber-500" />
-              {t('fieldreports.safety_incidents', { defaultValue: 'Safety Incidents' })}
-            </label>
-            <textarea
-              value={safetyIncidents}
-              onChange={(e) => setSafetyIncidents(e.target.value)}
-              rows={2}
-              placeholder={t('fieldreports.safety_placeholder', {
-                defaultValue: 'Report any safety incidents or near-misses...',
-              })}
-              className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary resize-y"
-            />
-          </div>
-
-          {/* Visitors + Deliveries */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-content-secondary">
-                {t('fieldreports.visitors', { defaultValue: 'Visitors' })}
-              </label>
-              <input
-                type="text"
-                value={visitors}
-                onChange={(e) => setVisitors(e.target.value)}
-                placeholder={t('fieldreports.visitors_placeholder', {
-                  defaultValue: 'Site visitors today...',
-                })}
-                className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-content-secondary">
-                {t('fieldreports.deliveries', { defaultValue: 'Deliveries' })}
-              </label>
-              <input
-                type="text"
-                value={deliveries}
-                onChange={(e) => setDeliveries(e.target.value)}
-                placeholder={t('fieldreports.deliveries_placeholder', {
-                  defaultValue: 'Materials or equipment delivered...',
-                })}
-                className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary"
-              />
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-content-secondary">
-              {t('fieldreports.notes', { defaultValue: 'Notes' })}
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              placeholder={t('fieldreports.notes_placeholder', {
-                defaultValue: 'Additional notes or observations...',
-              })}
-              className="w-full rounded-lg border border-border-light bg-surface-primary px-3 py-2 text-sm text-content-primary resize-y"
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between border-t border-border-light px-6 py-4">
-          <div className="flex items-center gap-2">
+    <WideModal
+      open
+      onClose={onClose}
+      busy={loading}
+      size="2xl"
+      title={
+        isEdit
+          ? t('fieldreports.edit_report', { defaultValue: 'Edit Field Report' })
+          : t('fieldreports.new_report', { defaultValue: 'New Field Report' })
+      }
+      subtitle={
+        isEdit && report
+          ? t(`fieldreports.status_${report.status}`, { defaultValue: report.status })
+          : undefined
+      }
+      footer={
+        <>
+          <div className="mr-auto flex items-center gap-2">
             {isEdit && report?.status === 'draft' && (
               <Button size="sm" variant="secondary" onClick={() => onSubmit(report.id)} className="shrink-0 whitespace-nowrap">
                 <Send size={14} className="mr-1.5 shrink-0" />
@@ -1483,20 +1206,249 @@ function ReportModal({
               </Button>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="ghost" onClick={onClose}>
-              {t('common.cancel', { defaultValue: 'Cancel' })}
+          <Button size="sm" variant="ghost" onClick={onClose} disabled={loading}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          {(!isEdit || report?.status !== 'approved') && (
+            <Button size="sm" onClick={handleSave} disabled={loading || !reportDate}>
+              {isEdit
+                ? t('common.save', { defaultValue: 'Save' })
+                : t('fieldreports.create', { defaultValue: 'Create Report' })}
             </Button>
-            {(!isEdit || report?.status !== 'approved') && (
-              <Button size="sm" onClick={handleSave} disabled={loading || !reportDate}>
-                {isEdit
-                  ? t('common.save', { defaultValue: 'Save' })
-                  : t('fieldreports.create', { defaultValue: 'Create Report' })}
-              </Button>
-            )}
+          )}
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField label={t('fieldreports.report_date', { defaultValue: 'Date' })}>
+          <input
+            type="date"
+            value={reportDate}
+            onChange={(e) => setReportDate(e.target.value)}
+            className={inputCls}
+            disabled={isEdit && report?.status === 'approved'}
+          />
+        </WideModalField>
+        <WideModalField label={t('fieldreports.report_type', { defaultValue: 'Report Type' })}>
+          <select
+            value={reportType}
+            onChange={(e) => setReportType(e.target.value as ReportType)}
+            className={inputCls}
+            disabled={isEdit && report?.status === 'approved'}
+          >
+            {REPORT_TYPES.map((rt) => (
+              <option key={rt} value={rt}>
+                {t(`fieldreports.type_${rt}`, { defaultValue: rt.replace(/_/g, ' ') })}
+              </option>
+            ))}
+          </select>
+        </WideModalField>
+      </WideModalSection>
+
+      <WideModalSection
+        title={t('fieldreports.weather', { defaultValue: 'Weather Conditions' })}
+        columns={2}
+      >
+        <WideModalField label={t('fieldreports.condition', { defaultValue: 'Condition' })}>
+          <select
+            value={weatherCondition}
+            onChange={(e) => setWeatherCondition(e.target.value as WeatherCondition)}
+            className={inputCls}
+          >
+            {WEATHER_CONDITIONS.map((wc) => (
+              <option key={wc} value={wc}>
+                {t(`fieldreports.weather_${wc}`, { defaultValue: wc })}
+              </option>
+            ))}
+          </select>
+        </WideModalField>
+        <WideModalField label={t('fieldreports.temperature', { defaultValue: 'Temp (\u00B0C)' })}>
+          <input
+            type="number"
+            value={temperatureC}
+            onChange={(e) => setTemperatureC(e.target.value)}
+            placeholder="--"
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('fieldreports.wind', { defaultValue: 'Wind' })}>
+          <input
+            type="text"
+            value={windSpeed}
+            onChange={(e) => setWindSpeed(e.target.value)}
+            placeholder={t('fieldreports.wind_placeholder', { defaultValue: 'e.g. 15 km/h NW' })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('fieldreports.humidity_label', { defaultValue: 'Humidity (%)' })}>
+          <input
+            type="number"
+            value={humidity}
+            onChange={(e) => setHumidity(e.target.value)}
+            placeholder="--"
+            min={0}
+            max={100}
+            className={inputCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      <WideModalSection
+        title={t('fieldreports.workforce_section', { defaultValue: 'Workforce' })}
+        columns={1}
+      >
+        <WideModalField
+          label={t('fieldreports.trade', { defaultValue: 'Trade' })}
+          className="!flex-row !items-center !gap-2 sm:[&>label]:hidden"
+        >
+          <div className="w-full space-y-2">
+            {workforce.map((entry, idx) => (
+              <div key={`workforce-${entry.trade}-${idx}`} className="flex items-center gap-2">
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    list="trades-list"
+                    value={entry.trade}
+                    onChange={(e) => handleWorkforceChange(idx, 'trade', e.target.value)}
+                    placeholder={t('fieldreports.trade', { defaultValue: 'Trade' })}
+                    className={inputCls}
+                  />
+                </div>
+                <div className="w-24">
+                  <input
+                    type="number"
+                    value={entry.count || ''}
+                    onChange={(e) =>
+                      handleWorkforceChange(idx, 'count', parseInt(e.target.value, 10) || 0)
+                    }
+                    placeholder={t('fieldreports.count', { defaultValue: 'Count' })}
+                    min={0}
+                    className={inputCls}
+                  />
+                </div>
+                <div className="w-24">
+                  <input
+                    type="number"
+                    value={entry.hours || ''}
+                    onChange={(e) =>
+                      handleWorkforceChange(idx, 'hours', parseFloat(e.target.value) || 0)
+                    }
+                    placeholder={t('fieldreports.hours', { defaultValue: 'Hours' })}
+                    min={0}
+                    step={0.5}
+                    className={inputCls}
+                  />
+                </div>
+                <button
+                  onClick={() => handleRemoveWorkforce(idx)}
+                  className="rounded p-1 text-semantic-error/60 hover:text-semantic-error hover:bg-semantic-error-bg"
+                  title={t('common.remove', { defaultValue: 'Remove' })}
+                  aria-label={t('common.remove', { defaultValue: 'Remove' })}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ))}
+            <datalist id="trades-list">
+              {COMMON_TRADES.map((trade) => (
+                <option key={trade} value={trade} />
+              ))}
+            </datalist>
+            <button
+              onClick={handleAddWorkforce}
+              className="flex items-center gap-1.5 text-sm text-oe-blue hover:text-oe-blue/80 transition-colors"
+            >
+              <Plus size={14} />
+              {t('fieldreports.add_trade', { defaultValue: 'Add trade' })}
+            </button>
           </div>
-        </div>
-      </div>
-    </div>
+        </WideModalField>
+      </WideModalSection>
+
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('fieldreports.work_performed', { defaultValue: 'Work Performed' })}
+          span={2}
+        >
+          <textarea
+            value={workPerformed}
+            onChange={(e) => setWorkPerformed(e.target.value)}
+            rows={3}
+            placeholder={t('fieldreports.work_performed_placeholder', {
+              defaultValue: 'Describe work activities completed today...',
+            })}
+            className={textareaCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('fieldreports.delays_label', { defaultValue: 'Delays' })}>
+          <textarea
+            value={delays}
+            onChange={(e) => setDelays(e.target.value)}
+            rows={2}
+            placeholder={t('fieldreports.delays_placeholder', {
+              defaultValue: 'Describe any delays encountered...',
+            })}
+            className={textareaCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('fieldreports.delay_hours', { defaultValue: 'Delay Hours' })}>
+          <input
+            type="number"
+            value={delayHours}
+            onChange={(e) => setDelayHours(e.target.value)}
+            min={0}
+            step={0.5}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('fieldreports.safety_incidents', { defaultValue: 'Safety Incidents' })}
+          span={2}
+        >
+          <textarea
+            value={safetyIncidents}
+            onChange={(e) => setSafetyIncidents(e.target.value)}
+            rows={2}
+            placeholder={t('fieldreports.safety_placeholder', {
+              defaultValue: 'Report any safety incidents or near-misses...',
+            })}
+            className={textareaCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('fieldreports.visitors', { defaultValue: 'Visitors' })}>
+          <input
+            type="text"
+            value={visitors}
+            onChange={(e) => setVisitors(e.target.value)}
+            placeholder={t('fieldreports.visitors_placeholder', {
+              defaultValue: 'Site visitors today...',
+            })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('fieldreports.deliveries', { defaultValue: 'Deliveries' })}>
+          <input
+            type="text"
+            value={deliveries}
+            onChange={(e) => setDeliveries(e.target.value)}
+            placeholder={t('fieldreports.deliveries_placeholder', {
+              defaultValue: 'Materials or equipment delivered...',
+            })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('fieldreports.notes', { defaultValue: 'Notes' })} span={2}>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={2}
+            placeholder={t('fieldreports.notes_placeholder', {
+              defaultValue: 'Additional notes or observations...',
+            })}
+            className={textareaCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }

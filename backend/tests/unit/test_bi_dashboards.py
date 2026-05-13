@@ -1271,3 +1271,100 @@ async def test_export_widget_svg(session: AsyncSession) -> None:
     with open(path) as fh:
         body = fh.read()
     assert "<svg" in body
+
+
+# ── Wave M4: cross-module wiring ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_invalidation_handler_publishes_kpi_recompute() -> None:
+    """Upstream source-of-truth event → ``bi_dashboards.kpi_recompute``."""
+    import asyncio
+
+    from app.core.events import Event
+    from app.core import events as _ev_module
+    from app.modules.bi_dashboards.events import _on_invalidation_event
+
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(name, data=None, source_module=None):  # noqa: ARG001
+        captured.append((name, dict(data or {})))
+        fut: asyncio.Future = asyncio.Future()
+        fut.set_result(None)
+        return fut
+
+    pid = str(uuid.uuid4())
+    event = Event(
+        name="contracts.claim.certified",
+        data={
+            "project_id": pid,
+            "claim_id": str(uuid.uuid4()),
+            "kpi_codes": ["cpi", "cash_in_30d"],
+        },
+        source_module="contracts",
+    )
+    real = _ev_module.event_bus.publish_detached
+    _ev_module.event_bus.publish_detached = _spy  # type: ignore[assignment]
+    try:
+        await _on_invalidation_event(event)
+    finally:
+        _ev_module.event_bus.publish_detached = real  # type: ignore[assignment]
+    names = [n for n, _ in captured]
+    assert "bi_dashboards.kpi_recompute" in names
+    payload = next(d for n, d in captured if n == "bi_dashboards.kpi_recompute")
+    assert payload["source_event"] == "contracts.claim.certified"
+    assert payload["project_id"] == pid
+    assert payload["kpi_codes"] == ["cpi", "cash_in_30d"]
+
+
+@pytest.mark.asyncio
+async def test_invalidation_handler_ignores_self_event() -> None:
+    """Re-broadcasting ``bi_dashboards.kpi_recompute`` would cause infinite loop —
+    handler must short-circuit when fed its own event name."""
+    import asyncio
+
+    from app.core.events import Event
+    from app.core import events as _ev_module
+    from app.modules.bi_dashboards.events import _on_invalidation_event
+
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(name, data=None, source_module=None):  # noqa: ARG001
+        captured.append((name, dict(data or {})))
+        fut: asyncio.Future = asyncio.Future()
+        fut.set_result(None)
+        return fut
+
+    event = Event(
+        name="bi_dashboards.kpi_recompute",
+        data={"project_id": str(uuid.uuid4()), "kpi_codes": ["cpi"]},
+        source_module="bi_dashboards",
+    )
+    real = _ev_module.event_bus.publish_detached
+    _ev_module.event_bus.publish_detached = _spy  # type: ignore[assignment]
+    try:
+        await _on_invalidation_event(event)
+    finally:
+        _ev_module.event_bus.publish_detached = real  # type: ignore[assignment]
+    assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_bi_register_subscribers_covers_all_topics() -> None:
+    """register_subscribers subscribes to every projection-invalidating event."""
+    from app.modules.bi_dashboards.events import (
+        _PROJECTION_INVALIDATING_EVENTS,
+        register_subscribers,
+    )
+
+    register_subscribers()
+    # Sanity: the curated list must include at least the five
+    # source-of-truth events Wave M4 specifies.
+    expected_subset = {
+        "safety.incident.created",
+        "qms.ncr.raised",
+        "daily_diary.closed",
+        "supplier_catalogs.material.added",
+        "schedule_advanced.actuals_update",
+    }
+    assert expected_subset.issubset(set(_PROJECTION_INVALIDATING_EVENTS))

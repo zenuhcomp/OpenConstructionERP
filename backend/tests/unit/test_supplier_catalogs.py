@@ -1488,3 +1488,96 @@ async def test_gr_emits_canonical_stock_low_event(session, captured_events):
     names = [n for n, _ in captured_events]
     assert "supplier_catalogs.stock.low" in names
     assert "supplier_catalogs.stock.low_threshold" in names
+
+
+# ── Wave M4: cross-module wiring ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_catalog_item_emits_material_added(
+    session, captured_events,
+) -> None:
+    """Catalog item creation publishes ``supplier_catalogs.material.added``."""
+    svc = SupplierCatalogsService(session)
+    item = await svc.create_catalog_item(
+        CatalogItemCreate(
+            sku="SKU-WAVE-M4",
+            name="Cement CEM I 42.5R",
+            unit_of_measure="t",
+            manufacturer="HeidelbergCement",
+            mpn="HC-CEMI-425R",
+        ),
+    )
+    matches = [
+        (n, d) for n, d in captured_events
+        if n == "supplier_catalogs.material.added"
+    ]
+    assert len(matches) == 1, f"expected 1 material.added event, got {len(matches)}"
+    payload = matches[0][1]
+    assert payload["catalog_item_id"] == str(item.id)
+    assert payload["sku"] == "SKU-WAVE-M4"
+    assert payload["manufacturer"] == "HeidelbergCement"
+    assert payload["mpn"] == "HC-CEMI-425R"
+    assert payload["unit_of_measure"] == "t"
+
+
+@pytest.mark.asyncio
+async def test_material_added_subscriber_publishes_vector_reindex() -> None:
+    """``supplier_catalogs.material.added`` → ``match_elements.vector_reindex``."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from app.modules.supplier_catalogs.events import (
+        _on_material_added,
+    )
+    from app.core.events import Event
+
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(name, data=None, source_module=None):  # noqa: ARG001
+        captured.append((name, dict(data or {})))
+        fut: asyncio.Future = asyncio.Future()
+        fut.set_result(None)
+        return fut
+
+    item_id = str(uuid.uuid4())
+    event = Event(
+        name="supplier_catalogs.material.added",
+        data={
+            "catalog_item_id": item_id,
+            "sku": "X-1",
+            "name": "Concrete",
+            "manufacturer": "ACME",
+            "mpn": "AC-X1",
+            "unit_of_measure": "m3",
+            "description": "C30/37 concrete",
+            "category_id": None,
+        },
+        source_module="supplier_catalogs",
+    )
+    from app.core import events as _ev_module
+
+    real = _ev_module.event_bus.publish_detached
+    _ev_module.event_bus.publish_detached = _spy  # type: ignore[assignment]
+    try:
+        await _on_material_added(event)
+    finally:
+        _ev_module.event_bus.publish_detached = real  # type: ignore[assignment]
+
+    names = [n for n, _ in captured]
+    assert "match_elements.vector_reindex" in names
+    assert "bi_dashboards.kpi_recompute" in names
+    reindex_payload = next(d for n, d in captured if n == "match_elements.vector_reindex")
+    assert reindex_payload["entity_id"] == item_id
+    assert reindex_payload["operation"] == "upsert"
+    assert reindex_payload["collection"] == "supplier_catalog_items"
+
+
+@pytest.mark.asyncio
+async def test_register_subscribers_idempotent() -> None:
+    """register_subscribers wiring is safe to call repeatedly."""
+    from app.modules.supplier_catalogs.events import register_subscribers
+
+    # Call twice — should not blow up nor double-subscribe.
+    register_subscribers()
+    register_subscribers()

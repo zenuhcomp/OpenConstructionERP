@@ -58,9 +58,24 @@ from app.modules.takeoff.schemas import (
     TakeoffMeasurementSummary,
     TakeoffMeasurementUpdate,
 )
+from app.modules.takeoff.manifest_verifier import (
+    InstallNotSupported,
+    InstallSHAMismatch,
+    ManifestError,
+    ManifestSignatureInvalid,
+    fetch_manifest,
+    maybe_warn_disabled,
+    resolve_install,
+    verify_downloaded_file,
+)
 from app.modules.takeoff.service import TakeoffService
 
 logger = logging.getLogger(__name__)
+
+# Surface the manifest-bypass warning at import time so it shows up in
+# server logs alongside the rest of the boot banner — operators who
+# left the escape hatch on by accident notice it on the next restart.
+maybe_warn_disabled()
 
 router = APIRouter(tags=["takeoff"])
 
@@ -955,6 +970,104 @@ async def install_converter(
                 f"https://github.com/{_DDC_REPO}/tree/{_DDC_BRANCH}/"
                 f"{_WINDOWS_CONVERTER_DIRS.get(converter_id, '')}"
             ),
+        ) from exc
+
+
+@router.post(
+    "/converters/manifest/install/{component_name}",
+    dependencies=[Depends(RequirePermission("takeoff.create"))],
+)
+async def install_from_manifest(
+    component_name: str,
+    _user_id: CurrentUserId,
+) -> dict[str, Any]:
+    """Install a component using the signed manifest (Audit A1).
+
+    Closes the A1 gap by sourcing the download URL + expected SHA-256
+    from a signed manifest instead of trusting whatever the GitHub
+    Contents API returns at runtime. The signature is verified against
+    an Ed25519 public key embedded in ``manifest_verifier.py`` — see
+    that module's header comment for the threat model.
+
+    Failure modes (all map to HTTP 502 with a clear ``detail`` so the
+    install banner can render the real reason instead of "internal
+    error"):
+
+    * Bad signature → manifest was tampered with in transit OR the
+      signing key was rotated and this client is stale
+    * Platform missing → no build for this OS/arch combination
+    * SHA mismatch → the file at the manifest URL is NOT the file the
+      publisher signed for (CDN poison, MITM, or upstream replace)
+    """
+    import asyncio
+
+    cache_dir = _CONVERTER_CACHE_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = cache_dir / f"{component_name}.manifest-download"
+
+    try:
+        manifest = await asyncio.to_thread(fetch_manifest)
+        resolved = resolve_install(manifest, component_name)
+
+        # Reuse the hardened download helper from A2/A9/A11 — it gives
+        # us host allow-listing, symlink guards, and the streaming
+        # size cap for free.
+        bytes_written = await asyncio.to_thread(
+            _download_one_file, resolved.url, target,
+        )
+
+        # SHA verification — this is the new A1 check. Mismatch deletes
+        # the partial file so a retry can't pick up a poisoned blob.
+        await asyncio.to_thread(
+            verify_downloaded_file,
+            target, resolved.sha256, resolved.size_bytes,
+        )
+
+        return {
+            "component": component_name,
+            "installed": True,
+            "version": resolved.version,
+            "platform": resolved.platform_key,
+            "path": str(target),
+            "size_bytes": bytes_written,
+            "sha256": resolved.sha256,
+            "manifest_version": manifest.version,
+            "manifest_signed_at": manifest.signed_at,
+        }
+    except ManifestSignatureInvalid as exc:
+        logger.error("Manifest signature verification failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Manifest signature did not verify. Refusing to install. "
+                f"This usually means the signing key was rotated and your "
+                f"client is stale, or there is an active MITM between you "
+                f"and the package CDN. Details: {exc}"
+            ),
+        ) from exc
+    except InstallNotSupported as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Component {component_name!r} is not available for this "
+                f"platform. Please file an issue. Details: {exc}"
+            ),
+        ) from exc
+    except InstallSHAMismatch as exc:
+        logger.error("Manifest SHA mismatch installing %s: %s", component_name, exc)
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Downloaded file does not match the manifest hash. "
+                f"Refusing to install — the file at the manifest URL is "
+                f"NOT the file the publisher signed for. Partial file "
+                f"has been deleted. Details: {exc}"
+            ),
+        ) from exc
+    except ManifestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Manifest install failed: {type(exc).__name__}: {exc}",
         ) from exc
 
 

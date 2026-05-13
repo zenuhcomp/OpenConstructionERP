@@ -592,6 +592,7 @@ class ProjectService:
                     exc,
                 )
 
+        prior_status = project.status
         await self.repo.update_fields(project_id, status="archived")
 
         await _safe_publish(
@@ -610,6 +611,25 @@ class ProjectService:
             entity_id=str(project_id),
             details={"name": project_name},
         )
+
+        # FSM audit row — record the transition in oe_activity_log so the
+        # workflow lifecycle is queryable from a single audit table.
+        try:
+            from app.core.audit_log import log_activity
+
+            await log_activity(
+                self.session,
+                actor_id=owner_id,
+                entity_type="project",
+                entity_id=str(project_id),
+                action="status_changed",
+                from_status=prior_status,
+                to_status="archived",
+                reason="Project soft-deleted via delete_project()",
+                metadata={"name": project_name},
+            )
+        except Exception:
+            logger.debug("FSM audit log skipped for project archive %s", project_id)
 
         logger.info("Project archived: %s", project_id)
 
@@ -639,6 +659,24 @@ class ProjectService:
             },
             source_module="oe_projects",
         )
+
+        # FSM audit row — archived -> active. Lets compliance reports
+        # show that a project was un-archived (an audit-significant event).
+        try:
+            from app.core.audit_log import log_activity
+
+            await log_activity(
+                self.session,
+                actor_id=owner_id,
+                entity_type="project",
+                entity_id=str(project_id),
+                action="status_changed",
+                from_status="archived",
+                to_status="active",
+                reason="Project restored via restore_project()",
+            )
+        except Exception:
+            logger.debug("FSM audit log skipped for project restore %s", project_id)
 
         logger.info("Project restored: %s", project_id)
 

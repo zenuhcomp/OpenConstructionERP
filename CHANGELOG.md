@@ -5,6 +5,26 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.3] — 2026-05-13 · Deep correctness pass + UX & supply-chain hardening
+
+### Added
+
+- **FSM engine** — 6 entity state machines (BOQ · Project · Invoice · NCR · RFQ · Submittal) with 50 declarative transitions, role-restricted guards, audit log via new `oe_activity_log` table (migration `v3033`)
+- **IFC unit assignment parser per ISO 16739-1:2024 §5.4.3** — every SI prefix, Imperial conversion, recursive `IfcConversionBasedUnit`, `IfcDerivedUnit` combinatorics; 92 unit-assignment regression tests
+- **Ed25519 manifest signing** for the converter installer pipeline — SHA-256 file verification, refuse-on-mismatch, 30 tests + emergency-rotation script
+- **Collapsible icon-only sidebar** — toggles to 64px, floating pill on the panel edge, persisted to localStorage
+- **WideModal sweep** — 19 files / 25 modals migrated to the shared `WideModal` foundation: Resources, DailyDiary, QMS, Punchlist, FieldReports, Contracts, CRM, Variations, PropertyDev, SupplierCatalogs, ChangeOrders, Tendering, Finance, Submittals, Correspondence, Contacts, RFI, Meetings, Transmittals. Forms with 4–14 fields now fit at 1366×768 without scrolling.
+
+### Fixed (UX)
+
+- Subcontractors page modal unified — was the only outlier still on a narrow `max-w-3xl` no-section modal; now uses `WideModal` + `WideModalSection` like the rest of M1
+- Service page — Delete with `ConfirmDialog` on contracts / assets / tickets; contract delete invalidates cascaded child rows
+- `module_loader` URL prefix — canonical kebab-case + underscore mirror so both `/bi-dashboards` and `/bi_dashboards` resolve
+
+### Tests
+
+5045 passed · 1 skipped · 0 regressions
+
 ## [3.0.1] — 2026-05-13 · 18-Modules Wave + deep stability
 
 ### Added — 17 new business modules (88 total)

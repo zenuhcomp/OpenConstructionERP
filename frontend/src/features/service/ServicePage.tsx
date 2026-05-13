@@ -14,6 +14,7 @@ import {
   Send,
   CheckCircle2,
   DollarSign,
+  Trash2,
 } from 'lucide-react';
 import {
   Button,
@@ -26,6 +27,7 @@ import {
   WideModalSection,
   WideModalField,
   ContactSearchInput,
+  ConfirmDialog,
 } from '@/shared/ui';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
@@ -40,6 +42,9 @@ import {
   createAsset,
   createTicket,
   createWorkOrder,
+  deleteContract,
+  deleteAsset,
+  deleteTicket,
   dispatchTicket,
   resolveTicket,
   closeTicket,
@@ -723,6 +728,76 @@ function DetailDrawer({
 
   const [tech, setTech] = useState('');
   const [debrief, setDebrief] = useState({ problem: '', cause: '', solution: '' });
+  // Destructive action gate. WOs intentionally have no delete here — they
+  // cascade from a ticket; a stand-alone WO delete would orphan the ticket
+  // history. WO cancellation should flow through the ticket's "cancel".
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Resolve the human label + delete function for the open entity.
+  const deletable =
+    kind === 'tickets'
+      ? ticket
+        ? {
+            id: ticket.id,
+            label: ticket.ticket_number,
+            displayName: ticket.title || ticket.ticket_number,
+            fn: deleteTicket,
+            queryKey: ['service', 'tickets'] as const,
+            kindLabel: t('service.ticket', { defaultValue: 'Ticket' }),
+          }
+        : null
+      : kind === 'contracts'
+        ? contract
+          ? {
+              id: contract.id,
+              label: contract.contract_number,
+              displayName: contract.title || contract.contract_number,
+              fn: deleteContract,
+              queryKey: ['service', 'contracts'] as const,
+              kindLabel: t('service.contract', { defaultValue: 'Contract' }),
+            }
+          : null
+        : kind === 'assets'
+          ? asset
+            ? {
+                id: asset.id,
+                label: asset.asset_tag || asset.name,
+                displayName: asset.name || asset.asset_tag || asset.id,
+                fn: deleteAsset,
+                queryKey: ['service', 'assets'] as const,
+                kindLabel: t('service.asset', { defaultValue: 'Asset' }),
+              }
+            : null
+          : null;
+
+  const handleDelete = async () => {
+    if (!deletable) return;
+    setDeleting(true);
+    try {
+      await deletable.fn(deletable.id);
+      addToast({
+        type: 'success',
+        title: t('service.deleted', {
+          defaultValue: '{{kind}} "{{name}}" deleted',
+          kind: deletable.kindLabel,
+          name: deletable.displayName,
+        }),
+      });
+      qc.invalidateQueries({ queryKey: deletable.queryKey });
+      // Contracts cascade to assets/tickets/work-orders via FK ondelete
+      // CASCADE, so we widen the invalidation when a contract goes.
+      if (kind === 'contracts') {
+        qc.invalidateQueries({ queryKey: ['service'] });
+      }
+      setDeleteOpen(false);
+      onClose();
+    } catch (err) {
+      addToast({ type: 'error', title: getErrorMessage(err) });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -731,21 +806,34 @@ function DetailDrawer({
         className="relative h-full w-full max-w-lg overflow-y-auto bg-surface-elevated shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border-light bg-surface-elevated px-5 py-3">
-          <h2 className="text-base font-semibold">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border-light bg-surface-elevated px-5 py-3 gap-3">
+          <h2 className="text-base font-semibold truncate min-w-0 flex-1">
             {kind === 'tickets' && ticket?.ticket_number}
             {kind === 'work_orders' && wo?.work_order_number}
             {kind === 'contracts' && contract?.contract_number}
             {kind === 'assets' && (asset?.asset_tag || asset?.name)}
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            {deletable && (
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border-light bg-surface-primary px-2.5 py-1.5 text-xs font-medium text-content-secondary hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+                aria-label={t('common.delete', { defaultValue: 'Delete' })}
+              >
+                <Trash2 size={12} />
+                {t('common.delete', { defaultValue: 'Delete' })}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="ml-1 rounded p-1 hover:bg-surface-secondary"
+              aria-label={t('common.close', { defaultValue: 'Close' })}
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4 p-5">
@@ -910,6 +998,42 @@ function DetailDrawer({
           )}
         </div>
       </div>
+
+      {/* Destructive delete — second click required. ConfirmDialog already
+          handles focus trapping + Escape. */}
+      <ConfirmDialog
+        open={deleteOpen}
+        title={
+          deletable
+            ? t('service.delete_title', {
+                defaultValue: 'Delete {{kind}}?',
+                kind: deletable.kindLabel.toLowerCase(),
+              })
+            : ''
+        }
+        message={
+          deletable
+            ? kind === 'contracts'
+              ? t('service.delete_contract_message', {
+                  defaultValue:
+                    'Delete contract "{{name}}"? This also removes every linked asset, ticket, and work order. This action cannot be undone.',
+                  name: deletable.displayName,
+                })
+              : t('service.delete_message', {
+                  defaultValue:
+                    'Delete {{kind}} "{{name}}"? This action cannot be undone.',
+                  kind: deletable.kindLabel.toLowerCase(),
+                  name: deletable.displayName,
+                })
+            : ''
+        }
+        confirmLabel={t('common.delete', { defaultValue: 'Delete' })}
+        cancelLabel={t('common.cancel', { defaultValue: 'Cancel' })}
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
     </div>
   );
 }

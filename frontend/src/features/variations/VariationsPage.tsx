@@ -26,6 +26,11 @@ import {
   Breadcrumb,
   SkeletonTable,
 } from '@/shared/ui';
+import {
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui/WideModal';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { apiGet, getErrorMessage } from '@/shared/lib/api';
@@ -111,8 +116,6 @@ const EOT_VARIANT: Record<EotStatus, 'neutral' | 'blue' | 'success' | 'warning' 
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
-
-const labelCls = 'block text-xs font-medium text-content-secondary mb-1';
 
 interface ProjectStub {
   id: string;
@@ -1764,424 +1767,31 @@ function CreateModal({
     }
   };
 
+  const title =
+    kind === 'notices'
+      ? t('variations.new_notice', { defaultValue: 'New Notice' })
+      : kind === 'requests'
+        ? t('variations.new_request', { defaultValue: 'New Request' })
+        : kind === 'orders'
+          ? t('variations.new_order', { defaultValue: 'New Order' })
+          : kind === 'daywork'
+            ? t('variations.new_daywork', { defaultValue: 'New Daywork' })
+            : t('variations.new_eot', { defaultValue: 'New EoT Claim' });
+
+  // Requests is the densest (7 fields with a cost/days/currency triplet)
+  // so it benefits from xl; the rest comfortably fit at lg.
+  const size = kind === 'requests' || kind === 'eot' ? 'xl' : 'lg';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">
-            {kind === 'notices' && t('variations.new_notice', { defaultValue: 'New Notice' })}
-            {kind === 'requests' && t('variations.new_request', { defaultValue: 'New Request' })}
-            {kind === 'orders' && t('variations.new_order', { defaultValue: 'New Order' })}
-            {kind === 'daywork' && t('variations.new_daywork', { defaultValue: 'New Daywork' })}
-            {kind === 'eot' && t('variations.new_eot', { defaultValue: 'New EoT Claim' })}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {kind === 'notices' && (
-            <>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.title_col', { defaultValue: 'Title' })}
-                </label>
-                <input
-                  value={noticeForm.title}
-                  onChange={(e) => setNoticeForm({ ...noticeForm, title: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.description', { defaultValue: 'Description' })}
-                </label>
-                <textarea
-                  value={noticeForm.description}
-                  onChange={(e) => setNoticeForm({ ...noticeForm, description: e.target.value })}
-                  rows={3}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>
-                    {t('variations.recipient_type', { defaultValue: 'Recipient type' })}
-                  </label>
-                  <select
-                    value={noticeForm.recipient_type}
-                    onChange={(e) =>
-                      setNoticeForm({
-                        ...noticeForm,
-                        recipient_type: e.target.value as Notice['recipient_type'],
-                      })
-                    }
-                    className={inputCls}
-                  >
-                    {(['owner', 'contractor', 'architect', 'engineer', 'consultant'] as const).map(
-                      (rt) => (
-                        <option key={rt} value={rt}>
-                          {rt}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    {t('variations.recipient_name', { defaultValue: 'Recipient name' })}
-                  </label>
-                  <input
-                    value={noticeForm.recipient_name}
-                    onChange={(e) =>
-                      setNoticeForm({ ...noticeForm, recipient_name: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.target_response', { defaultValue: 'Response by' })}
-                </label>
-                <input
-                  type="date"
-                  value={noticeForm.target_response_date}
-                  onChange={(e) =>
-                    setNoticeForm({ ...noticeForm, target_response_date: e.target.value })
-                  }
-                  className={inputCls}
-                />
-              </div>
-            </>
-          )}
-
-          {kind === 'requests' && (
-            <>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.title_col', { defaultValue: 'Title' })}
-                </label>
-                <input
-                  value={vrForm.title}
-                  onChange={(e) => setVrForm({ ...vrForm, title: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.description', { defaultValue: 'Description' })}
-                </label>
-                <textarea
-                  value={vrForm.description}
-                  onChange={(e) => setVrForm({ ...vrForm, description: e.target.value })}
-                  rows={3}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.from_notice', { defaultValue: 'From notice (optional)' })}
-                </label>
-                <select
-                  value={vrForm.notice_id}
-                  onChange={(e) => setVrForm({ ...vrForm, notice_id: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">—</option>
-                  {notices.map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {n.code} — {n.title || '—'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('variations.classification')}</label>
-                  <select
-                    value={vrForm.classification}
-                    onChange={(e) =>
-                      setVrForm({
-                        ...vrForm,
-                        classification: e.target.value as VariationRequest['classification'],
-                      })
-                    }
-                    className={inputCls}
-                  >
-                    {(
-                      [
-                        'scope_change',
-                        'unforeseen',
-                        'owner_change',
-                        'design_dev',
-                        'regulatory',
-                        'other',
-                      ] as const
-                    ).map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>{t('variations.urgency')}</label>
-                  <select
-                    value={vrForm.urgency}
-                    onChange={(e) =>
-                      setVrForm({ ...vrForm, urgency: e.target.value as VariationRequest['urgency'] })
-                    }
-                    className={inputCls}
-                  >
-                    {(['low', 'med', 'high'] as const).map((u) => (
-                      <option key={u} value={u}>
-                        {u}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className={labelCls}>{t('variations.cost_impact')}</label>
-                  <input
-                    type="number"
-                    value={vrForm.estimated_cost_impact}
-                    onChange={(e) =>
-                      setVrForm({ ...vrForm, estimated_cost_impact: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('variations.days')}</label>
-                  <input
-                    type="number"
-                    value={vrForm.estimated_schedule_days}
-                    onChange={(e) =>
-                      setVrForm({ ...vrForm, estimated_schedule_days: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('common.currency', { defaultValue: 'Currency' })}</label>
-                  <input
-                    value={vrForm.currency}
-                    onChange={(e) => setVrForm({ ...vrForm, currency: e.target.value })}
-                    className={inputCls}
-                    maxLength={3}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {kind === 'orders' && (
-            <>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.title_col', { defaultValue: 'Title' })}
-                </label>
-                <input
-                  value={voForm.title}
-                  onChange={(e) => setVoForm({ ...voForm, title: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.from_request', { defaultValue: 'From request (optional)' })}
-                </label>
-                <select
-                  value={voForm.variation_request_id}
-                  onChange={(e) =>
-                    setVoForm({ ...voForm, variation_request_id: e.target.value })
-                  }
-                  className={inputCls}
-                >
-                  <option value="">—</option>
-                  {requests.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.code} — {r.title || '—'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className={labelCls}>{t('variations.cost_impact')}</label>
-                  <input
-                    type="number"
-                    value={voForm.final_cost_impact}
-                    onChange={(e) =>
-                      setVoForm({ ...voForm, final_cost_impact: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('variations.days')}</label>
-                  <input
-                    type="number"
-                    value={voForm.final_schedule_days}
-                    onChange={(e) =>
-                      setVoForm({ ...voForm, final_schedule_days: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('common.currency', { defaultValue: 'Currency' })}</label>
-                  <input
-                    value={voForm.currency}
-                    onChange={(e) => setVoForm({ ...voForm, currency: e.target.value })}
-                    className={inputCls}
-                    maxLength={3}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {kind === 'daywork' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('variations.work_date')}</label>
-                <input
-                  type="date"
-                  value={dwForm.work_date}
-                  onChange={(e) => setDwForm({ ...dwForm, work_date: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.description', { defaultValue: 'Description' })}
-                </label>
-                <textarea
-                  value={dwForm.description}
-                  onChange={(e) => setDwForm({ ...dwForm, description: e.target.value })}
-                  rows={3}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('common.currency', { defaultValue: 'Currency' })}</label>
-                <input
-                  value={dwForm.currency}
-                  onChange={(e) => setDwForm({ ...dwForm, currency: e.target.value })}
-                  className={inputCls}
-                  maxLength={3}
-                />
-              </div>
-            </>
-          )}
-
-          {kind === 'eot' && (
-            <>
-              <div>
-                <label className={labelCls}>
-                  {t('variations.description', { defaultValue: 'Description' })}
-                </label>
-                <textarea
-                  value={eotForm.description}
-                  onChange={(e) => setEotForm({ ...eotForm, description: e.target.value })}
-                  rows={3}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('variations.cause')}</label>
-                  <select
-                    value={eotForm.root_cause_category}
-                    onChange={(e) =>
-                      setEotForm({
-                        ...eotForm,
-                        root_cause_category: e.target
-                          .value as ExtensionOfTimeClaim['root_cause_category'],
-                      })
-                    }
-                    className={inputCls}
-                  >
-                    {(['employer_caused', 'neutral', 'contractor_caused', 'concurrent'] as const).map(
-                      (c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>{t('variations.requested_days')}</label>
-                  <input
-                    type="number"
-                    value={eotForm.requested_days}
-                    onChange={(e) => setEotForm({ ...eotForm, requested_days: e.target.value })}
-                    className={inputCls}
-                    min={0}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>
-                    {t('variations.period_start', { defaultValue: 'Period start' })}
-                  </label>
-                  <input
-                    type="date"
-                    value={eotForm.claim_period_start}
-                    onChange={(e) =>
-                      setEotForm({ ...eotForm, claim_period_start: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    {t('variations.period_end', { defaultValue: 'Period end' })}
-                  </label>
-                  <input
-                    type="date"
-                    value={eotForm.claim_period_end}
-                    onChange={(e) =>
-                      setEotForm({ ...eotForm, claim_period_end: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <label className="inline-flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={eotForm.critical_path_impact}
-                  onChange={(e) =>
-                    setEotForm({ ...eotForm, critical_path_impact: e.target.checked })
-                  }
-                />
-                {t('variations.affects_critical_path', {
-                  defaultValue: 'Affects critical path',
-                })}
-              </label>
-            </>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 mt-5">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={title}
+      size={size}
+      busy={busy}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button
@@ -2192,8 +1802,395 @@ function CreateModal({
           >
             {t('common.create', { defaultValue: 'Create' })}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {kind === 'notices' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('variations.title_col', { defaultValue: 'Title' })}
+            span={2}
+          >
+            <input
+              value={noticeForm.title}
+              onChange={(e) => setNoticeForm({ ...noticeForm, title: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('variations.description', { defaultValue: 'Description' })}
+            span={2}
+          >
+            <textarea
+              value={noticeForm.description}
+              onChange={(e) => setNoticeForm({ ...noticeForm, description: e.target.value })}
+              rows={3}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('variations.recipient_type', { defaultValue: 'Recipient type' })}
+          >
+            <select
+              value={noticeForm.recipient_type}
+              onChange={(e) =>
+                setNoticeForm({
+                  ...noticeForm,
+                  recipient_type: e.target.value as Notice['recipient_type'],
+                })
+              }
+              className={inputCls}
+            >
+              {(['owner', 'contractor', 'architect', 'engineer', 'consultant'] as const).map(
+                (rt) => (
+                  <option key={rt} value={rt}>
+                    {rt}
+                  </option>
+                ),
+              )}
+            </select>
+          </WideModalField>
+          <WideModalField
+            label={t('variations.recipient_name', { defaultValue: 'Recipient name' })}
+          >
+            <input
+              value={noticeForm.recipient_name}
+              onChange={(e) =>
+                setNoticeForm({ ...noticeForm, recipient_name: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('variations.target_response', { defaultValue: 'Response by' })}
+            span={2}
+          >
+            <input
+              type="date"
+              value={noticeForm.target_response_date}
+              onChange={(e) =>
+                setNoticeForm({ ...noticeForm, target_response_date: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'requests' && (
+        <>
+          <WideModalSection
+            title={t('variations.section_basic', { defaultValue: 'Basic info' })}
+            columns={2}
+          >
+            <WideModalField
+              label={t('variations.title_col', { defaultValue: 'Title' })}
+              span={2}
+            >
+              <input
+                value={vrForm.title}
+                onChange={(e) => setVrForm({ ...vrForm, title: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('variations.description', { defaultValue: 'Description' })}
+              span={2}
+            >
+              <textarea
+                value={vrForm.description}
+                onChange={(e) => setVrForm({ ...vrForm, description: e.target.value })}
+                rows={3}
+                className={clsx(inputCls, 'h-auto py-2')}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('variations.from_notice', { defaultValue: 'From notice (optional)' })}
+              span={2}
+            >
+              <select
+                value={vrForm.notice_id}
+                onChange={(e) => setVrForm({ ...vrForm, notice_id: e.target.value })}
+                className={inputCls}
+              >
+                <option value="">—</option>
+                {notices.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.code} — {n.title || '—'}
+                  </option>
+                ))}
+              </select>
+            </WideModalField>
+            <WideModalField label={t('variations.classification')}>
+              <select
+                value={vrForm.classification}
+                onChange={(e) =>
+                  setVrForm({
+                    ...vrForm,
+                    classification: e.target.value as VariationRequest['classification'],
+                  })
+                }
+                className={inputCls}
+              >
+                {(
+                  [
+                    'scope_change',
+                    'unforeseen',
+                    'owner_change',
+                    'design_dev',
+                    'regulatory',
+                    'other',
+                  ] as const
+                ).map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </WideModalField>
+            <WideModalField label={t('variations.urgency')}>
+              <select
+                value={vrForm.urgency}
+                onChange={(e) =>
+                  setVrForm({ ...vrForm, urgency: e.target.value as VariationRequest['urgency'] })
+                }
+                className={inputCls}
+              >
+                {(['low', 'med', 'high'] as const).map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
+            </WideModalField>
+          </WideModalSection>
+
+          <WideModalSection
+            title={t('variations.section_impact', { defaultValue: 'Impact' })}
+            columns={3}
+          >
+            <WideModalField label={t('variations.cost_impact')}>
+              <input
+                type="number"
+                value={vrForm.estimated_cost_impact}
+                onChange={(e) =>
+                  setVrForm({ ...vrForm, estimated_cost_impact: e.target.value })
+                }
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField label={t('variations.days')}>
+              <input
+                type="number"
+                value={vrForm.estimated_schedule_days}
+                onChange={(e) =>
+                  setVrForm({ ...vrForm, estimated_schedule_days: e.target.value })
+                }
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('common.currency', { defaultValue: 'Currency' })}
+            >
+              <input
+                value={vrForm.currency}
+                onChange={(e) => setVrForm({ ...vrForm, currency: e.target.value })}
+                className={inputCls}
+                maxLength={3}
+              />
+            </WideModalField>
+          </WideModalSection>
+        </>
+      )}
+
+      {kind === 'orders' && (
+        <>
+          <WideModalSection columns={2}>
+            <WideModalField
+              label={t('variations.title_col', { defaultValue: 'Title' })}
+              span={2}
+            >
+              <input
+                value={voForm.title}
+                onChange={(e) => setVoForm({ ...voForm, title: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('variations.from_request', { defaultValue: 'From request (optional)' })}
+              span={2}
+            >
+              <select
+                value={voForm.variation_request_id}
+                onChange={(e) =>
+                  setVoForm({ ...voForm, variation_request_id: e.target.value })
+                }
+                className={inputCls}
+              >
+                <option value="">—</option>
+                {requests.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.code} — {r.title || '—'}
+                  </option>
+                ))}
+              </select>
+            </WideModalField>
+          </WideModalSection>
+          <WideModalSection
+            title={t('variations.section_impact', { defaultValue: 'Impact' })}
+            columns={3}
+          >
+            <WideModalField label={t('variations.cost_impact')}>
+              <input
+                type="number"
+                value={voForm.final_cost_impact}
+                onChange={(e) =>
+                  setVoForm({ ...voForm, final_cost_impact: e.target.value })
+                }
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField label={t('variations.days')}>
+              <input
+                type="number"
+                value={voForm.final_schedule_days}
+                onChange={(e) =>
+                  setVoForm({ ...voForm, final_schedule_days: e.target.value })
+                }
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('common.currency', { defaultValue: 'Currency' })}
+            >
+              <input
+                value={voForm.currency}
+                onChange={(e) => setVoForm({ ...voForm, currency: e.target.value })}
+                className={inputCls}
+                maxLength={3}
+              />
+            </WideModalField>
+          </WideModalSection>
+        </>
+      )}
+
+      {kind === 'daywork' && (
+        <WideModalSection columns={2}>
+          <WideModalField label={t('variations.work_date')}>
+            <input
+              type="date"
+              value={dwForm.work_date}
+              onChange={(e) => setDwForm({ ...dwForm, work_date: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('common.currency', { defaultValue: 'Currency' })}
+          >
+            <input
+              value={dwForm.currency}
+              onChange={(e) => setDwForm({ ...dwForm, currency: e.target.value })}
+              className={inputCls}
+              maxLength={3}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('variations.description', { defaultValue: 'Description' })}
+            span={2}
+          >
+            <textarea
+              value={dwForm.description}
+              onChange={(e) => setDwForm({ ...dwForm, description: e.target.value })}
+              rows={3}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'eot' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('variations.description', { defaultValue: 'Description' })}
+            span={2}
+          >
+            <textarea
+              value={eotForm.description}
+              onChange={(e) => setEotForm({ ...eotForm, description: e.target.value })}
+              rows={3}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+          <WideModalField label={t('variations.cause')}>
+            <select
+              value={eotForm.root_cause_category}
+              onChange={(e) =>
+                setEotForm({
+                  ...eotForm,
+                  root_cause_category: e.target
+                    .value as ExtensionOfTimeClaim['root_cause_category'],
+                })
+              }
+              className={inputCls}
+            >
+              {(['employer_caused', 'neutral', 'contractor_caused', 'concurrent'] as const).map(
+                (c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ),
+              )}
+            </select>
+          </WideModalField>
+          <WideModalField label={t('variations.requested_days')}>
+            <input
+              type="number"
+              value={eotForm.requested_days}
+              onChange={(e) => setEotForm({ ...eotForm, requested_days: e.target.value })}
+              className={inputCls}
+              min={0}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('variations.period_start', { defaultValue: 'Period start' })}
+          >
+            <input
+              type="date"
+              value={eotForm.claim_period_start}
+              onChange={(e) =>
+                setEotForm({ ...eotForm, claim_period_start: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('variations.period_end', { defaultValue: 'Period end' })}
+          >
+            <input
+              type="date"
+              value={eotForm.claim_period_end}
+              onChange={(e) =>
+                setEotForm({ ...eotForm, claim_period_end: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label="" span={2}>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={eotForm.critical_path_impact}
+                onChange={(e) =>
+                  setEotForm({ ...eotForm, critical_path_impact: e.target.checked })
+                }
+              />
+              {t('variations.affects_critical_path', {
+                defaultValue: 'Affects critical path',
+              })}
+            </label>
+          </WideModalField>
+        </WideModalSection>
+      )}
+    </WideModal>
   );
 }

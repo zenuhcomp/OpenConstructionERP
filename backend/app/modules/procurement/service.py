@@ -431,12 +431,34 @@ class ProcurementService:
     async def issue_po(self, po_id: uuid.UUID) -> PurchaseOrder:
         """Transition PO to issued status."""
         po = await self.get_po(po_id)
-        if po.status != "draft":
+        prior_status = po.status
+        if prior_status != "draft":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot issue PO in status '{po.status}'",
+                detail=f"Cannot issue PO in status '{prior_status}'",
             )
         await self.po_repo.update(po_id, status="issued")
+
+        # FSM audit row — PO lifecycle is closely tied to the RFQ FSM (see
+        # rfq.po_issued event). PO is not one of the six core FSMs but it
+        # benefits from the same audit-log substrate for compliance.
+        try:
+            from app.core.audit_log import log_activity
+
+            await log_activity(
+                self.session,
+                actor_id=None,
+                entity_type="purchase_order",
+                entity_id=str(po_id),
+                action="status_changed",
+                from_status=prior_status,
+                to_status="issued",
+                reason="PO issued via issue_po()",
+                metadata={"po_number": po.po_number},
+            )
+        except Exception:
+            logger.debug("FSM audit log skipped for PO %s issue", po_id)
+
         updated = await self.po_repo.get(po_id)
         if updated is None:
             raise HTTPException(

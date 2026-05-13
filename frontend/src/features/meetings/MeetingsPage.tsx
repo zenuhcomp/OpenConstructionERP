@@ -29,13 +29,23 @@ import {
   PenTool,
   HardHat,
   Rocket,
-  MapPin,
   AlertTriangle,
   Paperclip,
   Download,
   FileText,
 } from 'lucide-react';
-import { Button, Card, Badge, EmptyState, Breadcrumb, ConfirmDialog, SkeletonTable } from '@/shared/ui';
+import {
+  Button,
+  Card,
+  Badge,
+  EmptyState,
+  Breadcrumb,
+  ConfirmDialog,
+  SkeletonTable,
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useCreateShortcut } from '@/shared/hooks/useCreateShortcut';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
@@ -374,255 +384,23 @@ function CreateMeetingModal({
     if (canSubmit) onSubmit(form);
   };
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in">
-      <div className="w-full max-w-2xl bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[85vh] flex flex-col" role="dialog" aria-label={t('meetings.new_meeting', { defaultValue: 'New Meeting' })}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light sticky top-0 z-10 bg-surface-elevated rounded-t-xl">
-          <div>
-            <h2 className="text-lg font-semibold text-content-primary">
-              {t('meetings.new_meeting', { defaultValue: 'New Meeting' })}
-            </h2>
-            {projectName && (
-              <p className="text-xs text-content-tertiary mt-0.5">
-                {t('common.creating_in_project', {
-                  defaultValue: 'In {{project}}',
-                  project: projectName,
-                })}
-              </p>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="px-6 py-4 space-y-5 overflow-y-auto flex-1">
-          {/* ── Meeting Type ── */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-2">
-              {t('meetings.field_type', { defaultValue: 'Meeting Type' })}
-            </label>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {MEETING_TYPES.map((mt) => {
-                const cfg = MEETING_TYPE_CARD_CONFIG[mt];
-                const TypeIcon = cfg.icon;
-                const selected = form.meeting_type === mt;
-                return (
-                  <button
-                    key={mt}
-                    type="button"
-                    onClick={() => set('meeting_type', mt)}
-                    className={clsx(
-                      'flex flex-col items-center gap-1.5 rounded-lg border-2 px-2 py-2.5 text-center transition-all',
-                      selected
-                        ? cfg.color + ' ring-2 ring-oe-blue/30'
-                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
-                    )}
-                  >
-                    <TypeIcon size={18} />
-                    <span className="text-2xs font-medium leading-tight">
-                      {t(`meetings.type_${mt}`, {
-                        defaultValue: mt.charAt(0).toUpperCase() + mt.slice(1),
-                      })}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-1.5 text-xs text-content-quaternary">
-              {t(`meetings.type_${form.meeting_type}_desc`, {
-                defaultValue: MEETING_TYPE_CARD_CONFIG[form.meeting_type].description,
-              })}
-            </p>
-          </div>
-
-          {/* ── Meeting Details Section ── */}
-          <div className="flex items-center gap-2 pt-2 pb-1">
-            <CalendarDays size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('meetings.section_details', { defaultValue: 'Meeting Details' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
-
-          {/* Title */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_title', { defaultValue: 'Title' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              value={form.title}
-              onChange={(e) => {
-                set('title', e.target.value);
-                setTouched(true);
-              }}
-              placeholder={t('meetings.title_placeholder', {
-                defaultValue: 'e.g. Weekly Progress Meeting #12',
-              })}
-              className={clsx(
-                inputCls,
-                titleError &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-              autoFocus
-            />
-            {titleError && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {t('meetings.title_required', { defaultValue: 'Title is required' })}
-              </p>
-            )}
-          </div>
-
-          {/* ── Schedule Section ── */}
-          <div className="flex items-center gap-2 pt-2 pb-1">
-            <Clock size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('meetings.section_schedule', { defaultValue: 'Schedule' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
-
-          {/* Date */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_date', { defaultValue: 'Date & Time' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              type="datetime-local"
-              value={form.date}
-              onChange={(e) => {
-                set('date', e.target.value);
-                setTouched(true);
-              }}
-              className={clsx(
-                inputCls,
-                dateError &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-            />
-            {dateError && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {t('meetings.date_required', { defaultValue: 'Date is required' })}
-              </p>
-            )}
-          </div>
-
-          {/* ── Location Section ── */}
-          <div className="flex items-center gap-2 pt-2 pb-1">
-            <MapPin size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('meetings.section_location', { defaultValue: 'Location' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
-
-          {/* Location */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_location', { defaultValue: 'Location' })}
-            </label>
-            <input
-              value={form.location}
-              onChange={(e) => set('location', e.target.value)}
-              className={inputCls}
-              placeholder={t('meetings.location_placeholder', {
-                defaultValue: 'e.g., Site office, Room 301, Online',
-              })}
-            />
-          </div>
-
-          {/* Chairperson */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_chairperson', { defaultValue: 'Chairperson' })}
-            </label>
-            <input
-              value={form.chairperson}
-              onChange={(e) => set('chairperson', e.target.value)}
-              className={inputCls}
-              placeholder={t('meetings.chairperson_placeholder', {
-                defaultValue: 'Meeting organizer',
-              })}
-            />
-          </div>
-
-          {/* Attendees */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_attendees', { defaultValue: 'Attendees' })}
-            </label>
-            <textarea
-              value={form.attendees}
-              onChange={(e) => set('attendees', e.target.value)}
-              rows={3}
-              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
-              placeholder={t('meetings.attendees_placeholder', {
-                defaultValue: 'One name per line',
-              })}
-            />
-            <p className="mt-1 text-xs text-content-quaternary">
-              {t('meetings.attendees_hint', {
-                defaultValue: 'Enter each attendee on a separate line. They will be added to the meeting.',
-              })}
-            </p>
-          </div>
-
-          {/* Minutes / Description */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_minutes', { defaultValue: 'Description / Minutes' })}
-            </label>
-            <textarea
-              value={form.minutes}
-              onChange={(e) => set('minutes', e.target.value)}
-              rows={8}
-              maxLength={50000}
-              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-vertical"
-              placeholder={t('meetings.minutes_placeholder', {
-                defaultValue: 'Meeting description, minutes, or notes...',
-              })}
-              data-testid="meeting-minutes-input"
-            />
-          </div>
-
-          {/* Attachments */}
-          <AttachmentDropzone
-            projectId={projectId}
-            attachments={form.attachments}
-            onAdd={(att) =>
-              setForm((prev) => ({
-                ...prev,
-                attachments: [...prev.attachments.filter((a) => a.id !== att.id), att],
-              }))
-            }
-            onRemove={(id) =>
-              setForm((prev) => ({
-                ...prev,
-                attachments: prev.attachments.filter((a) => a.id !== id),
-              }))
-            }
-            disabled={isPending}
-          />
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light sticky bottom-0 z-10 bg-surface-elevated rounded-b-xl">
+    <WideModal
+      open
+      onClose={onClose}
+      busy={isPending}
+      size="xl"
+      title={t('meetings.new_meeting', { defaultValue: 'New Meeting' })}
+      subtitle={
+        projectName
+          ? t('common.creating_in_project', {
+              defaultValue: 'In {{project}}',
+              project: projectName,
+            })
+          : undefined
+      }
+      footer={
+        <>
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
@@ -634,9 +412,186 @@ function CreateMeetingModal({
             )}
             <span>{t('meetings.create_meeting', { defaultValue: 'Create Meeting' })}</span>
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {/* Meeting type tile picker */}
+      <WideModalSection columns={1}>
+        <WideModalField label={t('meetings.field_type', { defaultValue: 'Meeting Type' })}>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+            {MEETING_TYPES.map((mt) => {
+              const cfg = MEETING_TYPE_CARD_CONFIG[mt];
+              const TypeIcon = cfg.icon;
+              const selected = form.meeting_type === mt;
+              return (
+                <button
+                  key={mt}
+                  type="button"
+                  onClick={() => set('meeting_type', mt)}
+                  className={clsx(
+                    'flex flex-col items-center gap-1.5 rounded-lg border-2 px-2 py-2.5 text-center transition-all',
+                    selected
+                      ? cfg.color + ' ring-2 ring-oe-blue/30'
+                      : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                  )}
+                >
+                  <TypeIcon size={18} />
+                  <span className="text-2xs font-medium leading-tight">
+                    {t(`meetings.type_${mt}`, {
+                      defaultValue: mt.charAt(0).toUpperCase() + mt.slice(1),
+                    })}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-xs text-content-quaternary">
+            {t(`meetings.type_${form.meeting_type}_desc`, {
+              defaultValue: MEETING_TYPE_CARD_CONFIG[form.meeting_type].description,
+            })}
+          </p>
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Meeting details + Schedule combined into a two-column row */}
+      <WideModalSection
+        title={t('meetings.section_details', { defaultValue: 'Meeting Details' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('meetings.field_title', { defaultValue: 'Title' })}
+          required
+          span={2}
+          error={
+            titleError
+              ? t('meetings.title_required', { defaultValue: 'Title is required' })
+              : undefined
+          }
+        >
+          <input
+            value={form.title}
+            onChange={(e) => {
+              set('title', e.target.value);
+              setTouched(true);
+            }}
+            placeholder={t('meetings.title_placeholder', {
+              defaultValue: 'e.g. Weekly Progress Meeting #12',
+            })}
+            className={clsx(
+              inputCls,
+              titleError &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('meetings.field_date', { defaultValue: 'Date & Time' })}
+          required
+          error={
+            dateError
+              ? t('meetings.date_required', { defaultValue: 'Date is required' })
+              : undefined
+          }
+        >
+          <input
+            type="datetime-local"
+            value={form.date}
+            onChange={(e) => {
+              set('date', e.target.value);
+              setTouched(true);
+            }}
+            className={clsx(
+              inputCls,
+              dateError &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+          />
+        </WideModalField>
+
+        <WideModalField label={t('meetings.field_location', { defaultValue: 'Location' })}>
+          <input
+            value={form.location}
+            onChange={(e) => set('location', e.target.value)}
+            className={inputCls}
+            placeholder={t('meetings.location_placeholder', {
+              defaultValue: 'e.g., Site office, Room 301, Online',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('meetings.field_chairperson', { defaultValue: 'Chairperson' })}
+          span={2}
+        >
+          <input
+            value={form.chairperson}
+            onChange={(e) => set('chairperson', e.target.value)}
+            className={inputCls}
+            placeholder={t('meetings.chairperson_placeholder', {
+              defaultValue: 'Meeting organizer',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('meetings.field_attendees', { defaultValue: 'Attendees' })}
+          span={2}
+          hint={t('meetings.attendees_hint', {
+            defaultValue:
+              'Enter each attendee on a separate line. They will be added to the meeting.',
+          })}
+        >
+          <textarea
+            value={form.attendees}
+            onChange={(e) => set('attendees', e.target.value)}
+            rows={3}
+            className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
+            placeholder={t('meetings.attendees_placeholder', {
+              defaultValue: 'One name per line',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('meetings.field_minutes', { defaultValue: 'Description / Minutes' })}
+          span={2}
+        >
+          <textarea
+            value={form.minutes}
+            onChange={(e) => set('minutes', e.target.value)}
+            rows={8}
+            maxLength={50000}
+            className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-vertical"
+            placeholder={t('meetings.minutes_placeholder', {
+              defaultValue: 'Meeting description, minutes, or notes...',
+            })}
+            data-testid="meeting-minutes-input"
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Attachments — full width drop-zone */}
+      <WideModalSection columns={1}>
+        <AttachmentDropzone
+          projectId={projectId}
+          attachments={form.attachments}
+          onAdd={(att) =>
+            setForm((prev) => ({
+              ...prev,
+              attachments: [...prev.attachments.filter((a) => a.id !== att.id), att],
+            }))
+          }
+          onRemove={(id) =>
+            setForm((prev) => ({
+              ...prev,
+              attachments: prev.attachments.filter((a) => a.id !== id),
+            }))
+          }
+          disabled={isPending}
+        />
+      </WideModalSection>
+    </WideModal>
   );
 }
 
@@ -710,14 +665,6 @@ function EditMeetingModal({
     };
   }, [meeting.document_ids]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
   const set = <K extends keyof MeetingFormData>(key: K, value: MeetingFormData[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
@@ -771,194 +718,16 @@ function EditMeetingModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in">
-      <div
-        className="w-full max-w-2xl bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[85vh] flex flex-col"
-        role="dialog"
-        aria-label={t('meetings.edit_meeting', { defaultValue: 'Edit Meeting' })}
-        data-testid="edit-meeting-modal"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light sticky top-0 z-10 bg-surface-elevated rounded-t-xl">
-          <div>
-            <h2 className="text-lg font-semibold text-content-primary">
-              {t('meetings.edit_meeting', { defaultValue: 'Edit Meeting' })}
-            </h2>
-            <p className="text-xs text-content-tertiary mt-0.5">
-              MTG-{String(meeting.meeting_number).padStart(3, '0')}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="px-6 py-4 space-y-5 overflow-y-auto flex-1">
-          {/* Meeting Type */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-2">
-              {t('meetings.field_type', { defaultValue: 'Meeting Type' })}
-            </label>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {MEETING_TYPES.map((mt) => {
-                const cfg = MEETING_TYPE_CARD_CONFIG[mt];
-                const TypeIcon = cfg.icon;
-                const selected = form.meeting_type === mt;
-                return (
-                  <button
-                    key={mt}
-                    type="button"
-                    onClick={() => set('meeting_type', mt)}
-                    className={clsx(
-                      'flex flex-col items-center gap-1.5 rounded-lg border-2 px-2 py-2.5 text-center transition-all',
-                      selected
-                        ? cfg.color + ' ring-2 ring-oe-blue/30'
-                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
-                    )}
-                  >
-                    <TypeIcon size={18} />
-                    <span className="text-2xs font-medium leading-tight">
-                      {t(`meetings.type_${mt}`, {
-                        defaultValue: mt.charAt(0).toUpperCase() + mt.slice(1),
-                      })}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Title */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_title', { defaultValue: 'Title' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              value={form.title}
-              onChange={(e) => {
-                set('title', e.target.value);
-                setTouched(true);
-              }}
-              className={clsx(
-                inputCls,
-                titleError &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-              data-testid="edit-meeting-title"
-            />
-            {titleError && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {t('meetings.title_required', { defaultValue: 'Title is required' })}
-              </p>
-            )}
-          </div>
-
-          {/* Date */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_date', { defaultValue: 'Date & Time' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              type="date"
-              value={form.date?.split('T')[0] || form.date}
-              onChange={(e) => {
-                set('date', e.target.value);
-                setTouched(true);
-              }}
-              className={clsx(
-                inputCls,
-                dateError &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-            />
-            {dateError && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {t('meetings.date_required', { defaultValue: 'Date is required' })}
-              </p>
-            )}
-          </div>
-
-          {/* Location */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_location', { defaultValue: 'Location' })}
-            </label>
-            <input
-              value={form.location}
-              onChange={(e) => set('location', e.target.value)}
-              className={inputCls}
-            />
-          </div>
-
-          {/* Attendees */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_attendees', { defaultValue: 'Attendees' })}
-            </label>
-            <textarea
-              value={form.attendees}
-              onChange={(e) => set('attendees', e.target.value)}
-              rows={3}
-              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
-              placeholder={t('meetings.attendees_placeholder', {
-                defaultValue: 'One name per line',
-              })}
-            />
-          </div>
-
-          {/* Minutes */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('meetings.field_minutes', { defaultValue: 'Description / Minutes' })}
-            </label>
-            <textarea
-              value={form.minutes}
-              onChange={(e) => set('minutes', e.target.value)}
-              rows={8}
-              maxLength={50000}
-              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-vertical"
-              data-testid="edit-meeting-minutes"
-            />
-          </div>
-
-          {/* Attachments */}
-          {attachmentsLoaded ? (
-            <AttachmentDropzone
-              projectId={projectId}
-              attachments={form.attachments}
-              onAdd={(att) =>
-                setForm((prev) => ({
-                  ...prev,
-                  attachments: [...prev.attachments.filter((a) => a.id !== att.id), att],
-                }))
-              }
-              onRemove={(id) =>
-                setForm((prev) => ({
-                  ...prev,
-                  attachments: prev.attachments.filter((a) => a.id !== id),
-                }))
-              }
-              disabled={isPending}
-            />
-          ) : (
-            <div className="flex items-center gap-2 text-sm text-content-tertiary">
-              <Loader2 size={14} className="animate-spin" />
-              <span>
-                {t('meetings.loading_attachments', { defaultValue: 'Loading attachments...' })}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light sticky bottom-0 z-10 bg-surface-elevated rounded-b-xl">
+    <WideModal
+      open
+      onClose={onClose}
+      busy={isPending}
+      size="xl"
+      title={t('meetings.edit_meeting', { defaultValue: 'Edit Meeting' })}
+      subtitle={`MTG-${String(meeting.meeting_number).padStart(3, '0')}`}
+      className="data-[testid=edit-meeting-modal]"
+      footer={
+        <>
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
@@ -975,9 +744,161 @@ function EditMeetingModal({
             )}
             <span>{t('common.save', { defaultValue: 'Save' })}</span>
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {/* Meeting type tile picker */}
+      <WideModalSection columns={1}>
+        <WideModalField label={t('meetings.field_type', { defaultValue: 'Meeting Type' })}>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+            {MEETING_TYPES.map((mt) => {
+              const cfg = MEETING_TYPE_CARD_CONFIG[mt];
+              const TypeIcon = cfg.icon;
+              const selected = form.meeting_type === mt;
+              return (
+                <button
+                  key={mt}
+                  type="button"
+                  onClick={() => set('meeting_type', mt)}
+                  className={clsx(
+                    'flex flex-col items-center gap-1.5 rounded-lg border-2 px-2 py-2.5 text-center transition-all',
+                    selected
+                      ? cfg.color + ' ring-2 ring-oe-blue/30'
+                      : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                  )}
+                >
+                  <TypeIcon size={18} />
+                  <span className="text-2xs font-medium leading-tight">
+                    {t(`meetings.type_${mt}`, {
+                      defaultValue: mt.charAt(0).toUpperCase() + mt.slice(1),
+                    })}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Core meeting fields — title spans both, date + location share a row */}
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('meetings.field_title', { defaultValue: 'Title' })}
+          required
+          span={2}
+          error={
+            titleError
+              ? t('meetings.title_required', { defaultValue: 'Title is required' })
+              : undefined
+          }
+        >
+          <input
+            value={form.title}
+            onChange={(e) => {
+              set('title', e.target.value);
+              setTouched(true);
+            }}
+            className={clsx(
+              inputCls,
+              titleError &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+            data-testid="edit-meeting-title"
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('meetings.field_date', { defaultValue: 'Date & Time' })}
+          required
+          error={
+            dateError
+              ? t('meetings.date_required', { defaultValue: 'Date is required' })
+              : undefined
+          }
+        >
+          <input
+            type="date"
+            value={form.date?.split('T')[0] || form.date}
+            onChange={(e) => {
+              set('date', e.target.value);
+              setTouched(true);
+            }}
+            className={clsx(
+              inputCls,
+              dateError &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+          />
+        </WideModalField>
+
+        <WideModalField label={t('meetings.field_location', { defaultValue: 'Location' })}>
+          <input
+            value={form.location}
+            onChange={(e) => set('location', e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('meetings.field_attendees', { defaultValue: 'Attendees' })}
+          span={2}
+        >
+          <textarea
+            value={form.attendees}
+            onChange={(e) => set('attendees', e.target.value)}
+            rows={3}
+            className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
+            placeholder={t('meetings.attendees_placeholder', {
+              defaultValue: 'One name per line',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('meetings.field_minutes', { defaultValue: 'Description / Minutes' })}
+          span={2}
+        >
+          <textarea
+            value={form.minutes}
+            onChange={(e) => set('minutes', e.target.value)}
+            rows={8}
+            maxLength={50000}
+            className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-vertical"
+            data-testid="edit-meeting-minutes"
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Attachments dropzone — full width */}
+      <WideModalSection columns={1}>
+        {attachmentsLoaded ? (
+          <AttachmentDropzone
+            projectId={projectId}
+            attachments={form.attachments}
+            onAdd={(att) =>
+              setForm((prev) => ({
+                ...prev,
+                attachments: [...prev.attachments.filter((a) => a.id !== att.id), att],
+              }))
+            }
+            onRemove={(id) =>
+              setForm((prev) => ({
+                ...prev,
+                attachments: prev.attachments.filter((a) => a.id !== id),
+              }))
+            }
+            disabled={isPending}
+          />
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-content-tertiary">
+            <Loader2 size={14} className="animate-spin" />
+            <span>
+              {t('meetings.loading_attachments', { defaultValue: 'Loading attachments...' })}
+            </span>
+          </div>
+        )}
+      </WideModalSection>
+    </WideModal>
   );
 }
 

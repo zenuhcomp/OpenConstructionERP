@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -755,7 +755,7 @@ async def test_win_opportunity() -> None:
             stage_id=stage.id,
         )
     )
-    mock_publish = AsyncMock()
+    mock_publish = MagicMock()
     with patch("app.modules.crm.service.event_bus.publish_detached", mock_publish):
         out = await svc.win_opportunity(opp.id)
     assert out.status == "won"

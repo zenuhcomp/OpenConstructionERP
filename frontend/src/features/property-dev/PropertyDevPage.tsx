@@ -24,6 +24,11 @@ import {
   Breadcrumb,
   SkeletonTable,
 } from '@/shared/ui';
+import {
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui/WideModal';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { useToastStore } from '@/stores/useToastStore';
@@ -97,6 +102,9 @@ const WARRANTY_VARIANT: Record<WarrantyStatus, 'neutral' | 'blue' | 'success' | 
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
+// labelCls is still used by a couple of small inline modals (e.g.
+// BuyerContract date-pair) that were not migrated to WideModal because
+// they're tiny confirmation panels rather than full forms.
 const labelCls = 'block text-xs font-medium text-content-secondary mb-1';
 
 /* ─── helpers ─── */
@@ -1438,209 +1446,31 @@ function CreateModal({
     }
   };
 
+  const title =
+    kind === 'developments'
+      ? t('propdev.new_development', { defaultValue: 'New Development' })
+      : kind === 'plots'
+        ? t('propdev.new_plot', { defaultValue: 'New Plot' })
+        : kind === 'house_types'
+          ? t('propdev.new_house_type', { defaultValue: 'New House Type' })
+          : kind === 'buyers'
+            ? t('propdev.new_buyer', { defaultValue: 'New Buyer' })
+            : t('common.create', { defaultValue: 'Create' });
+
+  // house_types uses a triplet (bedrooms/area/base_price); xl gives it
+  // room. The other variants have ≤ 4 short fields, lg is enough.
+  const size = kind === 'house_types' ? 'xl' : 'lg';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">
-            {kind === 'developments' && t('propdev.new_development', { defaultValue: 'New Development' })}
-            {kind === 'plots' && t('propdev.new_plot', { defaultValue: 'New Plot' })}
-            {kind === 'house_types' && t('propdev.new_house_type', { defaultValue: 'New House Type' })}
-            {kind === 'buyers' && t('propdev.new_buyer', { defaultValue: 'New Buyer' })}
-            {(kind === 'handovers' || kind === 'warranty') && t('common.create', { defaultValue: 'Create' })}
-          </h2>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-surface-secondary">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {kind === 'developments' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('propdev.project_id', { defaultValue: 'Project ID (UUID)' })} *</label>
-                <input
-                  value={devForm.project_id}
-                  onChange={(e) => setDevForm({ ...devForm, project_id: e.target.value })}
-                  className={inputCls}
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('propdev.code', { defaultValue: 'Code' })} *</label>
-                <input
-                  value={devForm.code}
-                  onChange={(e) => setDevForm({ ...devForm, code: e.target.value })}
-                  className={inputCls}
-                  placeholder="DEV-001"
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('propdev.name', { defaultValue: 'Name' })}</label>
-                <input
-                  value={devForm.name}
-                  onChange={(e) => setDevForm({ ...devForm, name: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('propdev.total_plots', { defaultValue: 'Total plots' })}</label>
-                <input
-                  type="number"
-                  value={devForm.total_plots}
-                  onChange={(e) => setDevForm({ ...devForm, total_plots: Number(e.target.value) || 0 })}
-                  className={inputCls}
-                  min={0}
-                />
-              </div>
-            </>
-          )}
-          {kind === 'plots' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('propdev.development', { defaultValue: 'Development' })} *</label>
-                <select
-                  value={plotForm.development_id}
-                  onChange={(e) => setPlotForm({ ...plotForm, development_id: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">— {t('common.select', { defaultValue: 'Select' })} —</option>
-                  {developments.map((d) => (
-                    <option key={d.id} value={d.id}>{d.code} — {d.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>{t('propdev.plot_number', { defaultValue: 'Plot number' })} *</label>
-                <input
-                  value={plotForm.plot_number}
-                  onChange={(e) => setPlotForm({ ...plotForm, plot_number: e.target.value })}
-                  className={inputCls}
-                  placeholder="P-001"
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('propdev.house_type', { defaultValue: 'House Type' })}</label>
-                <select
-                  value={plotForm.house_type_id}
-                  onChange={(e) => setPlotForm({ ...plotForm, house_type_id: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">— {t('common.none', { defaultValue: 'None' })} —</option>
-                  {houseTypes.map((h) => (
-                    <option key={h.id} value={h.id}>{h.code} — {h.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('propdev.area', { defaultValue: 'Area (m²)' })}</label>
-                  <input
-                    type="number"
-                    value={plotForm.area_m2}
-                    onChange={(e) => setPlotForm({ ...plotForm, area_m2: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('propdev.base_price', { defaultValue: 'Base price' })}</label>
-                  <input
-                    type="number"
-                    value={plotForm.price_base}
-                    onChange={(e) => setPlotForm({ ...plotForm, price_base: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-          {kind === 'house_types' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('propdev.code', { defaultValue: 'Code' })} *</label>
-                <input
-                  value={htForm.code}
-                  onChange={(e) => setHtForm({ ...htForm, code: e.target.value })}
-                  className={inputCls}
-                  placeholder="TYPE-A"
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('propdev.name', { defaultValue: 'Name' })}</label>
-                <input
-                  value={htForm.name}
-                  onChange={(e) => setHtForm({ ...htForm, name: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className={labelCls}>{t('propdev.bedrooms', { defaultValue: 'Bedrooms' })}</label>
-                  <input
-                    type="number"
-                    value={htForm.bedrooms}
-                    onChange={(e) => setHtForm({ ...htForm, bedrooms: Number(e.target.value) || 0 })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('propdev.area', { defaultValue: 'Area' })}</label>
-                  <input
-                    type="number"
-                    value={htForm.total_area_m2}
-                    onChange={(e) => setHtForm({ ...htForm, total_area_m2: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('propdev.base_price', { defaultValue: 'Base price' })}</label>
-                  <input
-                    type="number"
-                    value={htForm.base_price}
-                    onChange={(e) => setHtForm({ ...htForm, base_price: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-          {kind === 'buyers' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('propdev.full_name', { defaultValue: 'Full name' })}</label>
-                <input
-                  value={buyerForm.full_name}
-                  onChange={(e) => setBuyerForm({ ...buyerForm, full_name: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('propdev.email', { defaultValue: 'Email' })} *</label>
-                <input
-                  type="email"
-                  value={buyerForm.email}
-                  onChange={(e) => setBuyerForm({ ...buyerForm, email: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('propdev.phone', { defaultValue: 'Phone' })}</label>
-                <input
-                  value={buyerForm.phone}
-                  onChange={(e) => setBuyerForm({ ...buyerForm, phone: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={title}
+      size={size}
+      busy={busy}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button
@@ -1651,8 +1481,205 @@ function CreateModal({
           >
             {t('common.create', { defaultValue: 'Create' })}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {kind === 'developments' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('propdev.project_id', { defaultValue: 'Project ID (UUID)' })}
+            required
+            span={2}
+          >
+            <input
+              value={devForm.project_id}
+              onChange={(e) => setDevForm({ ...devForm, project_id: e.target.value })}
+              className={inputCls}
+              placeholder="00000000-0000-0000-0000-000000000000"
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('propdev.code', { defaultValue: 'Code' })}
+            required
+          >
+            <input
+              value={devForm.code}
+              onChange={(e) => setDevForm({ ...devForm, code: e.target.value })}
+              className={inputCls}
+              placeholder="DEV-001"
+            />
+          </WideModalField>
+          <WideModalField label={t('propdev.name', { defaultValue: 'Name' })}>
+            <input
+              value={devForm.name}
+              onChange={(e) => setDevForm({ ...devForm, name: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('propdev.total_plots', { defaultValue: 'Total plots' })}
+            span={2}
+          >
+            <input
+              type="number"
+              value={devForm.total_plots}
+              onChange={(e) =>
+                setDevForm({ ...devForm, total_plots: Number(e.target.value) || 0 })
+              }
+              className={inputCls}
+              min={0}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+      {kind === 'plots' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('propdev.development', { defaultValue: 'Development' })}
+            required
+            span={2}
+          >
+            <select
+              value={plotForm.development_id}
+              onChange={(e) => setPlotForm({ ...plotForm, development_id: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">— {t('common.select', { defaultValue: 'Select' })} —</option>
+              {developments.map((d) => (
+                <option key={d.id} value={d.id}>{d.code} — {d.name}</option>
+              ))}
+            </select>
+          </WideModalField>
+          <WideModalField
+            label={t('propdev.plot_number', { defaultValue: 'Plot number' })}
+            required
+          >
+            <input
+              value={plotForm.plot_number}
+              onChange={(e) => setPlotForm({ ...plotForm, plot_number: e.target.value })}
+              className={inputCls}
+              placeholder="P-001"
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('propdev.house_type', { defaultValue: 'House Type' })}
+          >
+            <select
+              value={plotForm.house_type_id}
+              onChange={(e) => setPlotForm({ ...plotForm, house_type_id: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">— {t('common.none', { defaultValue: 'None' })} —</option>
+              {houseTypes.map((h) => (
+                <option key={h.id} value={h.id}>{h.code} — {h.name}</option>
+              ))}
+            </select>
+          </WideModalField>
+          <WideModalField label={t('propdev.area', { defaultValue: 'Area (m²)' })}>
+            <input
+              type="number"
+              value={plotForm.area_m2}
+              onChange={(e) => setPlotForm({ ...plotForm, area_m2: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('propdev.base_price', { defaultValue: 'Base price' })}
+          >
+            <input
+              type="number"
+              value={plotForm.price_base}
+              onChange={(e) => setPlotForm({ ...plotForm, price_base: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+      {kind === 'house_types' && (
+        <WideModalSection columns={3}>
+          <WideModalField
+            label={t('propdev.code', { defaultValue: 'Code' })}
+            required
+          >
+            <input
+              value={htForm.code}
+              onChange={(e) => setHtForm({ ...htForm, code: e.target.value })}
+              className={inputCls}
+              placeholder="TYPE-A"
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('propdev.name', { defaultValue: 'Name' })}
+            span={2}
+          >
+            <input
+              value={htForm.name}
+              onChange={(e) => setHtForm({ ...htForm, name: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('propdev.bedrooms', { defaultValue: 'Bedrooms' })}
+          >
+            <input
+              type="number"
+              value={htForm.bedrooms}
+              onChange={(e) => setHtForm({ ...htForm, bedrooms: Number(e.target.value) || 0 })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('propdev.area', { defaultValue: 'Area' })}>
+            <input
+              type="number"
+              value={htForm.total_area_m2}
+              onChange={(e) => setHtForm({ ...htForm, total_area_m2: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('propdev.base_price', { defaultValue: 'Base price' })}
+          >
+            <input
+              type="number"
+              value={htForm.base_price}
+              onChange={(e) => setHtForm({ ...htForm, base_price: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+      {kind === 'buyers' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('propdev.full_name', { defaultValue: 'Full name' })}
+            span={2}
+          >
+            <input
+              value={buyerForm.full_name}
+              onChange={(e) => setBuyerForm({ ...buyerForm, full_name: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('propdev.email', { defaultValue: 'Email' })}
+            required
+          >
+            <input
+              type="email"
+              value={buyerForm.email}
+              onChange={(e) => setBuyerForm({ ...buyerForm, email: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('propdev.phone', { defaultValue: 'Phone' })}>
+            <input
+              value={buyerForm.phone}
+              onChange={(e) => setBuyerForm({ ...buyerForm, phone: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+    </WideModal>
   );
 }

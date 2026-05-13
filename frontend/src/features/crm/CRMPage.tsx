@@ -25,6 +25,11 @@ import {
   Breadcrumb,
   SkeletonTable,
 } from '@/shared/ui';
+import {
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui/WideModal';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { useToastStore } from '@/stores/useToastStore';
@@ -111,7 +116,6 @@ const ACTIVITY_KINDS: ActivityKind[] = ['call', 'meeting', 'email', 'task', 'not
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
-const labelCls = 'block text-xs font-medium text-content-secondary mb-1';
 
 function toNum(v: number | string | null | undefined): number {
   if (v === null || v === undefined) return 0;
@@ -1384,379 +1388,29 @@ function CreateModal({
     }
   };
 
+  const title =
+    kind === 'accounts'
+      ? t('crm.new_account', { defaultValue: 'New Account' })
+      : kind === 'leads'
+        ? t('crm.new_lead', { defaultValue: 'New Lead' })
+        : kind === 'opportunities'
+          ? t('crm.new_opportunity', { defaultValue: 'New Opportunity' })
+          : t('crm.new_activity', { defaultValue: 'New Activity' });
+
+  // Opportunities have the widest form (7 fields) so we use xl; accounts
+  // and leads fit comfortably in lg.
+  const size = kind === 'opportunities' ? 'xl' : 'lg';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">
-            {kind === 'accounts' &&
-              t('crm.new_account', { defaultValue: 'New Account' })}
-            {kind === 'leads' && t('crm.new_lead', { defaultValue: 'New Lead' })}
-            {kind === 'opportunities' &&
-              t('crm.new_opportunity', { defaultValue: 'New Opportunity' })}
-            {kind === 'activities' &&
-              t('crm.new_activity', { defaultValue: 'New Activity' })}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {kind === 'accounts' && (
-            <>
-              <div>
-                <label className={labelCls}>
-                  {t('crm.account_name', { defaultValue: 'Name' })} *
-                </label>
-                <input
-                  value={accountForm.name}
-                  onChange={(e) =>
-                    setAccountForm({ ...accountForm, name: e.target.value })
-                  }
-                  className={inputCls}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.industry', { defaultValue: 'Industry' })}
-                  </label>
-                  <input
-                    value={accountForm.industry}
-                    onChange={(e) =>
-                      setAccountForm({ ...accountForm, industry: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.country', { defaultValue: 'Country' })}
-                  </label>
-                  <input
-                    value={accountForm.country}
-                    onChange={(e) =>
-                      setAccountForm({ ...accountForm, country: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.size', { defaultValue: 'Size' })}
-                  </label>
-                  <select
-                    value={accountForm.size_category}
-                    onChange={(e) =>
-                      setAccountForm({
-                        ...accountForm,
-                        size_category: e.target.value as AccountSize,
-                      })
-                    }
-                    className={inputCls}
-                  >
-                    <option value="sme">SME</option>
-                    <option value="mid">Mid-market</option>
-                    <option value="enterprise">Enterprise</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.status', { defaultValue: 'Status' })}
-                  </label>
-                  <select
-                    value={accountForm.status}
-                    onChange={(e) =>
-                      setAccountForm({
-                        ...accountForm,
-                        status: e.target.value as AccountStatus,
-                      })
-                    }
-                    className={inputCls}
-                  >
-                    <option value="active">active</option>
-                    <option value="dormant">dormant</option>
-                    <option value="lost">lost</option>
-                  </select>
-                </div>
-              </div>
-            </>
-          )}
-
-          {kind === 'leads' && (
-            <>
-              <div>
-                <label className={labelCls}>
-                  {t('crm.contact_name', { defaultValue: 'Contact name' })} *
-                </label>
-                <input
-                  value={leadForm.contact_name}
-                  onChange={(e) =>
-                    setLeadForm({ ...leadForm, contact_name: e.target.value })
-                  }
-                  className={inputCls}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.email', { defaultValue: 'Email' })}
-                  </label>
-                  <input
-                    type="email"
-                    value={leadForm.contact_email}
-                    onChange={(e) =>
-                      setLeadForm({ ...leadForm, contact_email: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.phone', { defaultValue: 'Phone' })}
-                  </label>
-                  <input
-                    value={leadForm.contact_phone}
-                    onChange={(e) =>
-                      setLeadForm({ ...leadForm, contact_phone: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.account', { defaultValue: 'Account' })}
-                  </label>
-                  <select
-                    value={leadForm.account_id}
-                    onChange={(e) =>
-                      setLeadForm({ ...leadForm, account_id: e.target.value })
-                    }
-                    className={inputCls}
-                  >
-                    <option value="">—</option>
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.source', { defaultValue: 'Source' })}
-                  </label>
-                  <select
-                    value={leadForm.source}
-                    onChange={(e) =>
-                      setLeadForm({ ...leadForm, source: e.target.value as LeadSource })
-                    }
-                    className={inputCls}
-                  >
-                    {LEAD_SOURCES.map((s) => (
-                      <option key={s} value={s}>
-                        {s.replace(/_/g, ' ')}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </>
-          )}
-
-          {kind === 'opportunities' && (
-            <>
-              <div>
-                <label className={labelCls}>
-                  {t('crm.title_col', { defaultValue: 'Title' })} *
-                </label>
-                <input
-                  value={oppForm.title}
-                  onChange={(e) =>
-                    setOppForm({ ...oppForm, title: e.target.value })
-                  }
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('crm.account', { defaultValue: 'Account' })} *
-                </label>
-                <select
-                  value={oppForm.account_id}
-                  onChange={(e) =>
-                    setOppForm({ ...oppForm, account_id: e.target.value })
-                  }
-                  className={inputCls}
-                >
-                  <option value="">—</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.value', { defaultValue: 'Value' })}
-                  </label>
-                  <input
-                    type="number"
-                    value={oppForm.estimated_value}
-                    onChange={(e) =>
-                      setOppForm({ ...oppForm, estimated_value: e.target.value })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.currency', { defaultValue: 'Currency' })}
-                  </label>
-                  <input
-                    value={oppForm.currency}
-                    onChange={(e) =>
-                      setOppForm({ ...oppForm, currency: e.target.value })
-                    }
-                    className={inputCls}
-                    maxLength={8}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.stage', { defaultValue: 'Stage' })}
-                  </label>
-                  <select
-                    value={oppForm.stage_id}
-                    onChange={(e) =>
-                      setOppForm({ ...oppForm, stage_id: e.target.value })
-                    }
-                    className={inputCls}
-                  >
-                    <option value="">—</option>
-                    {stages.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    {t('crm.probability', { defaultValue: 'Probability %' })}
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={oppForm.probability_percent}
-                    onChange={(e) =>
-                      setOppForm({
-                        ...oppForm,
-                        probability_percent: e.target.value,
-                      })
-                    }
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('crm.expected_close', { defaultValue: 'Expected close' })}
-                </label>
-                <input
-                  type="date"
-                  value={oppForm.expected_close_date}
-                  onChange={(e) =>
-                    setOppForm({ ...oppForm, expected_close_date: e.target.value })
-                  }
-                  className={inputCls}
-                />
-              </div>
-            </>
-          )}
-
-          {kind === 'activities' && (
-            <>
-              <div>
-                <label className={labelCls}>
-                  {t('crm.kind', { defaultValue: 'Kind' })}
-                </label>
-                <select
-                  value={actForm.kind}
-                  onChange={(e) =>
-                    setActForm({ ...actForm, kind: e.target.value as ActivityKind })
-                  }
-                  className={inputCls}
-                >
-                  {ACTIVITY_KINDS.map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('crm.subject', { defaultValue: 'Subject' })}
-                </label>
-                <input
-                  value={actForm.subject}
-                  onChange={(e) =>
-                    setActForm({ ...actForm, subject: e.target.value })
-                  }
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('crm.body', { defaultValue: 'Body' })}
-                </label>
-                <textarea
-                  value={actForm.body}
-                  onChange={(e) =>
-                    setActForm({ ...actForm, body: e.target.value })
-                  }
-                  rows={4}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('crm.due', { defaultValue: 'Due' })}
-                </label>
-                <input
-                  type="date"
-                  value={actForm.due_at}
-                  onChange={(e) =>
-                    setActForm({ ...actForm, due_at: e.target.value })
-                  }
-                  className={inputCls}
-                />
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 mt-5">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={title}
+      size={size}
+      busy={busy}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button
@@ -1767,8 +1421,318 @@ function CreateModal({
           >
             {t('common.create', { defaultValue: 'Create' })}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {kind === 'accounts' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('crm.account_name', { defaultValue: 'Name' })}
+            required
+            span={2}
+          >
+            <input
+              value={accountForm.name}
+              onChange={(e) =>
+                setAccountForm({ ...accountForm, name: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('crm.industry', { defaultValue: 'Industry' })}
+          >
+            <input
+              value={accountForm.industry}
+              onChange={(e) =>
+                setAccountForm({ ...accountForm, industry: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('crm.country', { defaultValue: 'Country' })}>
+            <input
+              value={accountForm.country}
+              onChange={(e) =>
+                setAccountForm({ ...accountForm, country: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('crm.size', { defaultValue: 'Size' })}>
+            <select
+              value={accountForm.size_category}
+              onChange={(e) =>
+                setAccountForm({
+                  ...accountForm,
+                  size_category: e.target.value as AccountSize,
+                })
+              }
+              className={inputCls}
+            >
+              <option value="sme">SME</option>
+              <option value="mid">Mid-market</option>
+              <option value="enterprise">Enterprise</option>
+            </select>
+          </WideModalField>
+          <WideModalField label={t('crm.status', { defaultValue: 'Status' })}>
+            <select
+              value={accountForm.status}
+              onChange={(e) =>
+                setAccountForm({
+                  ...accountForm,
+                  status: e.target.value as AccountStatus,
+                })
+              }
+              className={inputCls}
+            >
+              <option value="active">active</option>
+              <option value="dormant">dormant</option>
+              <option value="lost">lost</option>
+            </select>
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'leads' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('crm.contact_name', { defaultValue: 'Contact name' })}
+            required
+            span={2}
+          >
+            <input
+              value={leadForm.contact_name}
+              onChange={(e) =>
+                setLeadForm({ ...leadForm, contact_name: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('crm.email', { defaultValue: 'Email' })}>
+            <input
+              type="email"
+              value={leadForm.contact_email}
+              onChange={(e) =>
+                setLeadForm({ ...leadForm, contact_email: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('crm.phone', { defaultValue: 'Phone' })}>
+            <input
+              value={leadForm.contact_phone}
+              onChange={(e) =>
+                setLeadForm({ ...leadForm, contact_phone: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('crm.account', { defaultValue: 'Account' })}>
+            <select
+              value={leadForm.account_id}
+              onChange={(e) =>
+                setLeadForm({ ...leadForm, account_id: e.target.value })
+              }
+              className={inputCls}
+            >
+              <option value="">—</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </WideModalField>
+          <WideModalField label={t('crm.source', { defaultValue: 'Source' })}>
+            <select
+              value={leadForm.source}
+              onChange={(e) =>
+                setLeadForm({ ...leadForm, source: e.target.value as LeadSource })
+              }
+              className={inputCls}
+            >
+              {LEAD_SOURCES.map((s) => (
+                <option key={s} value={s}>
+                  {s.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'opportunities' && (
+        <>
+          <WideModalSection
+            title={t('crm.section_basic', { defaultValue: 'Basic info' })}
+            columns={2}
+          >
+            <WideModalField
+              label={t('crm.title_col', { defaultValue: 'Title' })}
+              required
+              span={2}
+            >
+              <input
+                value={oppForm.title}
+                onChange={(e) =>
+                  setOppForm({ ...oppForm, title: e.target.value })
+                }
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('crm.account', { defaultValue: 'Account' })}
+              required
+              span={2}
+            >
+              <select
+                value={oppForm.account_id}
+                onChange={(e) =>
+                  setOppForm({ ...oppForm, account_id: e.target.value })
+                }
+                className={inputCls}
+              >
+                <option value="">—</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </WideModalField>
+          </WideModalSection>
+
+          <WideModalSection
+            title={t('crm.section_value', { defaultValue: 'Value & pipeline' })}
+            columns={2}
+          >
+            <WideModalField label={t('crm.value', { defaultValue: 'Value' })}>
+              <input
+                type="number"
+                value={oppForm.estimated_value}
+                onChange={(e) =>
+                  setOppForm({ ...oppForm, estimated_value: e.target.value })
+                }
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('crm.currency', { defaultValue: 'Currency' })}
+            >
+              <input
+                value={oppForm.currency}
+                onChange={(e) =>
+                  setOppForm({ ...oppForm, currency: e.target.value })
+                }
+                className={inputCls}
+                maxLength={8}
+              />
+            </WideModalField>
+            <WideModalField label={t('crm.stage', { defaultValue: 'Stage' })}>
+              <select
+                value={oppForm.stage_id}
+                onChange={(e) =>
+                  setOppForm({ ...oppForm, stage_id: e.target.value })
+                }
+                className={inputCls}
+              >
+                <option value="">—</option>
+                {stages.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </WideModalField>
+            <WideModalField
+              label={t('crm.probability', { defaultValue: 'Probability %' })}
+            >
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={oppForm.probability_percent}
+                onChange={(e) =>
+                  setOppForm({
+                    ...oppForm,
+                    probability_percent: e.target.value,
+                  })
+                }
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('crm.expected_close', { defaultValue: 'Expected close' })}
+              span={2}
+            >
+              <input
+                type="date"
+                value={oppForm.expected_close_date}
+                onChange={(e) =>
+                  setOppForm({ ...oppForm, expected_close_date: e.target.value })
+                }
+                className={inputCls}
+              />
+            </WideModalField>
+          </WideModalSection>
+        </>
+      )}
+
+      {kind === 'activities' && (
+        <WideModalSection columns={2}>
+          <WideModalField label={t('crm.kind', { defaultValue: 'Kind' })}>
+            <select
+              value={actForm.kind}
+              onChange={(e) =>
+                setActForm({ ...actForm, kind: e.target.value as ActivityKind })
+              }
+              className={inputCls}
+            >
+              {ACTIVITY_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          </WideModalField>
+          <WideModalField label={t('crm.due', { defaultValue: 'Due' })}>
+            <input
+              type="date"
+              value={actForm.due_at}
+              onChange={(e) =>
+                setActForm({ ...actForm, due_at: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('crm.subject', { defaultValue: 'Subject' })}
+            span={2}
+          >
+            <input
+              value={actForm.subject}
+              onChange={(e) =>
+                setActForm({ ...actForm, subject: e.target.value })
+              }
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('crm.body', { defaultValue: 'Body' })}
+            span={2}
+          >
+            <textarea
+              value={actForm.body}
+              onChange={(e) =>
+                setActForm({ ...actForm, body: e.target.value })
+              }
+              rows={4}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+    </WideModal>
   );
 }

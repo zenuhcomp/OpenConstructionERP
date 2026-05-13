@@ -24,6 +24,11 @@ import {
   Breadcrumb,
   SkeletonTable,
 } from '@/shared/ui';
+import {
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui/WideModal';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { getErrorMessage } from '@/shared/lib/api';
@@ -58,7 +63,6 @@ const VENDOR_VARIANT: Record<VendorStatus, 'neutral' | 'blue' | 'success' | 'war
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
-const labelCls = 'block text-xs font-medium text-content-secondary mb-1';
 
 export function SupplierCatalogsPage() {
   const { t } = useTranslation();
@@ -780,312 +784,20 @@ function CreateModal({
     }
   };
 
+  // PRs / POs have 4 header fields + 3-field line item — xl gives the
+  // line-item row breathing room. Vendors/catalog/warehouses sit at lg.
+  const size = kind === 'prs' || kind === 'pos' ? 'xl' : 'lg';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">{createLabel(kind, t)}</h2>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-surface-secondary">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {kind === 'vendors' && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('supplier_catalogs.code', { defaultValue: 'Code' })} *</label>
-                  <input
-                    value={vendorForm.code}
-                    onChange={(e) => setVendorForm({ ...vendorForm, code: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('supplier_catalogs.country', { defaultValue: 'Country' })}</label>
-                  <input
-                    value={vendorForm.country_code}
-                    onChange={(e) => setVendorForm({ ...vendorForm, country_code: e.target.value })}
-                    className={inputCls}
-                    maxLength={3}
-                    placeholder="DE / FR / US"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>{t('supplier_catalogs.name', { defaultValue: 'Name' })} *</label>
-                <input
-                  value={vendorForm.name}
-                  onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('supplier_catalogs.legal_name', { defaultValue: 'Legal name' })}</label>
-                <input
-                  value={vendorForm.legal_name}
-                  onChange={(e) => setVendorForm({ ...vendorForm, legal_name: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('common.currency', { defaultValue: 'Currency' })}</label>
-                  <input
-                    value={vendorForm.currency}
-                    onChange={(e) => setVendorForm({ ...vendorForm, currency: e.target.value })}
-                    className={inputCls}
-                    maxLength={3}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('supplier_catalogs.payment_terms', { defaultValue: 'Payment terms (days)' })}</label>
-                  <input
-                    type="number"
-                    value={vendorForm.payment_terms_days}
-                    onChange={(e) => setVendorForm({ ...vendorForm, payment_terms_days: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {kind === 'catalog' && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('supplier_catalogs.sku', { defaultValue: 'SKU' })} *</label>
-                  <input
-                    value={itemForm.sku}
-                    onChange={(e) => setItemForm({ ...itemForm, sku: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('supplier_catalogs.uom', { defaultValue: 'UoM' })}</label>
-                  <input
-                    value={itemForm.unit_of_measure}
-                    onChange={(e) => setItemForm({ ...itemForm, unit_of_measure: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>{t('supplier_catalogs.name', { defaultValue: 'Name' })} *</label>
-                <input
-                  value={itemForm.name}
-                  onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>
-                  {t('supplier_catalogs.description_field', { defaultValue: 'Description' })}
-                </label>
-                <textarea
-                  value={itemForm.description}
-                  onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
-                  rows={2}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('supplier_catalogs.manufacturer', { defaultValue: 'Manufacturer' })}</label>
-                <input
-                  value={itemForm.manufacturer}
-                  onChange={(e) => setItemForm({ ...itemForm, manufacturer: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-            </>
-          )}
-
-          {kind === 'prs' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('supplier_catalogs.project_id', { defaultValue: 'Project ID' })} *</label>
-                <input
-                  value={prForm.project_id}
-                  onChange={(e) => setPrForm({ ...prForm, project_id: e.target.value })}
-                  className={inputCls}
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('common.currency', { defaultValue: 'Currency' })}</label>
-                  <input
-                    value={prForm.currency}
-                    onChange={(e) => setPrForm({ ...prForm, currency: e.target.value })}
-                    className={inputCls}
-                    maxLength={3}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('supplier_catalogs.needed_by', { defaultValue: 'Needed by' })}</label>
-                  <input
-                    type="date"
-                    value={prForm.needed_by}
-                    onChange={(e) => setPrForm({ ...prForm, needed_by: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div className="p-3 rounded-lg bg-surface-secondary space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-content-tertiary">
-                  {t('supplier_catalogs.first_line', { defaultValue: 'First line item' })}
-                </p>
-                <input
-                  value={prForm.lineDesc}
-                  onChange={(e) => setPrForm({ ...prForm, lineDesc: e.target.value })}
-                  placeholder={t('supplier_catalogs.line_description', { defaultValue: 'Description' })}
-                  className={inputCls}
-                />
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    type="number"
-                    value={prForm.lineQty}
-                    onChange={(e) => setPrForm({ ...prForm, lineQty: e.target.value })}
-                    placeholder={t('supplier_catalogs.qty', { defaultValue: 'Quantity' })}
-                    className={inputCls}
-                  />
-                  <input
-                    type="number"
-                    value={prForm.linePrice}
-                    onChange={(e) => setPrForm({ ...prForm, linePrice: e.target.value })}
-                    placeholder={t('supplier_catalogs.est_price', { defaultValue: 'Est. price' })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {kind === 'pos' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('supplier_catalogs.vendor', { defaultValue: 'Vendor' })} *</label>
-                <select
-                  value={poForm.vendor_id}
-                  onChange={(e) => setPoForm({ ...poForm, vendor_id: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">—</option>
-                  {vendors.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.code} — {v.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>{t('supplier_catalogs.project_id', { defaultValue: 'Project ID' })} *</label>
-                <input
-                  value={poForm.project_id}
-                  onChange={(e) => setPoForm({ ...poForm, project_id: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('common.currency', { defaultValue: 'Currency' })}</label>
-                  <input
-                    value={poForm.currency}
-                    onChange={(e) => setPoForm({ ...poForm, currency: e.target.value })}
-                    className={inputCls}
-                    maxLength={3}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('supplier_catalogs.expected_delivery', { defaultValue: 'Expected' })}</label>
-                  <input
-                    type="date"
-                    value={poForm.expected_delivery}
-                    onChange={(e) => setPoForm({ ...poForm, expected_delivery: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div className="p-3 rounded-lg bg-surface-secondary space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-content-tertiary">
-                  {t('supplier_catalogs.first_line', { defaultValue: 'First line item' })}
-                </p>
-                <input
-                  value={poForm.lineDesc}
-                  onChange={(e) => setPoForm({ ...poForm, lineDesc: e.target.value })}
-                  placeholder={t('supplier_catalogs.line_description', { defaultValue: 'Description' })}
-                  className={inputCls}
-                />
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    type="number"
-                    value={poForm.lineQty}
-                    onChange={(e) => setPoForm({ ...poForm, lineQty: e.target.value })}
-                    placeholder={t('supplier_catalogs.qty', { defaultValue: 'Quantity' })}
-                    className={inputCls}
-                  />
-                  <input
-                    type="number"
-                    value={poForm.linePrice}
-                    onChange={(e) => setPoForm({ ...poForm, linePrice: e.target.value })}
-                    placeholder={t('supplier_catalogs.unit_price', { defaultValue: 'Unit price' })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {kind === 'warehouses' && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('supplier_catalogs.code', { defaultValue: 'Code' })} *</label>
-                  <input
-                    value={warehouseForm.code}
-                    onChange={(e) => setWarehouseForm({ ...warehouseForm, code: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('supplier_catalogs.name', { defaultValue: 'Name' })} *</label>
-                  <input
-                    value={warehouseForm.name}
-                    onChange={(e) => setWarehouseForm({ ...warehouseForm, name: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>{t('supplier_catalogs.address', { defaultValue: 'Address' })}</label>
-                <textarea
-                  value={warehouseForm.address}
-                  onChange={(e) => setWarehouseForm({ ...warehouseForm, address: e.target.value })}
-                  rows={2}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-            </>
-          )}
-
-          {kind === 'match' && (
-            <div className="text-sm text-content-secondary">
-              {t('supplier_catalogs.match_create_hint', {
-                defaultValue:
-                  'Three-way match runs automatically when a vendor invoice is posted against a PO and GR.',
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 mt-5">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={createLabel(kind, t)}
+      size={size}
+      busy={busy}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           {kind !== 'match' && (
@@ -1098,9 +810,345 @@ function CreateModal({
               {t('common.create', { defaultValue: 'Create' })}
             </Button>
           )}
+        </>
+      }
+    >
+      {kind === 'vendors' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('supplier_catalogs.code', { defaultValue: 'Code' })}
+            required
+          >
+            <input
+              value={vendorForm.code}
+              onChange={(e) => setVendorForm({ ...vendorForm, code: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.country', { defaultValue: 'Country' })}
+          >
+            <input
+              value={vendorForm.country_code}
+              onChange={(e) => setVendorForm({ ...vendorForm, country_code: e.target.value })}
+              className={inputCls}
+              maxLength={3}
+              placeholder="DE / FR / US"
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.name', { defaultValue: 'Name' })}
+            required
+            span={2}
+          >
+            <input
+              value={vendorForm.name}
+              onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.legal_name', { defaultValue: 'Legal name' })}
+            span={2}
+          >
+            <input
+              value={vendorForm.legal_name}
+              onChange={(e) => setVendorForm({ ...vendorForm, legal_name: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('common.currency', { defaultValue: 'Currency' })}
+          >
+            <input
+              value={vendorForm.currency}
+              onChange={(e) => setVendorForm({ ...vendorForm, currency: e.target.value })}
+              className={inputCls}
+              maxLength={3}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.payment_terms', { defaultValue: 'Payment terms (days)' })}
+          >
+            <input
+              type="number"
+              value={vendorForm.payment_terms_days}
+              onChange={(e) => setVendorForm({ ...vendorForm, payment_terms_days: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'catalog' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('supplier_catalogs.sku', { defaultValue: 'SKU' })}
+            required
+          >
+            <input
+              value={itemForm.sku}
+              onChange={(e) => setItemForm({ ...itemForm, sku: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.uom', { defaultValue: 'UoM' })}
+          >
+            <input
+              value={itemForm.unit_of_measure}
+              onChange={(e) => setItemForm({ ...itemForm, unit_of_measure: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.name', { defaultValue: 'Name' })}
+            required
+            span={2}
+          >
+            <input
+              value={itemForm.name}
+              onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.description_field', { defaultValue: 'Description' })}
+            span={2}
+          >
+            <textarea
+              value={itemForm.description}
+              onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
+              rows={2}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.manufacturer', { defaultValue: 'Manufacturer' })}
+            span={2}
+          >
+            <input
+              value={itemForm.manufacturer}
+              onChange={(e) => setItemForm({ ...itemForm, manufacturer: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'prs' && (
+        <>
+          <WideModalSection
+            title={t('supplier_catalogs.section_header', { defaultValue: 'Requisition' })}
+            columns={3}
+          >
+            <WideModalField
+              label={t('supplier_catalogs.project_id', { defaultValue: 'Project ID' })}
+              required
+              span={3}
+            >
+              <input
+                value={prForm.project_id}
+                onChange={(e) => setPrForm({ ...prForm, project_id: e.target.value })}
+                className={inputCls}
+                placeholder="00000000-0000-0000-0000-000000000000"
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('common.currency', { defaultValue: 'Currency' })}
+            >
+              <input
+                value={prForm.currency}
+                onChange={(e) => setPrForm({ ...prForm, currency: e.target.value })}
+                className={inputCls}
+                maxLength={3}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('supplier_catalogs.needed_by', { defaultValue: 'Needed by' })}
+              span={2}
+            >
+              <input
+                type="date"
+                value={prForm.needed_by}
+                onChange={(e) => setPrForm({ ...prForm, needed_by: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+          </WideModalSection>
+          <WideModalSection
+            title={t('supplier_catalogs.first_line', { defaultValue: 'First line item' })}
+            columns={3}
+          >
+            <WideModalField
+              label={t('supplier_catalogs.line_description', { defaultValue: 'Description' })}
+              span={3}
+            >
+              <input
+                value={prForm.lineDesc}
+                onChange={(e) => setPrForm({ ...prForm, lineDesc: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField label={t('supplier_catalogs.qty', { defaultValue: 'Quantity' })}>
+              <input
+                type="number"
+                value={prForm.lineQty}
+                onChange={(e) => setPrForm({ ...prForm, lineQty: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('supplier_catalogs.est_price', { defaultValue: 'Est. price' })}
+              span={2}
+            >
+              <input
+                type="number"
+                value={prForm.linePrice}
+                onChange={(e) => setPrForm({ ...prForm, linePrice: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+          </WideModalSection>
+        </>
+      )}
+
+      {kind === 'pos' && (
+        <>
+          <WideModalSection
+            title={t('supplier_catalogs.section_header', { defaultValue: 'Order' })}
+            columns={2}
+          >
+            <WideModalField
+              label={t('supplier_catalogs.vendor', { defaultValue: 'Vendor' })}
+              required
+            >
+              <select
+                value={poForm.vendor_id}
+                onChange={(e) => setPoForm({ ...poForm, vendor_id: e.target.value })}
+                className={inputCls}
+              >
+                <option value="">—</option>
+                {vendors.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.code} — {v.name}
+                  </option>
+                ))}
+              </select>
+            </WideModalField>
+            <WideModalField
+              label={t('supplier_catalogs.project_id', { defaultValue: 'Project ID' })}
+              required
+            >
+              <input
+                value={poForm.project_id}
+                onChange={(e) => setPoForm({ ...poForm, project_id: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('common.currency', { defaultValue: 'Currency' })}
+            >
+              <input
+                value={poForm.currency}
+                onChange={(e) => setPoForm({ ...poForm, currency: e.target.value })}
+                className={inputCls}
+                maxLength={3}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('supplier_catalogs.expected_delivery', { defaultValue: 'Expected' })}
+            >
+              <input
+                type="date"
+                value={poForm.expected_delivery}
+                onChange={(e) => setPoForm({ ...poForm, expected_delivery: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+          </WideModalSection>
+          <WideModalSection
+            title={t('supplier_catalogs.first_line', { defaultValue: 'First line item' })}
+            columns={3}
+          >
+            <WideModalField
+              label={t('supplier_catalogs.line_description', { defaultValue: 'Description' })}
+              span={3}
+            >
+              <input
+                value={poForm.lineDesc}
+                onChange={(e) => setPoForm({ ...poForm, lineDesc: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField label={t('supplier_catalogs.qty', { defaultValue: 'Quantity' })}>
+              <input
+                type="number"
+                value={poForm.lineQty}
+                onChange={(e) => setPoForm({ ...poForm, lineQty: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('supplier_catalogs.unit_price', { defaultValue: 'Unit price' })}
+              span={2}
+            >
+              <input
+                type="number"
+                value={poForm.linePrice}
+                onChange={(e) => setPoForm({ ...poForm, linePrice: e.target.value })}
+                className={inputCls}
+              />
+            </WideModalField>
+          </WideModalSection>
+        </>
+      )}
+
+      {kind === 'warehouses' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('supplier_catalogs.code', { defaultValue: 'Code' })}
+            required
+          >
+            <input
+              value={warehouseForm.code}
+              onChange={(e) => setWarehouseForm({ ...warehouseForm, code: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.name', { defaultValue: 'Name' })}
+            required
+          >
+            <input
+              value={warehouseForm.name}
+              onChange={(e) => setWarehouseForm({ ...warehouseForm, name: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField
+            label={t('supplier_catalogs.address', { defaultValue: 'Address' })}
+            span={2}
+          >
+            <textarea
+              value={warehouseForm.address}
+              onChange={(e) => setWarehouseForm({ ...warehouseForm, address: e.target.value })}
+              rows={2}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'match' && (
+        <div className="text-sm text-content-secondary">
+          {t('supplier_catalogs.match_create_hint', {
+            defaultValue:
+              'Three-way match runs automatically when a vendor invoice is posted against a PO and GR.',
+          })}
         </div>
-      </div>
-    </div>
+      )}
+    </WideModal>
   );
 }
 

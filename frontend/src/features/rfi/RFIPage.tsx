@@ -15,8 +15,6 @@ import {
   FileText,
   Download,
   Loader2,
-  MessageSquare,
-  User,
   CalendarClock,
   AlertTriangle,
   Paperclip,
@@ -24,7 +22,18 @@ import {
   UploadCloud,
   Check,
 } from 'lucide-react';
-import { Button, Card, Badge, EmptyState, Breadcrumb, ConfirmDialog, SkeletonTable } from '@/shared/ui';
+import {
+  Button,
+  Card,
+  Badge,
+  EmptyState,
+  Breadcrumb,
+  ConfirmDialog,
+  SkeletonTable,
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui';
 import { UserSearchInput } from '@/shared/ui/UserSearchInput';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useCreateShortcut } from '@/shared/hooks/useCreateShortcut';
@@ -507,373 +516,354 @@ function CreateRFIModal({
     onSubmit(form);
   };
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in">
-      <div className="w-full max-w-2xl bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[85vh] flex flex-col" role="dialog" aria-modal="true" aria-label={t('rfi.new_rfi', { defaultValue: 'New RFI‌⁠‍' })}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light sticky top-0 z-10 bg-surface-elevated rounded-t-xl">
-          <div>
-            <h2 className="text-lg font-semibold text-content-primary">
-              {t('rfi.new_rfi', { defaultValue: 'New RFI‌⁠‍' })}
-            </h2>
-            {projectName && (
-              <p className="text-xs text-content-tertiary mt-0.5">
-                {t('common.creating_in_project', {
-                  defaultValue: 'In {{project}}‌⁠‍',
-                  project: projectName,
-                })}
-              </p>
+    <WideModal
+      open
+      onClose={onClose}
+      busy={isPending}
+      size="xl"
+      title={t('rfi.new_rfi', { defaultValue: 'New RFI‌⁠‍' })}
+      subtitle={
+        projectName
+          ? t('common.creating_in_project', {
+              defaultValue: 'In {{project}}‌⁠‍',
+              project: projectName,
+            })
+          : undefined
+      }
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={isPending}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button variant="primary" onClick={handleSubmit} disabled={isPending || !canSubmit}>
+            {isPending ? (
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent mr-2 shrink-0" />
+            ) : (
+              <Plus size={16} className="mr-1.5 shrink-0" />
             )}
-          </div>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
+            <span>{t('rfi.create_rfi', { defaultValue: 'Create RFI' })}</span>
+          </Button>
+        </>
+      }
+    >
+      {/* Document picker — list-modal lazily mounted */}
+      {showDocPicker && (
+        <DocumentPickerModal
+          documents={documents}
+          isLoading={docsLoading}
+          selected={form.linked_drawing_ids}
+          onClose={() => setShowDocPicker(false)}
+          onApply={(ids) => {
+            setForm((prev) => ({ ...prev, linked_drawing_ids: ids }));
+            setShowDocPicker(false);
+          }}
+        />
+      )}
+
+      {/* ── Request Details ── */}
+      <WideModalSection
+        title={t('rfi.section_request', { defaultValue: 'Request Details' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('rfi.field_subject', { defaultValue: 'Subject' })}
+          required
+          span={2}
+          htmlFor="rfi-subject"
+          error={errors.subject}
+        >
+          <input
+            id="rfi-subject"
+            value={form.subject}
+            onChange={(e) => set('subject', e.target.value)}
+            placeholder={t('rfi.subject_placeholder', {
+              defaultValue: 'e.g. Clarification on foundation depth at Grid Line A-3',
+            })}
+            className={clsx(
+              'h-12 w-full rounded-lg border border-border bg-surface-primary px-3 text-base font-medium focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue',
+              errors.subject &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('rfi.field_question', { defaultValue: 'Question' })}
+          required
+          span={2}
+          htmlFor="rfi-question"
+          error={errors.question}
+        >
+          <textarea
+            id="rfi-question"
+            value={form.question}
+            onChange={(e) => set('question', e.target.value)}
+            rows={5}
+            className={clsx(
+              textareaCls,
+              errors.question &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+            placeholder={t('rfi.question_placeholder', {
+              defaultValue: 'Describe the information you need...',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField label={t('rfi.field_priority', { defaultValue: 'Priority' })}>
+          <div
+            role="radiogroup"
+            aria-label={t('rfi.field_priority', { defaultValue: 'Priority' })}
+            className="flex flex-wrap gap-1.5"
           >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="px-6 py-4 space-y-5 overflow-y-auto flex-1">
-          {/* ── Request Details ── */}
-          <div className="flex items-center gap-2 pb-1">
-            <MessageSquare size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('rfi.section_request', { defaultValue: 'Request Details' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
-
-          {/* Subject */}
-          <div>
-            <label htmlFor="rfi-subject" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('rfi.field_subject', { defaultValue: 'Subject' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              id="rfi-subject"
-              value={form.subject}
-              onChange={(e) => set('subject', e.target.value)}
-              placeholder={t('rfi.subject_placeholder', {
-                defaultValue: 'e.g. Clarification on foundation depth at Grid Line A-3',
-              })}
-              className={clsx(
-                'h-12 w-full rounded-lg border border-border bg-surface-primary px-3 text-base font-medium focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue',
-                errors.subject &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-              autoFocus
-            />
-            {errors.subject && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {errors.subject}
-              </p>
-            )}
-          </div>
-
-          {/* Question */}
-          <div>
-            <label htmlFor="rfi-question" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('rfi.field_question', { defaultValue: 'Question' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <textarea
-              id="rfi-question"
-              value={form.question}
-              onChange={(e) => set('question', e.target.value)}
-              rows={5}
-              className={clsx(
-                textareaCls,
-                errors.question &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-              placeholder={t('rfi.question_placeholder', {
-                defaultValue: 'Describe the information you need...',
-              })}
-            />
-            {errors.question && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {errors.question}
-              </p>
-            )}
-          </div>
-
-          {/* Priority + Discipline — two-column row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <span
-                id="rfi-priority-label"
-                className="block text-sm font-medium text-content-primary mb-1.5"
-              >
-                {t('rfi.field_priority', { defaultValue: 'Priority' })}
-              </span>
-              <div
-                role="radiogroup"
-                aria-labelledby="rfi-priority-label"
-                className="flex flex-wrap gap-1.5"
-              >
-                {PRIORITY_VALUES.map((p) => {
-                  const active = form.priority === p;
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      onClick={() => set('priority', p)}
-                      className={clsx(
-                        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                        active
-                          ? 'border-oe-blue bg-oe-blue/10 text-oe-blue'
-                          : 'border-border bg-surface-primary text-content-secondary hover:bg-surface-secondary',
-                      )}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={clsx(
-                          'inline-block h-2 w-2 rounded-full',
-                          PRIORITY_DOT[p],
-                        )}
-                      />
-                      {t(`rfi.priority_${p}`, {
-                        defaultValue: p.charAt(0).toUpperCase() + p.slice(1),
-                      })}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <label
-                htmlFor="rfi-discipline"
-                className="block text-sm font-medium text-content-primary mb-1.5"
-              >
-                {t('rfi.field_discipline', { defaultValue: 'Discipline' })}
-              </label>
-              <div className="relative">
-                <select
-                  id="rfi-discipline"
-                  value={form.discipline}
-                  onChange={(e) => set('discipline', e.target.value)}
-                  className={clsx(inputCls, 'pr-9 appearance-none')}
+            {PRIORITY_VALUES.map((p) => {
+              const active = form.priority === p;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => set('priority', p)}
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                    active
+                      ? 'border-oe-blue bg-oe-blue/10 text-oe-blue'
+                      : 'border-border bg-surface-primary text-content-secondary hover:bg-surface-secondary',
+                  )}
                 >
-                  <option value="">
-                    {t('rfi.discipline_none', { defaultValue: 'No discipline' })}
-                  </option>
-                  {RFI_DISCIPLINES.map((d) => (
-                    <option key={d} value={d}>
-                      {t(`rfi.discipline_${d}`, {
-                        defaultValue: d.charAt(0).toUpperCase() + d.slice(1),
-                      })}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
-                  <ChevronDown size={14} />
-                </div>
-              </div>
-            </div>
+                  <span
+                    aria-hidden="true"
+                    className={clsx('inline-block h-2 w-2 rounded-full', PRIORITY_DOT[p])}
+                  />
+                  {t(`rfi.priority_${p}`, {
+                    defaultValue: p.charAt(0).toUpperCase() + p.slice(1),
+                  })}
+                </button>
+              );
+            })}
           </div>
+        </WideModalField>
 
-          {/* ── Assignment & Schedule ── */}
-          <div className="flex items-center gap-2 pt-2 pb-1">
-            <User size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('rfi.section_assignment', { defaultValue: 'Assignment & Schedule' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
-
-          {/* Two-column: Ball in Court + Assigned To */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="rfi-ball-in-court" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('rfi.field_ball_in_court', { defaultValue: 'Ball in Court' })}
-              </label>
-              <UserSearchInput
-                value={form.ball_in_court}
-                displayValue={form.ball_in_court_name}
-                onChange={(id, name) => {
-                  setForm((prev) => ({ ...prev, ball_in_court: id, ball_in_court_name: name }));
-                }}
-                placeholder={t('rfi.bic_placeholder', {
-                  defaultValue: 'Person responsible for response',
-                })}
-              />
-            </div>
-            <div>
-              <label htmlFor="rfi-assigned-to" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('rfi.field_assigned_to', { defaultValue: 'Assigned To' })}
-              </label>
-              <UserSearchInput
-                value={form.assigned_to}
-                displayValue={form.assigned_to_name}
-                onChange={(id, name) => {
-                  setForm((prev) => ({ ...prev, assigned_to: id, assigned_to_name: name }));
-                }}
-                placeholder={t('rfi.assigned_to_placeholder', {
-                  defaultValue: 'Reviewer / coordinator',
-                })}
-              />
-            </div>
-          </div>
-
-          {/* Response due date — full width */}
-          <div>
-            <label htmlFor="rfi-due-date" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('rfi.field_due_date', { defaultValue: 'Response Due Date' })}
-            </label>
-            <input
-              id="rfi-due-date"
-              type="date"
-              value={form.due_date}
-              onChange={(e) => set('due_date', e.target.value)}
-              className={inputCls}
-            />
-            <p className="mt-1 text-xs text-content-quaternary">
-              {t('rfi.response_due_date_hint', { defaultValue: 'Typical: 14 business days from submission' })}
-            </p>
-          </div>
-
-          {/* ── Impact Assessment ── */}
-          <div className="flex items-center gap-2 pt-2 pb-1">
-            <AlertTriangle size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('rfi.section_impact', { defaultValue: 'Impact Assessment' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
-
-          {/* Impact toggles as visual cards */}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => set('cost_impact', !form.cost_impact)}
-              className={clsx(
-                'flex items-center gap-3 rounded-lg border-2 px-4 py-3 transition-all text-left',
-                form.cost_impact
-                  ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-600'
-                  : 'border-border bg-surface-primary hover:bg-surface-secondary',
-              )}
+        <WideModalField
+          label={t('rfi.field_discipline', { defaultValue: 'Discipline' })}
+          htmlFor="rfi-discipline"
+        >
+          <div className="relative">
+            <select
+              id="rfi-discipline"
+              value={form.discipline}
+              onChange={(e) => set('discipline', e.target.value)}
+              className={clsx(inputCls, 'pr-9 appearance-none')}
             >
-              <div className={clsx(
+              <option value="">
+                {t('rfi.discipline_none', { defaultValue: 'No discipline' })}
+              </option>
+              {RFI_DISCIPLINES.map((d) => (
+                <option key={d} value={d}>
+                  {t(`rfi.discipline_${d}`, {
+                    defaultValue: d.charAt(0).toUpperCase() + d.slice(1),
+                  })}
+                </option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
+              <ChevronDown size={14} />
+            </div>
+          </div>
+        </WideModalField>
+      </WideModalSection>
+
+      {/* ── Assignment & Schedule ── */}
+      <WideModalSection
+        title={t('rfi.section_assignment', { defaultValue: 'Assignment & Schedule' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('rfi.field_ball_in_court', { defaultValue: 'Ball in Court' })}
+          htmlFor="rfi-ball-in-court"
+        >
+          <UserSearchInput
+            value={form.ball_in_court}
+            displayValue={form.ball_in_court_name}
+            onChange={(id, name) => {
+              setForm((prev) => ({ ...prev, ball_in_court: id, ball_in_court_name: name }));
+            }}
+            placeholder={t('rfi.bic_placeholder', {
+              defaultValue: 'Person responsible for response',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('rfi.field_assigned_to', { defaultValue: 'Assigned To' })}
+          htmlFor="rfi-assigned-to"
+        >
+          <UserSearchInput
+            value={form.assigned_to}
+            displayValue={form.assigned_to_name}
+            onChange={(id, name) => {
+              setForm((prev) => ({ ...prev, assigned_to: id, assigned_to_name: name }));
+            }}
+            placeholder={t('rfi.assigned_to_placeholder', {
+              defaultValue: 'Reviewer / coordinator',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('rfi.field_due_date', { defaultValue: 'Response Due Date' })}
+          span={2}
+          htmlFor="rfi-due-date"
+          hint={t('rfi.response_due_date_hint', {
+            defaultValue: 'Typical: 14 business days from submission',
+          })}
+        >
+          <input
+            id="rfi-due-date"
+            type="date"
+            value={form.due_date}
+            onChange={(e) => set('due_date', e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      {/* ── Impact Assessment ── */}
+      <WideModalSection
+        title={t('rfi.section_impact', { defaultValue: 'Impact Assessment' })}
+        columns={2}
+      >
+        <WideModalField label={t('rfi.cost_impact', { defaultValue: 'Cost Impact' })}>
+          <button
+            type="button"
+            onClick={() => set('cost_impact', !form.cost_impact)}
+            className={clsx(
+              'flex items-center gap-3 rounded-lg border-2 px-4 py-3 transition-all text-left w-full',
+              form.cost_impact
+                ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-600'
+                : 'border-border bg-surface-primary hover:bg-surface-secondary',
+            )}
+          >
+            <div
+              className={clsx(
                 'flex h-8 w-8 items-center justify-center rounded-full shrink-0',
                 form.cost_impact
                   ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400'
                   : 'bg-surface-tertiary text-content-quaternary',
-              )}>
-                <DollarSign size={16} />
-              </div>
-              <div>
-                <p className={clsx('text-sm font-medium', form.cost_impact ? 'text-amber-700 dark:text-amber-400' : 'text-content-secondary')}>
-                  {t('rfi.cost_impact', { defaultValue: 'Cost Impact' })}
-                </p>
-                <p className="text-xs text-content-quaternary">
-                  {form.cost_impact
-                    ? t('rfi.impact_yes', { defaultValue: 'Yes' })
-                    : t('rfi.impact_no', { defaultValue: 'No' })}
-                </p>
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => set('schedule_impact', !form.schedule_impact)}
-              className={clsx(
-                'flex items-center gap-3 rounded-lg border-2 px-4 py-3 transition-all text-left',
-                form.schedule_impact
-                  ? 'border-blue-400 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-600'
-                  : 'border-border bg-surface-primary hover:bg-surface-secondary',
               )}
             >
-              <div className={clsx(
+              <DollarSign size={16} />
+            </div>
+            <div>
+              <p
+                className={clsx(
+                  'text-sm font-medium',
+                  form.cost_impact ? 'text-amber-700 dark:text-amber-400' : 'text-content-secondary',
+                )}
+              >
+                {t('rfi.cost_impact', { defaultValue: 'Cost Impact' })}
+              </p>
+              <p className="text-xs text-content-quaternary">
+                {form.cost_impact
+                  ? t('rfi.impact_yes', { defaultValue: 'Yes' })
+                  : t('rfi.impact_no', { defaultValue: 'No' })}
+              </p>
+            </div>
+          </button>
+        </WideModalField>
+
+        <WideModalField label={t('rfi.schedule_impact', { defaultValue: 'Schedule Impact' })}>
+          <button
+            type="button"
+            onClick={() => set('schedule_impact', !form.schedule_impact)}
+            className={clsx(
+              'flex items-center gap-3 rounded-lg border-2 px-4 py-3 transition-all text-left w-full',
+              form.schedule_impact
+                ? 'border-blue-400 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-600'
+                : 'border-border bg-surface-primary hover:bg-surface-secondary',
+            )}
+          >
+            <div
+              className={clsx(
                 'flex h-8 w-8 items-center justify-center rounded-full shrink-0',
                 form.schedule_impact
                   ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400'
                   : 'bg-surface-tertiary text-content-quaternary',
-              )}>
-                <CalendarClock size={16} />
-              </div>
-              <div>
-                <p className={clsx('text-sm font-medium', form.schedule_impact ? 'text-blue-700 dark:text-blue-400' : 'text-content-secondary')}>
-                  {t('rfi.schedule_impact', { defaultValue: 'Schedule Impact' })}
-                </p>
-                <p className="text-xs text-content-quaternary">
-                  {form.schedule_impact
-                    ? t('rfi.impact_yes', { defaultValue: 'Yes' })
-                    : t('rfi.impact_no', { defaultValue: 'No' })}
-                </p>
-              </div>
-            </button>
-          </div>
-
-          {(form.cost_impact || form.schedule_impact) && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {form.cost_impact && (
-                <div>
-                  <label htmlFor="rfi-cost-value" className="block text-sm font-medium text-content-primary mb-1.5">
-                    {t('rfi.field_cost_impact_value', { defaultValue: 'Cost exposure' })}
-                  </label>
-                  <input
-                    id="rfi-cost-value"
-                    type="text"
-                    inputMode="decimal"
-                    value={form.cost_impact_value}
-                    onChange={(e) => set('cost_impact_value', e.target.value)}
-                    placeholder={t('rfi.cost_value_placeholder', { defaultValue: 'e.g. 15000' })}
-                    className={inputCls}
-                  />
-                  <p className="mt-1 text-xs text-content-quaternary">
-                    {t('rfi.cost_value_hint', {
-                      defaultValue: 'Estimated impact in project currency (optional)',
-                    })}
-                  </p>
-                </div>
               )}
-              {form.schedule_impact && (
-                <div>
-                  <label htmlFor="rfi-schedule-days" className="block text-sm font-medium text-content-primary mb-1.5">
-                    {t('rfi.field_schedule_impact_days', { defaultValue: 'Schedule slip (days)' })}
-                  </label>
-                  <input
-                    id="rfi-schedule-days"
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={form.schedule_impact_days}
-                    onChange={(e) => set('schedule_impact_days', e.target.value)}
-                    placeholder={t('rfi.schedule_days_placeholder', { defaultValue: 'e.g. 5' })}
-                    className={inputCls}
-                  />
-                  <p className="mt-1 text-xs text-content-quaternary">
-                    {t('rfi.schedule_days_hint', {
-                      defaultValue: 'Working days the response could delay the schedule',
-                    })}
-                  </p>
-                </div>
-              )}
+            >
+              <CalendarClock size={16} />
             </div>
-          )}
+            <div>
+              <p
+                className={clsx(
+                  'text-sm font-medium',
+                  form.schedule_impact
+                    ? 'text-blue-700 dark:text-blue-400'
+                    : 'text-content-secondary',
+                )}
+              >
+                {t('rfi.schedule_impact', { defaultValue: 'Schedule Impact' })}
+              </p>
+              <p className="text-xs text-content-quaternary">
+                {form.schedule_impact
+                  ? t('rfi.impact_yes', { defaultValue: 'Yes' })
+                  : t('rfi.impact_no', { defaultValue: 'No' })}
+              </p>
+            </div>
+          </button>
+        </WideModalField>
 
-          {/* ── Linked Drawings (optional) ── */}
-          <div className="flex items-center gap-2 pt-2 pb-1">
-            <Paperclip size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('rfi.section_references', { defaultValue: 'References' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
+        {form.cost_impact && (
+          <WideModalField
+            label={t('rfi.field_cost_impact_value', { defaultValue: 'Cost exposure' })}
+            htmlFor="rfi-cost-value"
+            hint={t('rfi.cost_value_hint', {
+              defaultValue: 'Estimated impact in project currency (optional)',
+            })}
+          >
+            <input
+              id="rfi-cost-value"
+              type="text"
+              inputMode="decimal"
+              value={form.cost_impact_value}
+              onChange={(e) => set('cost_impact_value', e.target.value)}
+              placeholder={t('rfi.cost_value_placeholder', { defaultValue: 'e.g. 15000' })}
+              className={inputCls}
+            />
+          </WideModalField>
+        )}
 
-          {/* Existing chips for already-attached documents */}
-          {form.linked_drawing_ids.length > 0 && (
+        {form.schedule_impact && (
+          <WideModalField
+            label={t('rfi.field_schedule_impact_days', { defaultValue: 'Schedule slip (days)' })}
+            htmlFor="rfi-schedule-days"
+            hint={t('rfi.schedule_days_hint', {
+              defaultValue: 'Working days the response could delay the schedule',
+            })}
+          >
+            <input
+              id="rfi-schedule-days"
+              type="number"
+              min={0}
+              step={1}
+              value={form.schedule_impact_days}
+              onChange={(e) => set('schedule_impact_days', e.target.value)}
+              placeholder={t('rfi.schedule_days_placeholder', { defaultValue: 'e.g. 5' })}
+              className={inputCls}
+            />
+          </WideModalField>
+        )}
+      </WideModalSection>
+
+      {/* ── References / Linked Drawings ── */}
+      <WideModalSection
+        title={t('rfi.section_references', { defaultValue: 'References' })}
+        columns={2}
+      >
+        {form.linked_drawing_ids.length > 0 && (
+          <WideModalField label={t('rfi.attached_documents', { defaultValue: 'Attached documents' })} span={2}>
             <div className="flex flex-wrap gap-1.5">
               {form.linked_drawing_ids.map((id) => {
                 const doc = docById.get(id);
@@ -901,111 +891,79 @@ function CreateRFIModal({
                 );
               })}
             </div>
-          )}
-
-          {/* Picker + dropzone — two paths to attach */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => setShowDocPicker(true)}
-              disabled={!projectId}
-              className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-surface-primary px-3 py-3 text-sm font-medium text-content-secondary hover:bg-surface-secondary hover:border-oe-blue/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Paperclip size={14} />
-              {t('rfi.attach_drawings', { defaultValue: 'Attach drawings' })}
-            </button>
-
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => dropFileInputRef.current?.click()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  dropFileInputRef.current?.click();
-                }
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                if (e.dataTransfer.files.length > 0) {
-                  void handleFilesDropped(e.dataTransfer.files);
-                }
-              }}
-              className={clsx(
-                'flex items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-3 text-sm font-medium cursor-pointer transition-colors',
-                dragOver
-                  ? 'border-oe-blue bg-oe-blue/5 text-oe-blue'
-                  : 'border-border bg-surface-primary text-content-secondary hover:bg-surface-secondary hover:border-oe-blue/60',
-              )}
-              aria-label={t('rfi.upload_attachment', {
-                defaultValue: 'Upload an attachment',
-              })}
-            >
-              {uploadInFlight > 0 ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <UploadCloud size={14} />
-              )}
-              {uploadInFlight > 0
-                ? t('rfi.uploading', { defaultValue: 'Uploading…' })
-                : t('rfi.drop_or_browse', {
-                    defaultValue: 'Drop file or browse',
-                  })}
-            </div>
-            <input
-              ref={dropFileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  void handleFilesDropped(e.target.files);
-                  e.target.value = '';
-                }
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Document picker — list-modal lazily mounted */}
-        {showDocPicker && (
-          <DocumentPickerModal
-            documents={documents}
-            isLoading={docsLoading}
-            selected={form.linked_drawing_ids}
-            onClose={() => setShowDocPicker(false)}
-            onApply={(ids) => {
-              setForm((prev) => ({ ...prev, linked_drawing_ids: ids }));
-              setShowDocPicker(false);
-            }}
-          />
+          </WideModalField>
         )}
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light sticky bottom-0 z-10 bg-surface-elevated rounded-b-xl">
-          <Button variant="ghost" onClick={onClose} disabled={isPending}>
-            {t('common.cancel', { defaultValue: 'Cancel' })}
-          </Button>
-          <Button variant="primary" onClick={handleSubmit} disabled={isPending || !canSubmit}>
-            {isPending ? (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent mr-2 shrink-0" />
-            ) : (
-              <Plus size={16} className="mr-1.5 shrink-0" />
+        <WideModalField label={t('rfi.attach_drawings', { defaultValue: 'Attach drawings' })}>
+          <button
+            type="button"
+            onClick={() => setShowDocPicker(true)}
+            disabled={!projectId}
+            className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-surface-primary px-3 py-3 text-sm font-medium text-content-secondary hover:bg-surface-secondary hover:border-oe-blue/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full"
+          >
+            <Paperclip size={14} />
+            {t('rfi.attach_drawings', { defaultValue: 'Attach drawings' })}
+          </button>
+        </WideModalField>
+
+        <WideModalField label={t('rfi.drop_or_browse', { defaultValue: 'Drop file or browse' })}>
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => dropFileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                dropFileInputRef.current?.click();
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (e.dataTransfer.files.length > 0) {
+                void handleFilesDropped(e.dataTransfer.files);
+              }
+            }}
+            className={clsx(
+              'flex items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-3 text-sm font-medium cursor-pointer transition-colors',
+              dragOver
+                ? 'border-oe-blue bg-oe-blue/5 text-oe-blue'
+                : 'border-border bg-surface-primary text-content-secondary hover:bg-surface-secondary hover:border-oe-blue/60',
             )}
-            <span>{t('rfi.create_rfi', { defaultValue: 'Create RFI' })}</span>
-          </Button>
-        </div>
-      </div>
-    </div>
+            aria-label={t('rfi.upload_attachment', { defaultValue: 'Upload an attachment' })}
+          >
+            {uploadInFlight > 0 ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <UploadCloud size={14} />
+            )}
+            {uploadInFlight > 0
+              ? t('rfi.uploading', { defaultValue: 'Uploading…' })
+              : t('rfi.drop_or_browse', { defaultValue: 'Drop file or browse' })}
+          </div>
+          <input
+            ref={dropFileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files && e.target.files.length > 0) {
+                void handleFilesDropped(e.target.files);
+                e.target.value = '';
+              }
+            }}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 

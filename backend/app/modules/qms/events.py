@@ -146,6 +146,56 @@ async def _on_hse_incident_root_cause(event: Event) -> None:
         logger.debug("qms: HSE→QMS NCR mirror failed", exc_info=True)
 
 
+async def _on_ncr_raised_fanout(event: Event) -> None:
+    """``qms.ncr.raised`` → publish derived events.
+
+    Two follow-on events:
+
+    * ``procurement.supplier_rating_update`` — when an NCR is linked to
+      an inspection that references a subcontractor / supplier, the rating
+      projection should re-compute. We publish unconditionally and let the
+      procurement-side handler resolve the supplier — keeps coupling loose.
+    * ``bi_dashboards.kpi_recompute`` — the COPQ / first-pass-yield gauges
+      depend on NCR counts and severities.
+    """
+    data = event.data or {}
+    ncr_id = data.get("ncr_id")
+    project_id = data.get("project_id")
+    if not (ncr_id and project_id):
+        return
+    severity = data.get("severity") or ""
+    try:
+        event_bus.publish_detached(
+            "procurement.supplier_rating_update",
+            {
+                "source_event": "qms.ncr.raised",
+                "ncr_id": str(ncr_id),
+                "project_id": str(project_id),
+                "severity": severity,
+                "cost_impact_amount": data.get("cost_impact_amount") or "",
+                "cost_impact_currency": data.get("cost_impact_currency") or "",
+            },
+            source_module="qms",
+        )
+    except Exception:
+        logger.debug("qms: supplier_rating_update emit failed", exc_info=True)
+
+    try:
+        event_bus.publish_detached(
+            "bi_dashboards.kpi_recompute",
+            {
+                "source_module": "qms",
+                "source_event": "qms.ncr.raised",
+                "project_id": str(project_id),
+                "kpi_codes": ["copq", "first_pass_yield", "ncr_open_count"],
+                "reason": "ncr_raised",
+            },
+            source_module="qms",
+        )
+    except Exception:
+        logger.debug("qms: kpi_recompute emit failed", exc_info=True)
+
+
 def register_subscribers() -> None:
     """Idempotently subscribe QMS handlers to upstream events."""
     if getattr(event_bus, _SUBSCRIBED_FLAG, False):
@@ -154,4 +204,5 @@ def register_subscribers() -> None:
     event_bus.subscribe(
         "hse.capa.root_cause_recorded", _on_hse_incident_root_cause,
     )
+    event_bus.subscribe("qms.ncr.raised", _on_ncr_raised_fanout)
     setattr(event_bus, _SUBSCRIBED_FLAG, True)

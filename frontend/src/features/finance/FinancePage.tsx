@@ -36,6 +36,11 @@ import {
   SkeletonTable,
   ConfirmDialog,
 } from '@/shared/ui';
+import {
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui/WideModal';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
@@ -691,102 +696,14 @@ function BudgetsTab({ projectId }: { projectId: string }) {
   ];
 
   const renderBudgetModal = () => (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in">
-      <div className="w-full max-w-lg bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[90vh] overflow-y-auto" role="dialog" aria-label={t('finance.new_budget', { defaultValue: 'New Budget Line' })}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('finance.new_budget', { defaultValue: 'New Budget Line' })}
-          </h2>
-          <button
-            onClick={() => setShowCreate(false)}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-5">
-          {/* Category — visual badges */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-2">
-              {t('finance.category', { defaultValue: 'Category' })} <span className="text-semantic-error">*</span>
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {BUDGET_CATEGORIES.map((cat) => (
-                <button
-                  key={cat.key}
-                  type="button"
-                  onClick={() => {
-                    setBudgetForm((p) => ({ ...p, category: cat.key }));
-                    if (budgetErrors.category) setBudgetErrors((prev) => { const next = { ...prev }; delete next.category; return next; });
-                  }}
-                  className={clsx(
-                    'rounded-full px-3.5 py-1.5 text-xs font-medium border transition-all',
-                    budgetForm.category === cat.key
-                      ? 'bg-oe-blue text-white border-oe-blue shadow-sm'
-                      : 'border-border text-content-secondary hover:border-oe-blue/40 hover:bg-surface-secondary',
-                  )}
-                >
-                  {cat.label}
-                </button>
-              ))}
-            </div>
-            {budgetErrors.category && <p className="mt-1.5 text-xs text-semantic-error">{budgetErrors.category}</p>}
-          </div>
-
-          {/* WBS Code */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('finance.wbs', { defaultValue: 'WBS Code' })}
-            </label>
-            <input
-              ref={budgetFirstRef}
-              value={budgetForm.wbs_code}
-              onChange={(e) => setBudgetForm((p) => ({ ...p, wbs_code: e.target.value }))}
-              className={inputCls}
-              placeholder={t('finance.wbs_placeholder', { defaultValue: 'e.g., 01.02' })}
-            />
-          </div>
-
-          {/* Original Budget with currency */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('finance.original', { defaultValue: 'Original Budget' })} <span className="text-semantic-error">*</span>
-            </label>
-            <div className="relative">
-              <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-xs text-content-tertiary font-medium">
-                {budgets?.[0]?.currency ?? 'EUR'}
-              </span>
-              <input
-                type="number"
-                step="0.01"
-                value={budgetForm.original_budget}
-                onChange={(e) => {
-                  setBudgetForm((p) => ({ ...p, original_budget: e.target.value }));
-                  if (budgetErrors.original_budget) setBudgetErrors((prev) => { const next = { ...prev }; delete next.original_budget; return next; });
-                }}
-                className={clsx(inputCls, 'pl-12', budgetErrors.original_budget && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error')}
-                placeholder="0.00"
-              />
-            </div>
-            {budgetErrors.original_budget && <p className="mt-1 text-xs text-semantic-error">{budgetErrors.original_budget}</p>}
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('finance.notes', { defaultValue: 'Notes' })}
-            </label>
-            <textarea
-              value={budgetForm.notes}
-              onChange={(e) => setBudgetForm((p) => ({ ...p, notes: e.target.value }))}
-              rows={2}
-              className={clsx(inputCls, 'h-auto py-2.5 resize-none')}
-              placeholder={t('finance.budget_notes_placeholder', { defaultValue: 'e.g., Includes contingency for weather delays' })}
-            />
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light">
+    <WideModal
+      open
+      onClose={() => setShowCreate(false)}
+      title={t('finance.new_budget', { defaultValue: 'New Budget Line' })}
+      size="lg"
+      busy={createBudgetMut.isPending}
+      footer={
+        <>
           <Button variant="ghost" onClick={() => setShowCreate(false)} disabled={createBudgetMut.isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
@@ -810,9 +727,87 @@ function BudgetsTab({ projectId }: { projectId: string }) {
             )}
             <span>{t('common.create', { defaultValue: 'Create' })}</span>
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        {/* Category badge picker spans the full width so all 4-6 chips lay
+            out horizontally rather than wrapping to multiple lines. */}
+        <WideModalField
+          label={t('finance.category', { defaultValue: 'Category' })}
+          required
+          error={budgetErrors.category}
+          span={2}
+        >
+          <div className="flex flex-wrap gap-2">
+            {BUDGET_CATEGORIES.map((cat) => (
+              <button
+                key={cat.key}
+                type="button"
+                onClick={() => {
+                  setBudgetForm((p) => ({ ...p, category: cat.key }));
+                  if (budgetErrors.category) setBudgetErrors((prev) => { const next = { ...prev }; delete next.category; return next; });
+                }}
+                className={clsx(
+                  'rounded-full px-3.5 py-1.5 text-xs font-medium border transition-all',
+                  budgetForm.category === cat.key
+                    ? 'bg-oe-blue text-white border-oe-blue shadow-sm'
+                    : 'border-border text-content-secondary hover:border-oe-blue/40 hover:bg-surface-secondary',
+                )}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+        </WideModalField>
+
+        <WideModalField label={t('finance.wbs', { defaultValue: 'WBS Code' })}>
+          <input
+            ref={budgetFirstRef}
+            value={budgetForm.wbs_code}
+            onChange={(e) => setBudgetForm((p) => ({ ...p, wbs_code: e.target.value }))}
+            className={inputCls}
+            placeholder={t('finance.wbs_placeholder', { defaultValue: 'e.g., 01.02' })}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('finance.original', { defaultValue: 'Original Budget' })}
+          required
+          error={budgetErrors.original_budget}
+        >
+          <div className="relative">
+            <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-xs text-content-tertiary font-medium">
+              {budgets?.[0]?.currency ?? 'EUR'}
+            </span>
+            <input
+              type="number"
+              step="0.01"
+              value={budgetForm.original_budget}
+              onChange={(e) => {
+                setBudgetForm((p) => ({ ...p, original_budget: e.target.value }));
+                if (budgetErrors.original_budget) setBudgetErrors((prev) => { const next = { ...prev }; delete next.original_budget; return next; });
+              }}
+              className={clsx(inputCls, 'pl-12', budgetErrors.original_budget && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error')}
+              placeholder="0.00"
+            />
+          </div>
+        </WideModalField>
+
+        <WideModalField
+          label={t('finance.notes', { defaultValue: 'Notes' })}
+          span={2}
+        >
+          <textarea
+            value={budgetForm.notes}
+            onChange={(e) => setBudgetForm((p) => ({ ...p, notes: e.target.value }))}
+            rows={2}
+            className={clsx(inputCls, 'h-auto py-2.5 resize-none')}
+            placeholder={t('finance.budget_notes_placeholder', { defaultValue: 'e.g., Includes contingency for weather delays' })}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 
   const { data: budgets, isLoading } = useQuery({
@@ -1776,268 +1771,22 @@ function InvoicesTab({ projectId }: { projectId: string }) {
 
       {/* New Invoice Modal */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in">
-          <div className="w-full max-w-xl bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[90vh] overflow-y-auto" role="dialog" aria-label={t('finance.new_invoice', { defaultValue: 'New Invoice' })}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border-light">
-              <div>
-                <h2 className="text-lg font-semibold text-content-primary">
-                  {t('finance.new_invoice', { defaultValue: 'New Invoice' })}
-                </h2>
-                {invoiceProjectName && (
-                  <p className="text-xs text-content-tertiary mt-0.5">
-                    {t('common.creating_in_project', {
-                      defaultValue: 'In {{project}}',
-                      project: invoiceProjectName,
-                    })}
-                  </p>
-                )}
-              </div>
-              <button
-                onClick={() => setShowCreate(false)}
-                aria-label={t('common.close', { defaultValue: 'Close' })}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="px-6 py-5 space-y-5">
-              {/* Direction — large visual cards */}
-              <div>
-                <label className="block text-sm font-medium text-content-secondary mb-2.5">
-                  {t('finance.direction', { defaultValue: 'Direction' })}
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setInvoiceForm((f) => ({ ...f, direction: 'payable' }))}
-                    className={clsx(
-                      'relative flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all',
-                      invoiceForm.direction === 'payable'
-                        ? 'border-red-400 bg-red-50 dark:bg-red-950/20 shadow-sm'
-                        : 'border-border hover:border-red-200 dark:hover:border-red-800 hover:bg-surface-secondary',
-                    )}
-                  >
-                    <div className={clsx(
-                      'flex h-10 w-10 items-center justify-center rounded-full',
-                      invoiceForm.direction === 'payable'
-                        ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'
-                        : 'bg-surface-secondary text-content-tertiary',
-                    )}>
-                      <ArrowUpRight size={20} />
-                    </div>
-                    <span className={clsx(
-                      'text-sm font-semibold',
-                      invoiceForm.direction === 'payable' ? 'text-red-700 dark:text-red-300' : 'text-content-secondary',
-                    )}>
-                      {t('finance.payable', { defaultValue: 'Payable' })}
-                    </span>
-                    <span className="text-2xs text-content-tertiary text-center leading-tight">
-                      {t('finance.payable_desc', { defaultValue: 'Invoice you need to pay' })}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInvoiceForm((f) => ({ ...f, direction: 'receivable' }))}
-                    className={clsx(
-                      'relative flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all',
-                      invoiceForm.direction === 'receivable'
-                        ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 shadow-sm'
-                        : 'border-border hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-surface-secondary',
-                    )}
-                  >
-                    <div className={clsx(
-                      'flex h-10 w-10 items-center justify-center rounded-full',
-                      invoiceForm.direction === 'receivable'
-                        ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-surface-secondary text-content-tertiary',
-                    )}>
-                      <ArrowDownLeft size={20} />
-                    </div>
-                    <span className={clsx(
-                      'text-sm font-semibold',
-                      invoiceForm.direction === 'receivable' ? 'text-emerald-700 dark:text-emerald-300' : 'text-content-secondary',
-                    )}>
-                      {t('finance.receivable', { defaultValue: 'Receivable' })}
-                    </span>
-                    <span className="text-2xs text-content-tertiary text-center leading-tight">
-                      {t('finance.receivable_desc', { defaultValue: "Invoice you're sending" })}
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* ── Section: Invoice Details ── */}
-              <div className="pt-1">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-content-tertiary mb-3">
-                  {t('finance.section_invoice_details', { defaultValue: 'Invoice Details' })}
-                </h3>
-                <div className="space-y-3">
-                  {/* Contact picker (vendor/client) */}
-                  <div>
-                    <label className="block text-sm font-medium text-content-primary mb-1.5">
-                      {invoiceForm.direction === 'payable'
-                        ? t('finance.vendor', { defaultValue: 'Vendor' })
-                        : t('finance.client', { defaultValue: 'Client' })}
-                    </label>
-                    <ContactSearchInput
-                      value={invoiceForm.counterparty}
-                      onChange={(id, name) => setInvoiceForm((f) => ({ ...f, counterparty: name, contact_id: id }))}
-                      placeholder={
-                        invoiceForm.direction === 'payable'
-                          ? t('finance.search_vendor', { defaultValue: 'Search vendor...' })
-                          : t('finance.search_client', { defaultValue: 'Search client...' })
-                      }
-                    />
-                  </div>
-                  {/* Invoice date */}
-                  <div>
-                    <label className="block text-sm font-medium text-content-primary mb-1.5">
-                      {t('finance.issue_date', { defaultValue: 'Invoice Date' })} <span className="text-semantic-error">*</span>
-                    </label>
-                    <input
-                      ref={invoiceDateRef}
-                      type="date"
-                      value={invoiceForm.invoice_date}
-                      onChange={(e) => {
-                        setInvoiceForm((f) => ({ ...f, invoice_date: e.target.value }));
-                        if (invoiceErrors.invoice_date) setInvoiceErrors((prev) => { const next = { ...prev }; delete next.invoice_date; return next; });
-                      }}
-                      className={clsx(inputCls, invoiceErrors.invoice_date && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error')}
-                    />
-                    {invoiceErrors.invoice_date && <p className="mt-1 text-xs text-semantic-error">{invoiceErrors.invoice_date}</p>}
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Section: Amounts ── */}
-              <div className="pt-1">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-content-tertiary mb-3">
-                  {t('finance.section_amounts', { defaultValue: 'Amounts' })}
-                </h3>
-                <div className="space-y-3">
-                  {/* Currency */}
-                  <div>
-                    <label className="block text-sm font-medium text-content-primary mb-1.5">
-                      {t('finance.currency', { defaultValue: 'Currency' })}
-                    </label>
-                    <select
-                      value={invoiceForm.currency}
-                      onChange={(e) => setInvoiceForm((f) => ({ ...f, currency: e.target.value }))}
-                      className={inputCls}
-                    >
-                      <option value="EUR">EUR</option>
-                      <option value="USD">USD</option>
-                      <option value="GBP">GBP</option>
-                      <option value="CHF">CHF</option>
-                      <option value="PLN">PLN</option>
-                      <option value="CZK">CZK</option>
-                      <option value="SEK">SEK</option>
-                      <option value="NOK">NOK</option>
-                      <option value="DKK">DKK</option>
-                      <option value="AED">AED</option>
-                      <option value="SAR">SAR</option>
-                    </select>
-                  </div>
-                  {/* Subtotal */}
-                  <div>
-                    <label className="block text-sm font-medium text-content-primary mb-1.5">
-                      {t('finance.subtotal', { defaultValue: 'Subtotal' })} <span className="text-semantic-error">*</span>
-                    </label>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-xs text-content-tertiary font-medium">
-                        {invoiceForm.currency}
-                      </span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={invoiceForm.subtotal}
-                        onChange={(e) => {
-                          const sub = e.target.value;
-                          const tax = invoiceForm.tax || '0';
-                          const total = (parseFloat(sub || '0') + parseFloat(tax)).toFixed(2);
-                          setInvoiceForm((f) => ({ ...f, subtotal: sub, amount: total }));
-                          if (invoiceErrors.subtotal) setInvoiceErrors((prev) => { const next = { ...prev }; delete next.subtotal; return next; });
-                        }}
-                        className={clsx(inputCls, 'pl-12', invoiceErrors.subtotal && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error')}
-                        placeholder="0.00"
-                      />
-                    </div>
-                    {invoiceErrors.subtotal && <p className="mt-1 text-xs text-semantic-error">{invoiceErrors.subtotal}</p>}
-                  </div>
-                  {/* Tax */}
-                  <div>
-                    <label className="block text-sm font-medium text-content-primary mb-1.5">
-                      {t('finance.tax', { defaultValue: 'Tax' })}
-                    </label>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-xs text-content-tertiary font-medium">
-                        {invoiceForm.currency}
-                      </span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={invoiceForm.tax}
-                        onChange={(e) => {
-                          const tax = e.target.value;
-                          const sub = invoiceForm.subtotal || '0';
-                          const total = (parseFloat(sub) + parseFloat(tax || '0')).toFixed(2);
-                          setInvoiceForm((f) => ({ ...f, tax, amount: total }));
-                        }}
-                        className={clsx(inputCls, 'pl-12')}
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </div>
-                  {/* Total (auto-calculated, read-only) */}
-                  <div className="rounded-lg bg-surface-secondary/60 px-4 py-3 flex items-center justify-between">
-                    <span className="text-sm font-semibold text-content-primary">
-                      {t('finance.total', { defaultValue: 'Total' })}
-                    </span>
-                    <span className="text-base font-bold tabular-nums text-content-primary">
-                      {invoiceForm.currency} {(() => {
-                        const sub = parseFloat(invoiceForm.subtotal || '0');
-                        const tax = parseFloat(invoiceForm.tax || '0');
-                        const total = (Number.isFinite(sub) ? sub : 0) + (Number.isFinite(tax) ? tax : 0);
-                        return total.toFixed(2);
-                      })()}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Section: Due Date ── */}
-              <div className="pt-1">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-content-tertiary mb-3">
-                  {t('finance.section_due_date', { defaultValue: 'Due Date' })}
-                </h3>
-                <div>
-                  <label className="block text-sm font-medium text-content-primary mb-1.5">
-                    {t('finance.due_date', { defaultValue: 'Due Date' })}
-                  </label>
-                  <input
-                    type="date"
-                    value={invoiceForm.due_date}
-                    onChange={(e) => setInvoiceForm((f) => ({ ...f, due_date: e.target.value }))}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-
-              {/* Notes/Description */}
-              <div>
-                <label className="block text-sm font-medium text-content-primary mb-1.5">
-                  {t('finance.notes', { defaultValue: 'Notes / Description' })}
-                </label>
-                <textarea
-                  value={invoiceForm.description}
-                  onChange={(e) => setInvoiceForm((f) => ({ ...f, description: e.target.value }))}
-                  rows={3}
-                  className={clsx(inputCls, 'h-auto py-2.5 resize-none')}
-                  placeholder={t('finance.invoice_desc_placeholder', { defaultValue: 'e.g., Progress payment for concrete works - Phase 2' })}
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light">
+        <WideModal
+          open
+          onClose={() => setShowCreate(false)}
+          title={t('finance.new_invoice', { defaultValue: 'New Invoice' })}
+          subtitle={
+            invoiceProjectName
+              ? t('common.creating_in_project', {
+                  defaultValue: 'In {{project}}',
+                  project: invoiceProjectName,
+                })
+              : undefined
+          }
+          size="xl"
+          busy={createInvoiceMut.isPending}
+          footer={
+            <>
               <Button variant="ghost" onClick={() => setShowCreate(false)} disabled={createInvoiceMut.isPending}>
                 {t('common.cancel', { defaultValue: 'Cancel' })}
               </Button>
@@ -2056,9 +1805,226 @@ function InvoicesTab({ projectId }: { projectId: string }) {
                 )}
                 <span>{t('common.create', { defaultValue: 'Create' })}</span>
               </Button>
+            </>
+          }
+        >
+          {/* Direction picker — full-width two-card visual selector. */}
+          <WideModalSection columns={2}>
+            <WideModalField
+              label={t('finance.direction', { defaultValue: 'Direction' })}
+              span={2}
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setInvoiceForm((f) => ({ ...f, direction: 'payable' }))}
+                  className={clsx(
+                    'relative flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all',
+                    invoiceForm.direction === 'payable'
+                      ? 'border-red-400 bg-red-50 dark:bg-red-950/20 shadow-sm'
+                      : 'border-border hover:border-red-200 dark:hover:border-red-800 hover:bg-surface-secondary',
+                  )}
+                >
+                  <div className={clsx(
+                    'flex h-10 w-10 items-center justify-center rounded-full',
+                    invoiceForm.direction === 'payable'
+                      ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'
+                      : 'bg-surface-secondary text-content-tertiary',
+                  )}>
+                    <ArrowUpRight size={20} />
+                  </div>
+                  <span className={clsx(
+                    'text-sm font-semibold',
+                    invoiceForm.direction === 'payable' ? 'text-red-700 dark:text-red-300' : 'text-content-secondary',
+                  )}>
+                    {t('finance.payable', { defaultValue: 'Payable' })}
+                  </span>
+                  <span className="text-2xs text-content-tertiary text-center leading-tight">
+                    {t('finance.payable_desc', { defaultValue: 'Invoice you need to pay' })}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInvoiceForm((f) => ({ ...f, direction: 'receivable' }))}
+                  className={clsx(
+                    'relative flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all',
+                    invoiceForm.direction === 'receivable'
+                      ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 shadow-sm'
+                      : 'border-border hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-surface-secondary',
+                  )}
+                >
+                  <div className={clsx(
+                    'flex h-10 w-10 items-center justify-center rounded-full',
+                    invoiceForm.direction === 'receivable'
+                      ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-surface-secondary text-content-tertiary',
+                  )}>
+                    <ArrowDownLeft size={20} />
+                  </div>
+                  <span className={clsx(
+                    'text-sm font-semibold',
+                    invoiceForm.direction === 'receivable' ? 'text-emerald-700 dark:text-emerald-300' : 'text-content-secondary',
+                  )}>
+                    {t('finance.receivable', { defaultValue: 'Receivable' })}
+                  </span>
+                  <span className="text-2xs text-content-tertiary text-center leading-tight">
+                    {t('finance.receivable_desc', { defaultValue: "Invoice you're sending" })}
+                  </span>
+                </button>
+              </div>
+            </WideModalField>
+          </WideModalSection>
+
+          <WideModalSection
+            title={t('finance.section_invoice_details', { defaultValue: 'Invoice Details' })}
+            columns={2}
+          >
+            <WideModalField
+              label={
+                invoiceForm.direction === 'payable'
+                  ? t('finance.vendor', { defaultValue: 'Vendor' })
+                  : t('finance.client', { defaultValue: 'Client' })
+              }
+            >
+              <ContactSearchInput
+                value={invoiceForm.counterparty}
+                onChange={(id, name) => setInvoiceForm((f) => ({ ...f, counterparty: name, contact_id: id }))}
+                placeholder={
+                  invoiceForm.direction === 'payable'
+                    ? t('finance.search_vendor', { defaultValue: 'Search vendor...' })
+                    : t('finance.search_client', { defaultValue: 'Search client...' })
+                }
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('finance.issue_date', { defaultValue: 'Invoice Date' })}
+              required
+              error={invoiceErrors.invoice_date}
+            >
+              <input
+                ref={invoiceDateRef}
+                type="date"
+                value={invoiceForm.invoice_date}
+                onChange={(e) => {
+                  setInvoiceForm((f) => ({ ...f, invoice_date: e.target.value }));
+                  if (invoiceErrors.invoice_date) setInvoiceErrors((prev) => { const next = { ...prev }; delete next.invoice_date; return next; });
+                }}
+                className={clsx(inputCls, invoiceErrors.invoice_date && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error')}
+              />
+            </WideModalField>
+          </WideModalSection>
+
+          <WideModalSection
+            title={t('finance.section_amounts', { defaultValue: 'Amounts' })}
+            columns={3}
+          >
+            <WideModalField
+              label={t('finance.currency', { defaultValue: 'Currency' })}
+            >
+              <select
+                value={invoiceForm.currency}
+                onChange={(e) => setInvoiceForm((f) => ({ ...f, currency: e.target.value }))}
+                className={inputCls}
+              >
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="GBP">GBP</option>
+                <option value="CHF">CHF</option>
+                <option value="PLN">PLN</option>
+                <option value="CZK">CZK</option>
+                <option value="SEK">SEK</option>
+                <option value="NOK">NOK</option>
+                <option value="DKK">DKK</option>
+                <option value="AED">AED</option>
+                <option value="SAR">SAR</option>
+              </select>
+            </WideModalField>
+            <WideModalField
+              label={t('finance.subtotal', { defaultValue: 'Subtotal' })}
+              required
+              error={invoiceErrors.subtotal}
+            >
+              <div className="relative">
+                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-xs text-content-tertiary font-medium">
+                  {invoiceForm.currency}
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={invoiceForm.subtotal}
+                  onChange={(e) => {
+                    const sub = e.target.value;
+                    const tax = invoiceForm.tax || '0';
+                    const total = (parseFloat(sub || '0') + parseFloat(tax)).toFixed(2);
+                    setInvoiceForm((f) => ({ ...f, subtotal: sub, amount: total }));
+                    if (invoiceErrors.subtotal) setInvoiceErrors((prev) => { const next = { ...prev }; delete next.subtotal; return next; });
+                  }}
+                  className={clsx(inputCls, 'pl-12', invoiceErrors.subtotal && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error')}
+                  placeholder="0.00"
+                />
+              </div>
+            </WideModalField>
+            <WideModalField label={t('finance.tax', { defaultValue: 'Tax' })}>
+              <div className="relative">
+                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-xs text-content-tertiary font-medium">
+                  {invoiceForm.currency}
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={invoiceForm.tax}
+                  onChange={(e) => {
+                    const tax = e.target.value;
+                    const sub = invoiceForm.subtotal || '0';
+                    const total = (parseFloat(sub) + parseFloat(tax || '0')).toFixed(2);
+                    setInvoiceForm((f) => ({ ...f, tax, amount: total }));
+                  }}
+                  className={clsx(inputCls, 'pl-12')}
+                  placeholder="0.00"
+                />
+              </div>
+            </WideModalField>
+            <div className="sm:col-span-2 lg:col-span-3 rounded-lg bg-surface-secondary/60 px-4 py-3 flex items-center justify-between">
+              <span className="text-sm font-semibold text-content-primary">
+                {t('finance.total', { defaultValue: 'Total' })}
+              </span>
+              <span className="text-base font-bold tabular-nums text-content-primary">
+                {invoiceForm.currency} {(() => {
+                  const sub = parseFloat(invoiceForm.subtotal || '0');
+                  const tax = parseFloat(invoiceForm.tax || '0');
+                  const total = (Number.isFinite(sub) ? sub : 0) + (Number.isFinite(tax) ? tax : 0);
+                  return total.toFixed(2);
+                })()}
+              </span>
             </div>
-          </div>
-        </div>
+          </WideModalSection>
+
+          <WideModalSection columns={2}>
+            <WideModalField
+              label={t('finance.due_date', { defaultValue: 'Due Date' })}
+              span={2}
+            >
+              <input
+                type="date"
+                value={invoiceForm.due_date}
+                onChange={(e) => setInvoiceForm((f) => ({ ...f, due_date: e.target.value }))}
+                className={inputCls}
+              />
+            </WideModalField>
+            <WideModalField
+              label={t('finance.notes', { defaultValue: 'Notes / Description' })}
+              span={2}
+            >
+              <textarea
+                value={invoiceForm.description}
+                onChange={(e) => setInvoiceForm((f) => ({ ...f, description: e.target.value }))}
+                rows={3}
+                className={clsx(inputCls, 'h-auto py-2.5 resize-none')}
+                placeholder={t('finance.invoice_desc_placeholder', { defaultValue: 'e.g., Progress payment for concrete works - Phase 2' })}
+              />
+            </WideModalField>
+          </WideModalSection>
+        </WideModal>
       )}
 
       {/* Confirm Dialog */}

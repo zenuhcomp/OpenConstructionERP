@@ -1206,6 +1206,28 @@ async def lock_boq(
             detail="BOQ is already locked.",
         )
 
+    # FSM audit row — record draft -> final transition in oe_activity_log
+    # so the entity lifecycle has the same audit footprint as the other
+    # FSM-managed entities. Best-effort: if audit write fails (e.g. table
+    # not present in a partial migration), we still return the locked
+    # BOQ — the CAS UPDATE above already committed the status change.
+    try:
+        from app.core.audit_log import log_activity
+
+        await log_activity(
+            service.session,
+            actor_id=str(user_id),
+            entity_type="boq",
+            entity_id=str(boq_id),
+            action="status_changed",
+            from_status="draft",
+            to_status="final",
+            reason="Locked via /boqs/{id}/lock",
+            metadata={"approved_at": now_iso, "approved_by": str(user_id)},
+        )
+    except Exception:
+        _log.exception("FSM audit write skipped for BOQ %s lock", boq_id)
+
     boq = await service.get_boq(boq_id)
     return BOQResponse.model_validate(boq)
 
@@ -1264,6 +1286,25 @@ async def unlock_boq(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="BOQ is not locked.",
         )
+
+    # FSM audit row — record final -> draft transition in oe_activity_log
+    # for compliance traceability (regulatory dispute records).
+    try:
+        from app.core.audit_log import log_activity
+
+        await log_activity(
+            service.session,
+            actor_id=str(user_id),
+            entity_type="boq",
+            entity_id=str(boq_id),
+            action="status_changed",
+            from_status="final",
+            to_status="draft",
+            reason="Unlocked via /boqs/{id}/unlock",
+            metadata={"actor_role": role},
+        )
+    except Exception:
+        _log.exception("FSM audit write skipped for BOQ %s unlock", boq_id)
 
     boq = await service.get_boq(boq_id)
     return BOQResponse.model_validate(boq)

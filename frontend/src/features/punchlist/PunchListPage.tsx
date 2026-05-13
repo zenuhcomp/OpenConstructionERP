@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -12,7 +12,6 @@ import {
   Calendar,
   Camera,
   Trash2,
-  X,
   Play,
   CheckCircle2,
   ShieldCheck,
@@ -20,7 +19,16 @@ import {
   AlertTriangle,
   Clock,
 } from 'lucide-react';
-import { Button, Card, Badge, EmptyState, Breadcrumb } from '@/shared/ui';
+import {
+  Button,
+  Card,
+  Badge,
+  EmptyState,
+  Breadcrumb,
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui';
 import { apiGet } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -241,196 +249,19 @@ function AddPunchModal({
     }
   };
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in">
-      <div className="w-full max-w-2xl bg-surface-primary rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-label={t('punch.add_item', { defaultValue: 'Add Punch Item‌⁠‍' })}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('punch.add_item', { defaultValue: 'Add Punch Item' })}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="px-6 py-4 space-y-4">
-          {/* Title — full width */}
-          <div>
-            <label htmlFor="punch-title" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('punch.field_title', { defaultValue: 'Title' })} <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              id="punch-title"
-              value={form.title}
-              onChange={(e) => { set('title', e.target.value); setTouched(true); }}
-              placeholder={t('punch.title_placeholder', {
-                defaultValue: 'e.g. Missing fire seal on Level 3 penetration',
-              })}
-              className={clsx(inputCls, titleError && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error')}
-              autoFocus
-            />
-            {titleError && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {t('punch.title_required', { defaultValue: 'Title is required' })}
-              </p>
-            )}
-          </div>
-
-          {/* Description — full width */}
-          <div>
-            <label htmlFor="punch-description" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('punch.field_description', { defaultValue: 'Description' })}
-            </label>
-            <textarea
-              id="punch-description"
-              value={form.description}
-              onChange={(e) => set('description', e.target.value)}
-              rows={2}
-              className={textareaCls}
-              placeholder={t('punch.description_placeholder', {
-                defaultValue: 'Provide details about the issue...',
-              })}
-            />
-          </div>
-
-          {/* Priority — inline colored radio buttons in one row */}
-          <div>
-            <label className="block text-sm font-medium text-content-secondary mb-2">
-              {t('punch.field_priority', { defaultValue: 'Priority' })}
-            </label>
-            <div className="flex items-center gap-2 flex-wrap">
-              {PRIORITIES.map((p) => (
-                <label key={p} className="relative cursor-pointer">
-                  <input
-                    type="radio"
-                    name="priority"
-                    value={p}
-                    checked={form.priority === p}
-                    onChange={() => set('priority', p)}
-                    className="peer sr-only"
-                  />
-                  <div
-                    className={clsx(
-                      'rounded-lg border px-3 py-1.5 text-center text-sm font-medium transition-all',
-                      PRIORITY_RADIO_COLORS[p],
-                    )}
-                  >
-                    {t(`punch.priority_${p}`, {
-                      defaultValue: p.charAt(0).toUpperCase() + p.slice(1),
-                    })}
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Two-column grid: Category + Assigned To */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Category */}
-            <div>
-              <label htmlFor="punch-category" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('punch.field_category', { defaultValue: 'Category' })}
-              </label>
-              <select
-                id="punch-category"
-                value={form.category}
-                onChange={(e) => set('category', e.target.value as PunchCategory)}
-                className={inputCls}
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {t(`punch.category_${c}`, {
-                      defaultValue: c
-                        .split('_')
-                        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-                        .join(' '),
-                    })}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Assigned To */}
-            <div>
-              <label htmlFor="punch-assigned-to" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('punch.field_assigned_to', { defaultValue: 'Assigned To' })}
-              </label>
-              <select
-                id="punch-assigned-to"
-                value={form.assigned_to}
-                onChange={(e) => set('assigned_to', e.target.value)}
-                className={inputCls}
-              >
-                <option value="">
-                  {t('punch.unassigned', { defaultValue: 'Unassigned' })}
-                </option>
-                {teamMembers.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Two-column grid: Due Date + Location */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Due Date */}
-            <div>
-              <label htmlFor="punch-due-date" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('punch.field_due_date', { defaultValue: 'Due Date' })}
-              </label>
-              <input
-                id="punch-due-date"
-                type="date"
-                value={form.due_date}
-                onChange={(e) => set('due_date', e.target.value)}
-                className={inputCls}
-              />
-            </div>
-
-            {/* Location */}
-            <div>
-              <label htmlFor="punch-location" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('punch.field_location', { defaultValue: 'Location' })}
-              </label>
-              <input
-                id="punch-location"
-                value={form.location}
-                onChange={(e) => set('location', e.target.value)}
-                placeholder={t('punch.location_placeholder', {
-                  defaultValue: 'e.g. Building A, Level 3, Room 305',
-                })}
-                className={inputCls}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light">
+    <WideModal
+      open
+      onClose={onClose}
+      busy={isPending}
+      size="xl"
+      title={t('punch.add_item', { defaultValue: 'Add Punch Item' })}
+      footer={
+        <>
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
-          <Button
-            variant="primary"
-            onClick={handleSubmit}
-            disabled={isPending}
-          >
+          <Button variant="primary" onClick={handleSubmit} disabled={isPending}>
             {isPending ? (
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent mr-2 shrink-0" />
             ) : (
@@ -438,9 +269,149 @@ function AddPunchModal({
             )}
             <span>{t('punch.create_item', { defaultValue: 'Create Item' })}</span>
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('punch.field_title', { defaultValue: 'Title' })}
+          required
+          error={titleError ? t('punch.title_required', { defaultValue: 'Title is required' }) : undefined}
+          span={2}
+          htmlFor="punch-title"
+        >
+          <input
+            id="punch-title"
+            value={form.title}
+            onChange={(e) => { set('title', e.target.value); setTouched(true); }}
+            placeholder={t('punch.title_placeholder', {
+              defaultValue: 'e.g. Missing fire seal on Level 3 penetration',
+            })}
+            className={clsx(inputCls, titleError && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error')}
+            autoFocus
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('punch.field_description', { defaultValue: 'Description' })}
+          span={2}
+          htmlFor="punch-description"
+        >
+          <textarea
+            id="punch-description"
+            value={form.description}
+            onChange={(e) => set('description', e.target.value)}
+            rows={2}
+            className={textareaCls}
+            placeholder={t('punch.description_placeholder', {
+              defaultValue: 'Provide details about the issue...',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('punch.field_priority', { defaultValue: 'Priority' })}
+          span={2}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            {PRIORITIES.map((p) => (
+              <label key={p} className="relative cursor-pointer">
+                <input
+                  type="radio"
+                  name="priority"
+                  value={p}
+                  checked={form.priority === p}
+                  onChange={() => set('priority', p)}
+                  className="peer sr-only"
+                />
+                <div
+                  className={clsx(
+                    'rounded-lg border px-3 py-1.5 text-center text-sm font-medium transition-all',
+                    PRIORITY_RADIO_COLORS[p],
+                  )}
+                >
+                  {t(`punch.priority_${p}`, {
+                    defaultValue: p.charAt(0).toUpperCase() + p.slice(1),
+                  })}
+                </div>
+              </label>
+            ))}
+          </div>
+        </WideModalField>
+
+        <WideModalField
+          label={t('punch.field_category', { defaultValue: 'Category' })}
+          htmlFor="punch-category"
+        >
+          <select
+            id="punch-category"
+            value={form.category}
+            onChange={(e) => set('category', e.target.value as PunchCategory)}
+            className={inputCls}
+          >
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {t(`punch.category_${c}`, {
+                  defaultValue: c
+                    .split('_')
+                    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                    .join(' '),
+                })}
+              </option>
+            ))}
+          </select>
+        </WideModalField>
+
+        <WideModalField
+          label={t('punch.field_assigned_to', { defaultValue: 'Assigned To' })}
+          htmlFor="punch-assigned-to"
+        >
+          <select
+            id="punch-assigned-to"
+            value={form.assigned_to}
+            onChange={(e) => set('assigned_to', e.target.value)}
+            className={inputCls}
+          >
+            <option value="">
+              {t('punch.unassigned', { defaultValue: 'Unassigned' })}
+            </option>
+            {teamMembers.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </WideModalField>
+
+        <WideModalField
+          label={t('punch.field_due_date', { defaultValue: 'Due Date' })}
+          htmlFor="punch-due-date"
+        >
+          <input
+            id="punch-due-date"
+            type="date"
+            value={form.due_date}
+            onChange={(e) => set('due_date', e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('punch.field_location', { defaultValue: 'Location' })}
+          htmlFor="punch-location"
+        >
+          <input
+            id="punch-location"
+            value={form.location}
+            onChange={(e) => set('location', e.target.value)}
+            placeholder={t('punch.location_placeholder', {
+              defaultValue: 'e.g. Building A, Level 3, Room 305',
+            })}
+            className={inputCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 

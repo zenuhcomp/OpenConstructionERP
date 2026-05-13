@@ -18,7 +18,19 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
-import { Button, Card, Badge, EmptyState, Breadcrumb, DateDisplay, ConfirmDialog, SkeletonTable } from '@/shared/ui';
+import {
+  Button,
+  Card,
+  Badge,
+  EmptyState,
+  Breadcrumb,
+  DateDisplay,
+  ConfirmDialog,
+  SkeletonTable,
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { apiGet } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
@@ -208,233 +220,15 @@ function CreateTransmittalModal({
     if (canSubmit) onSubmit(form);
   };
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in" role="dialog" aria-modal="true" aria-label={t('transmittals.new_transmittal', { defaultValue: 'New Transmittal‌⁠‍' })}>
-      <div className="w-full max-w-2xl bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('transmittals.new_transmittal', { defaultValue: 'New Transmittal‌⁠‍' })}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="px-6 py-4 space-y-4">
-          {/* Subject */}
-          <div>
-            <label htmlFor="tr-subject" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('transmittals.field_subject', { defaultValue: 'Subject‌⁠‍' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              id="tr-subject"
-              value={form.subject}
-              onChange={(e) => {
-                set('subject', e.target.value);
-                setTouched(true);
-              }}
-              placeholder={t('transmittals.subject_placeholder', {
-                defaultValue: 'e.g. Structural drawings for approval - Rev C‌⁠‍',
-              })}
-              className={clsx(
-                inputCls,
-                subjectError &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-              autoFocus
-            />
-            {subjectError && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {t('transmittals.subject_required', { defaultValue: 'Subject is required‌⁠‍' })}
-              </p>
-            )}
-          </div>
-
-          {/* Two-column: Purpose + Response Due */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="tr-purpose" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('transmittals.field_purpose', { defaultValue: 'Purpose' })}
-              </label>
-              <div className="relative">
-                <select
-                  id="tr-purpose"
-                  value={form.purpose}
-                  onChange={(e) => set('purpose', e.target.value as TransmittalPurpose)}
-                  className={inputCls + ' appearance-none pr-9'}
-                >
-                  {(Object.keys(PURPOSE_LABELS) as TransmittalPurpose[]).map((p) => (
-                    <option key={p} value={p}>
-                      {t(`transmittals.purpose_${p}`, { defaultValue: PURPOSE_LABELS[p] })}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
-                  <ChevronDown size={14} />
-                </div>
-              </div>
-              <p className="mt-1 text-2xs text-content-tertiary">
-                {t(`transmittals.purpose_desc_${form.purpose}`, { defaultValue: PURPOSE_DESCRIPTIONS[form.purpose] })}
-              </p>
-            </div>
-            <div>
-              <label htmlFor="tr-response-due" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('transmittals.field_response_due', { defaultValue: 'Response Due' })}
-              </label>
-              <input
-                id="tr-response-due"
-                type="date"
-                value={form.response_due}
-                onChange={(e) => set('response_due', e.target.value)}
-                className={inputCls}
-              />
-            </div>
-          </div>
-
-          {/* Recipients */}
-          <div>
-            <label htmlFor="tr-recipients" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('transmittals.field_recipients', { defaultValue: 'Recipients' })}
-            </label>
-            <input
-              id="tr-recipients"
-              value={form.recipients}
-              onChange={(e) => set('recipients', e.target.value)}
-              placeholder={t('transmittals.recipients_placeholder', {
-                defaultValue: 'Names, comma-separated',
-              })}
-              className={inputCls}
-            />
-          </div>
-
-          {/* Items */}
-          <div>
-            <label htmlFor="tr-items" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('transmittals.field_items', { defaultValue: 'Document Items' })}
-            </label>
-            <input
-              id="tr-items"
-              value={form.items}
-              onChange={(e) => set('items', e.target.value)}
-              placeholder={t('transmittals.items_placeholder', {
-                defaultValue: 'Document titles, comma-separated',
-              })}
-              className={inputCls}
-            />
-          </div>
-
-          {/* CDE Revision picker */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('transmittals.field_link_revision', {
-                defaultValue: 'Link CDE Revision',
-              })}
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div className="relative">
-                <select
-                  aria-label={t('transmittals.picker_container_label', { defaultValue: 'Container' })}
-                  value={pickerContainerId}
-                  onChange={(e) => setPickerContainerId(e.target.value)}
-                  className={inputCls + ' appearance-none pr-9'}
-                >
-                  <option value="">
-                    {t('transmittals.picker_select_container', { defaultValue: 'Select container…' })}
-                  </option>
-                  {containers.map((c: CDEContainer) => (
-                    <option key={c.id} value={c.id}>
-                      {c.container_code}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
-                  <ChevronDown size={14} />
-                </div>
-              </div>
-              <div className="relative">
-                <select
-                  aria-label={t('transmittals.picker_revision_label', { defaultValue: 'Revision' })}
-                  value=""
-                  onChange={(e) => {
-                    const rev = revisions.find((r) => r.id === e.target.value);
-                    if (rev) addRevision(rev);
-                  }}
-                  className={inputCls + ' appearance-none pr-9'}
-                  disabled={!pickerContainerId}
-                >
-                  <option value="">
-                    {t('transmittals.picker_select_revision', { defaultValue: 'Select revision…' })}
-                  </option>
-                  {revisions.map((r: CDERevision) => (
-                    <option key={r.id} value={r.id}>
-                      {r.revision_code} — {r.file_name}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
-                  <ChevronDown size={14} />
-                </div>
-              </div>
-            </div>
-            {form.revisions.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {form.revisions.map((r) => (
-                  <div
-                    key={r.revision_id}
-                    className="flex items-center justify-between rounded-lg bg-surface-secondary px-3 py-2 text-sm"
-                  >
-                    <span className="font-mono">
-                      {r.container_code} · {r.revision_code}
-                    </span>
-                    <button
-                      type="button"
-                      className="text-content-tertiary hover:text-semantic-error"
-                      onClick={() => removeRevision(r.revision_id)}
-                      aria-label={t('common.remove', { defaultValue: 'Remove' })}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Cover Note */}
-          <div>
-            <label htmlFor="tr-cover-note" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('transmittals.field_cover_note', { defaultValue: 'Cover Note' })}
-            </label>
-            <textarea
-              id="tr-cover-note"
-              value={form.cover_note}
-              onChange={(e) => set('cover_note', e.target.value)}
-              rows={3}
-              className={textareaCls}
-              placeholder={t('transmittals.cover_note_placeholder', {
-                defaultValue: 'Cover letter or transmission notes...',
-              })}
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light">
+    <WideModal
+      open
+      onClose={onClose}
+      busy={isPending}
+      size="xl"
+      title={t('transmittals.new_transmittal', { defaultValue: 'New Transmittal‌⁠‍' })}
+      footer={
+        <>
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
@@ -448,9 +242,202 @@ function CreateTransmittalModal({
               {t('transmittals.create_transmittal', { defaultValue: 'Create Transmittal' })}
             </span>
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('transmittals.field_subject', { defaultValue: 'Subject‌⁠‍' })}
+          required
+          span={2}
+          htmlFor="tr-subject"
+          error={
+            subjectError
+              ? t('transmittals.subject_required', { defaultValue: 'Subject is required‌⁠‍' })
+              : undefined
+          }
+        >
+          <input
+            id="tr-subject"
+            value={form.subject}
+            onChange={(e) => {
+              set('subject', e.target.value);
+              setTouched(true);
+            }}
+            placeholder={t('transmittals.subject_placeholder', {
+              defaultValue: 'e.g. Structural drawings for approval - Rev C‌⁠‍',
+            })}
+            className={clsx(
+              inputCls,
+              subjectError &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('transmittals.field_purpose', { defaultValue: 'Purpose' })}
+          htmlFor="tr-purpose"
+          hint={t(`transmittals.purpose_desc_${form.purpose}`, {
+            defaultValue: PURPOSE_DESCRIPTIONS[form.purpose],
+          })}
+        >
+          <div className="relative">
+            <select
+              id="tr-purpose"
+              value={form.purpose}
+              onChange={(e) => set('purpose', e.target.value as TransmittalPurpose)}
+              className={inputCls + ' appearance-none pr-9'}
+            >
+              {(Object.keys(PURPOSE_LABELS) as TransmittalPurpose[]).map((p) => (
+                <option key={p} value={p}>
+                  {t(`transmittals.purpose_${p}`, { defaultValue: PURPOSE_LABELS[p] })}
+                </option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
+              <ChevronDown size={14} />
+            </div>
+          </div>
+        </WideModalField>
+
+        <WideModalField
+          label={t('transmittals.field_response_due', { defaultValue: 'Response Due' })}
+          htmlFor="tr-response-due"
+        >
+          <input
+            id="tr-response-due"
+            type="date"
+            value={form.response_due}
+            onChange={(e) => set('response_due', e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('transmittals.field_recipients', { defaultValue: 'Recipients' })}
+          htmlFor="tr-recipients"
+        >
+          <input
+            id="tr-recipients"
+            value={form.recipients}
+            onChange={(e) => set('recipients', e.target.value)}
+            placeholder={t('transmittals.recipients_placeholder', {
+              defaultValue: 'Names, comma-separated',
+            })}
+            className={inputCls}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('transmittals.field_items', { defaultValue: 'Document Items' })}
+          htmlFor="tr-items"
+        >
+          <input
+            id="tr-items"
+            value={form.items}
+            onChange={(e) => set('items', e.target.value)}
+            placeholder={t('transmittals.items_placeholder', {
+              defaultValue: 'Document titles, comma-separated',
+            })}
+            className={inputCls}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('transmittals.field_link_revision', {
+            defaultValue: 'Link CDE Revision',
+          })}
+          span={2}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="relative">
+              <select
+                aria-label={t('transmittals.picker_container_label', { defaultValue: 'Container' })}
+                value={pickerContainerId}
+                onChange={(e) => setPickerContainerId(e.target.value)}
+                className={inputCls + ' appearance-none pr-9'}
+              >
+                <option value="">
+                  {t('transmittals.picker_select_container', { defaultValue: 'Select container…' })}
+                </option>
+                {containers.map((c: CDEContainer) => (
+                  <option key={c.id} value={c.id}>
+                    {c.container_code}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
+                <ChevronDown size={14} />
+              </div>
+            </div>
+            <div className="relative">
+              <select
+                aria-label={t('transmittals.picker_revision_label', { defaultValue: 'Revision' })}
+                value=""
+                onChange={(e) => {
+                  const rev = revisions.find((r) => r.id === e.target.value);
+                  if (rev) addRevision(rev);
+                }}
+                className={inputCls + ' appearance-none pr-9'}
+                disabled={!pickerContainerId}
+              >
+                <option value="">
+                  {t('transmittals.picker_select_revision', { defaultValue: 'Select revision…' })}
+                </option>
+                {revisions.map((r: CDERevision) => (
+                  <option key={r.id} value={r.id}>
+                    {r.revision_code} — {r.file_name}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
+                <ChevronDown size={14} />
+              </div>
+            </div>
+          </div>
+          {form.revisions.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {form.revisions.map((r) => (
+                <div
+                  key={r.revision_id}
+                  className="flex items-center justify-between rounded-lg bg-surface-secondary px-3 py-2 text-sm"
+                >
+                  <span className="font-mono">
+                    {r.container_code} · {r.revision_code}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-content-tertiary hover:text-semantic-error"
+                    onClick={() => removeRevision(r.revision_id)}
+                    aria-label={t('common.remove', { defaultValue: 'Remove' })}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </WideModalField>
+
+        <WideModalField
+          label={t('transmittals.field_cover_note', { defaultValue: 'Cover Note' })}
+          span={2}
+          htmlFor="tr-cover-note"
+        >
+          <textarea
+            id="tr-cover-note"
+            value={form.cover_note}
+            onChange={(e) => set('cover_note', e.target.value)}
+            rows={3}
+            className={textareaCls}
+            placeholder={t('transmittals.cover_note_placeholder', {
+              defaultValue: 'Cover letter or transmission notes...',
+            })}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 

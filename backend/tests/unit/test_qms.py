@@ -1146,3 +1146,53 @@ async def test_management_review_period_validation(svc: QMSService) -> None:
             period_from=today,
             period_to=today - _td(days=7),  # wrong direction
         )
+
+
+# ── Wave M4: cross-module wiring ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_ncr_raised_fanout_publishes_supplier_rating_and_kpi() -> None:
+    """``qms.ncr.raised`` → procurement.supplier_rating_update + bi.kpi_recompute."""
+    import asyncio
+    import uuid as _uuid
+
+    from app.core.events import Event
+    from app.core import events as _ev_module
+    from app.modules.qms.events import _on_ncr_raised_fanout
+
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(name, data=None, source_module=None):  # noqa: ARG001
+        captured.append((name, dict(data or {})))
+        fut: asyncio.Future = asyncio.Future()
+        fut.set_result(None)
+        return fut
+
+    event = Event(
+        name="qms.ncr.raised",
+        data={
+            "ncr_id": str(_uuid.uuid4()),
+            "project_id": str(_uuid.uuid4()),
+            "severity": "major",
+            "title": "Wrong rebar grade in pour P-12",
+            "cost_impact_amount": "12000",
+            "cost_impact_currency": "EUR",
+        },
+        source_module="qms",
+    )
+    real = _ev_module.event_bus.publish_detached
+    _ev_module.event_bus.publish_detached = _spy  # type: ignore[assignment]
+    try:
+        await _on_ncr_raised_fanout(event)
+    finally:
+        _ev_module.event_bus.publish_detached = real  # type: ignore[assignment]
+    names = [n for n, _ in captured]
+    assert "procurement.supplier_rating_update" in names
+    assert "bi_dashboards.kpi_recompute" in names
+    rating = next(d for n, d in captured if n == "procurement.supplier_rating_update")
+    assert rating["cost_impact_amount"] == "12000"
+    assert rating["cost_impact_currency"] == "EUR"
+    kpi = next(d for n, d in captured if n == "bi_dashboards.kpi_recompute")
+    assert "copq" in kpi["kpi_codes"]
+    assert "first_pass_yield" in kpi["kpi_codes"]

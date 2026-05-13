@@ -22,13 +22,22 @@ import {
   HardHat,
   Truck,
   Briefcase,
-  CreditCard,
-  MapPin,
   User,
   Pencil,
   Trash2,
 } from 'lucide-react';
-import { Button, Card, Badge, EmptyState, Breadcrumb, CountryFlag, ConfirmDialog } from '@/shared/ui';
+import {
+  Button,
+  Card,
+  Badge,
+  EmptyState,
+  Breadcrumb,
+  CountryFlag,
+  ConfirmDialog,
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useCreateShortcut } from '@/shared/hooks/useCreateShortcut';
 import { useToastStore } from '@/stores/useToastStore';
@@ -128,16 +137,6 @@ const TYPE_CARD_CONFIG: Record<ContactType, { icon: React.ElementType; color: st
   customer: { icon: Users, color: 'text-emerald-600 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-950/30 dark:border-emerald-800' },
 };
 
-function SectionHeader({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
-  return (
-    <div className="flex items-center gap-2 pt-2 pb-1">
-      <Icon size={14} className="text-content-tertiary" />
-      <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">{label}</span>
-      <div className="flex-1 h-px bg-border-light" />
-    </div>
-  );
-}
-
 interface ContactFormData {
   company_name: string;
   legal_name: string;
@@ -214,299 +213,19 @@ function AddContactModal({
     onSubmit(form);
   };
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in">
-      <div className="w-full max-w-2xl bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[85vh] flex flex-col" role="dialog" aria-label={isEdit ? t('contacts.edit_contact', { defaultValue: 'Edit Contact‌⁠‍' }) : t('contacts.add_contact', { defaultValue: 'Add Contact‌⁠‍' })}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light sticky top-0 z-10 bg-surface-elevated rounded-t-xl">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {isEdit
-              ? t('contacts.edit_contact', { defaultValue: 'Edit Contact‌⁠‍' })
-              : t('contacts.add_contact', { defaultValue: 'Add Contact' })}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="px-6 py-4 space-y-5 overflow-y-auto flex-1">
-          {/* ── Contact Type ── */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-2">
-              {t('contacts.field_type', { defaultValue: 'Contact Type' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {CONTACT_TYPES.map((ct) => {
-                const cfg = TYPE_CARD_CONFIG[ct];
-                const TypeIcon = cfg.icon;
-                const selected = form.contact_type === ct;
-                return (
-                  <button
-                    key={ct}
-                    type="button"
-                    onClick={() => set('contact_type', ct)}
-                    className={clsx(
-                      'flex flex-col items-center gap-1.5 rounded-lg border-2 px-3 py-3 text-center transition-all',
-                      selected
-                        ? cfg.color + ' ring-2 ring-oe-blue/30'
-                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
-                    )}
-                  >
-                    <TypeIcon size={20} />
-                    <span className="text-xs font-medium">
-                      {t(`contacts.type_${ct}`, {
-                        defaultValue: ct.charAt(0).toUpperCase() + ct.slice(1),
-                      })}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* ── Company Section ── */}
-          <SectionHeader icon={Building2} label={t('contacts.section_company', { defaultValue: 'Company' })} />
-
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('contacts.field_company', { defaultValue: 'Company Name' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              value={form.company_name}
-              onChange={(e) => set('company_name', e.target.value)}
-              placeholder={t('contacts.company_placeholder', {
-                defaultValue: 'e.g. Acme Construction Ltd.',
-              })}
-              className={clsx(
-                inputCls,
-                errors.company_name &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-              autoFocus
-            />
-            {errors.company_name && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {errors.company_name}
-              </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_legal_name', { defaultValue: 'Legal Name' })}
-              </label>
-              <input
-                value={form.legal_name}
-                onChange={(e) => set('legal_name', e.target.value)}
-                className={inputCls}
-                placeholder={t('contacts.legal_name_placeholder', { defaultValue: 'Registered legal entity name' })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_vat', { defaultValue: 'VAT / Tax ID' })}
-              </label>
-              <input
-                value={form.vat_number}
-                onChange={(e) => set('vat_number', e.target.value)}
-                className={inputCls}
-                placeholder={t('contacts.vat_placeholder', { defaultValue: 'e.g. DE123456789' })}
-              />
-            </div>
-          </div>
-
-          {/* ── Person Section ── */}
-          <SectionHeader icon={User} label={t('contacts.section_person', { defaultValue: 'Contact Person' })} />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_first_name', { defaultValue: 'First Name' })}
-              </label>
-              <input
-                value={form.first_name}
-                onChange={(e) => set('first_name', e.target.value)}
-                className={inputCls}
-                placeholder={t('contacts.first_name_placeholder', { defaultValue: 'John' })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_last_name', { defaultValue: 'Last Name' })}
-              </label>
-              <input
-                value={form.last_name}
-                onChange={(e) => set('last_name', e.target.value)}
-                className={inputCls}
-                placeholder={t('contacts.last_name_placeholder', { defaultValue: 'Doe' })}
-              />
-            </div>
-          </div>
-
-          {/* ── Contact Details Section ── */}
-          <SectionHeader icon={Mail} label={t('contacts.section_contact', { defaultValue: 'Contact Details' })} />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_email', { defaultValue: 'Email' })}
-              </label>
-              <input
-                type="email"
-                value={form.email}
-                onChange={(e) => set('email', e.target.value)}
-                className={inputCls}
-                placeholder="name@company.com"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_phone', { defaultValue: 'Phone' })}
-              </label>
-              <input
-                type="tel"
-                value={form.phone}
-                onChange={(e) => set('phone', e.target.value)}
-                className={inputCls}
-                placeholder="+49 170 1234567"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('contacts.field_website', { defaultValue: 'Website' })}
-            </label>
-            <input
-              type="url"
-              value={form.website}
-              onChange={(e) => set('website', e.target.value)}
-              className={inputCls}
-              placeholder="https://www.example.com"
-            />
-          </div>
-
-          {/* ── Address Section ── */}
-          <SectionHeader icon={MapPin} label={t('contacts.section_address', { defaultValue: 'Address' })} />
-
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('contacts.field_country', { defaultValue: 'Country' })}
-            </label>
-            <input
-              value={form.country}
-              onChange={(e) => set('country', e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2))}
-              maxLength={2}
-              className={clsx(inputCls, errors.country && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error')}
-              placeholder={t('contacts.country_placeholder', {
-                defaultValue: 'e.g. DE, US, GB',
-              })}
-            />
-            {errors.country && (
-              <p className="mt-1 text-xs text-semantic-error">{errors.country}</p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('contacts.field_address', { defaultValue: 'Address' })}
-            </label>
-            <textarea
-              value={form.address}
-              onChange={(e) => set('address', e.target.value)}
-              rows={2}
-              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
-              placeholder={t('contacts.address_placeholder', {
-                defaultValue: 'Street address, City, ZIP / Postal code',
-              })}
-            />
-          </div>
-
-          {/* ── Payment & Status Section ── */}
-          <SectionHeader icon={CreditCard} label={t('contacts.section_payment', { defaultValue: 'Payment & Status' })} />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_payment_terms', { defaultValue: 'Payment Terms' })}
-              </label>
-              <div className="flex items-center gap-2">
-                {['30', '45', '60'].map((days) => (
-                  <button
-                    key={days}
-                    type="button"
-                    onClick={() => set('payment_terms', days)}
-                    className={clsx(
-                      'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all text-center',
-                      form.payment_terms === days
-                        ? 'border-oe-blue bg-oe-blue-subtle text-oe-blue ring-1 ring-oe-blue/30'
-                        : 'border-border text-content-tertiary hover:border-border-light hover:text-content-secondary',
-                    )}
-                  >
-                    {days} {t('contacts.days', { defaultValue: 'days' })}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('contacts.field_prequal', { defaultValue: 'Prequalification' })}
-              </label>
-              <select
-                value={form.prequalification_status}
-                onChange={(e) =>
-                  set('prequalification_status', e.target.value as PrequalificationStatus)
-                }
-                className={inputCls}
-              >
-                {(
-                  Object.keys(PREQUAL_CONFIG) as PrequalificationStatus[]
-                ).map((ps) => (
-                  <option key={ps} value={ps}>
-                    {t(PREQUAL_CONFIG[ps].labelKey, {
-                      defaultValue: PREQUAL_CONFIG[ps].defaultLabel,
-                    })}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('contacts.field_notes', { defaultValue: 'Notes' })}
-            </label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => set('notes', e.target.value)}
-              rows={2}
-              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
-              placeholder={t('contacts.notes_placeholder', {
-                defaultValue: 'Additional notes...',
-              })}
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light sticky bottom-0 z-10 bg-surface-elevated rounded-b-xl">
+    <WideModal
+      open
+      onClose={onClose}
+      busy={isPending}
+      size="xl"
+      title={
+        isEdit
+          ? t('contacts.edit_contact', { defaultValue: 'Edit Contact‌⁠‍' })
+          : t('contacts.add_contact', { defaultValue: 'Add Contact' })
+      }
+      footer={
+        <>
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
@@ -522,9 +241,248 @@ function AddContactModal({
                 : t('contacts.create_contact', { defaultValue: 'Create Contact' })}
             </span>
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {/* Contact type picker — 4-wide tile row */}
+      <WideModalSection columns={1}>
+        <WideModalField
+          label={t('contacts.field_type', { defaultValue: 'Contact Type' })}
+          required
+        >
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+            {CONTACT_TYPES.map((ct) => {
+              const cfg = TYPE_CARD_CONFIG[ct];
+              const TypeIcon = cfg.icon;
+              const selected = form.contact_type === ct;
+              return (
+                <button
+                  key={ct}
+                  type="button"
+                  onClick={() => set('contact_type', ct)}
+                  className={clsx(
+                    'flex flex-col items-center gap-1.5 rounded-lg border-2 px-3 py-3 text-center transition-all',
+                    selected
+                      ? cfg.color + ' ring-2 ring-oe-blue/30'
+                      : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                  )}
+                >
+                  <TypeIcon size={20} />
+                  <span className="text-xs font-medium">
+                    {t(`contacts.type_${ct}`, {
+                      defaultValue: ct.charAt(0).toUpperCase() + ct.slice(1),
+                    })}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Company */}
+      <WideModalSection
+        title={t('contacts.section_company', { defaultValue: 'Company' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('contacts.field_company', { defaultValue: 'Company Name' })}
+          required
+          span={2}
+          error={errors.company_name}
+        >
+          <input
+            value={form.company_name}
+            onChange={(e) => set('company_name', e.target.value)}
+            placeholder={t('contacts.company_placeholder', {
+              defaultValue: 'e.g. Acme Construction Ltd.',
+            })}
+            className={clsx(
+              inputCls,
+              errors.company_name &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+          />
+        </WideModalField>
+
+        <WideModalField label={t('contacts.field_legal_name', { defaultValue: 'Legal Name' })}>
+          <input
+            value={form.legal_name}
+            onChange={(e) => set('legal_name', e.target.value)}
+            className={inputCls}
+            placeholder={t('contacts.legal_name_placeholder', { defaultValue: 'Registered legal entity name' })}
+          />
+        </WideModalField>
+
+        <WideModalField label={t('contacts.field_vat', { defaultValue: 'VAT / Tax ID' })}>
+          <input
+            value={form.vat_number}
+            onChange={(e) => set('vat_number', e.target.value)}
+            className={inputCls}
+            placeholder={t('contacts.vat_placeholder', { defaultValue: 'e.g. DE123456789' })}
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Person */}
+      <WideModalSection
+        title={t('contacts.section_person', { defaultValue: 'Contact Person' })}
+        columns={2}
+      >
+        <WideModalField label={t('contacts.field_first_name', { defaultValue: 'First Name' })}>
+          <input
+            value={form.first_name}
+            onChange={(e) => set('first_name', e.target.value)}
+            className={inputCls}
+            placeholder={t('contacts.first_name_placeholder', { defaultValue: 'John' })}
+          />
+        </WideModalField>
+
+        <WideModalField label={t('contacts.field_last_name', { defaultValue: 'Last Name' })}>
+          <input
+            value={form.last_name}
+            onChange={(e) => set('last_name', e.target.value)}
+            className={inputCls}
+            placeholder={t('contacts.last_name_placeholder', { defaultValue: 'Doe' })}
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Contact details */}
+      <WideModalSection
+        title={t('contacts.section_contact', { defaultValue: 'Contact Details' })}
+        columns={2}
+      >
+        <WideModalField label={t('contacts.field_email', { defaultValue: 'Email' })}>
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => set('email', e.target.value)}
+            className={inputCls}
+            placeholder="name@company.com"
+          />
+        </WideModalField>
+
+        <WideModalField label={t('contacts.field_phone', { defaultValue: 'Phone' })}>
+          <input
+            type="tel"
+            value={form.phone}
+            onChange={(e) => set('phone', e.target.value)}
+            className={inputCls}
+            placeholder="+49 170 1234567"
+          />
+        </WideModalField>
+
+        <WideModalField label={t('contacts.field_website', { defaultValue: 'Website' })} span={2}>
+          <input
+            type="url"
+            value={form.website}
+            onChange={(e) => set('website', e.target.value)}
+            className={inputCls}
+            placeholder="https://www.example.com"
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Address */}
+      <WideModalSection
+        title={t('contacts.section_address', { defaultValue: 'Address' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('contacts.field_country', { defaultValue: 'Country' })}
+          error={errors.country}
+        >
+          <input
+            value={form.country}
+            onChange={(e) =>
+              set('country', e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2))
+            }
+            maxLength={2}
+            className={clsx(
+              inputCls,
+              errors.country && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+            placeholder={t('contacts.country_placeholder', {
+              defaultValue: 'e.g. DE, US, GB',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField label={t('contacts.field_address', { defaultValue: 'Address' })}>
+          <textarea
+            value={form.address}
+            onChange={(e) => set('address', e.target.value)}
+            rows={2}
+            className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
+            placeholder={t('contacts.address_placeholder', {
+              defaultValue: 'Street address, City, ZIP / Postal code',
+            })}
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Payment & Status */}
+      <WideModalSection
+        title={t('contacts.section_payment', { defaultValue: 'Payment & Status' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('contacts.field_payment_terms', { defaultValue: 'Payment Terms' })}
+        >
+          <div className="flex items-center gap-2">
+            {['30', '45', '60'].map((days) => (
+              <button
+                key={days}
+                type="button"
+                onClick={() => set('payment_terms', days)}
+                className={clsx(
+                  'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all text-center',
+                  form.payment_terms === days
+                    ? 'border-oe-blue bg-oe-blue-subtle text-oe-blue ring-1 ring-oe-blue/30'
+                    : 'border-border text-content-tertiary hover:border-border-light hover:text-content-secondary',
+                )}
+              >
+                {days} {t('contacts.days', { defaultValue: 'days' })}
+              </button>
+            ))}
+          </div>
+        </WideModalField>
+
+        <WideModalField label={t('contacts.field_prequal', { defaultValue: 'Prequalification' })}>
+          <select
+            value={form.prequalification_status}
+            onChange={(e) =>
+              set('prequalification_status', e.target.value as PrequalificationStatus)
+            }
+            className={inputCls}
+          >
+            {(Object.keys(PREQUAL_CONFIG) as PrequalificationStatus[]).map((ps) => (
+              <option key={ps} value={ps}>
+                {t(PREQUAL_CONFIG[ps].labelKey, {
+                  defaultValue: PREQUAL_CONFIG[ps].defaultLabel,
+                })}
+              </option>
+            ))}
+          </select>
+        </WideModalField>
+
+        <WideModalField
+          label={t('contacts.field_notes', { defaultValue: 'Notes' })}
+          span={2}
+        >
+          <textarea
+            value={form.notes}
+            onChange={(e) => set('notes', e.target.value)}
+            rows={2}
+            className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
+            placeholder={t('contacts.notes_placeholder', {
+              defaultValue: 'Additional notes...',
+            })}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 

@@ -315,6 +315,71 @@ def recommend_bidder(
     return bidder_lookup.get(getattr(chosen, "bidder_id", None))
 
 
+def detect_bid_outliers(
+    submissions: list[Any],
+    sigma_threshold: Decimal | float | int | str = Decimal("2"),
+) -> dict[str, Any]:
+    """Flag submissions outside ±N·σ of the mean total amount.
+
+    Returns a dict with the underlying mean / σ + per-submission flag.
+    ``low_outliers`` are likely scope-misunderstanding bids; ``high_outliers``
+    are conservative or padded.  Public procurement guidance (e.g. EU Dir
+    2014/24 Art 69 abnormally-low-tender screen) typically uses ±2σ.
+
+    Pure: no DB.
+    """
+    threshold = Decimal(str(sigma_threshold or 0))
+    totals: list[Decimal] = []
+    for s in submissions:
+        amt = _to_decimal(getattr(s, "total_amount", 0))
+        if amt > 0:
+            totals.append(amt)
+    if len(totals) < 2:
+        return {
+            "mean": Decimal("0"),
+            "std_dev": Decimal("0"),
+            "low_threshold": Decimal("0"),
+            "high_threshold": Decimal("0"),
+            "low_outliers": [],
+            "high_outliers": [],
+            "sigma_threshold": threshold,
+        }
+    mean = sum(totals, Decimal("0")) / Decimal(len(totals))
+    # Population standard deviation (matches statistics.pstdev rounding).
+    variance = sum(((t - mean) ** 2 for t in totals), Decimal("0")) / Decimal(len(totals))
+    # Decimal lacks sqrt; iterate Newton's method for stability.
+    if variance > 0:
+        x = variance
+        for _ in range(40):
+            x = (x + variance / x) / Decimal("2")
+        sigma = x
+    else:
+        sigma = Decimal("0")
+    low_thr = mean - threshold * sigma
+    high_thr = mean + threshold * sigma
+    low_outliers: list[Any] = []
+    high_outliers: list[Any] = []
+    for s in submissions:
+        amt = _to_decimal(getattr(s, "total_amount", 0))
+        if amt <= 0:
+            continue
+        sid = str(getattr(s, "id", "") or "")
+        if amt < low_thr:
+            low_outliers.append({"id": sid, "total_amount": amt})
+        elif amt > high_thr:
+            high_outliers.append({"id": sid, "total_amount": amt})
+    q = Decimal("0.01")
+    return {
+        "mean": mean.quantize(q),
+        "std_dev": sigma.quantize(q),
+        "low_threshold": low_thr.quantize(q),
+        "high_threshold": high_thr.quantize(q),
+        "low_outliers": low_outliers,
+        "high_outliers": high_outliers,
+        "sigma_threshold": threshold,
+    }
+
+
 def compute_bid_summary(submissions: list[Any]) -> dict[str, Any]:
     """Aggregate stats across a list of submissions.
 

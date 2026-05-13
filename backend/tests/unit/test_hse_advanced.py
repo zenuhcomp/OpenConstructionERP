@@ -1353,3 +1353,134 @@ async def test_clone_inactive_jsa_template_rejected() -> None:
             ),
         )
     assert exc.value.status_code == 400
+
+
+# ── Wave M4: cross-module wiring ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_safety_incident_subscriber_fans_out() -> None:
+    """``safety.incident.created`` → risk_register_update + kpi_recompute."""
+    import asyncio
+
+    from app.core.events import Event
+    from app.core import events as _ev_module
+    from app.modules.hse_advanced.events import _on_safety_incident_created
+
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(name, data=None, source_module=None):  # noqa: ARG001
+        captured.append((name, dict(data or {})))
+        fut: asyncio.Future = asyncio.Future()
+        fut.set_result(None)
+        return fut
+
+    pid = str(uuid.uuid4())
+    iid = str(uuid.uuid4())
+    event = Event(
+        name="safety.incident.created",
+        data={
+            "project_id": pid,
+            "incident_id": iid,
+            "incident_number": "INC-001",
+            "severity": "high",
+        },
+        source_module="safety",
+    )
+    real = _ev_module.event_bus.publish_detached
+    _ev_module.event_bus.publish_detached = _spy  # type: ignore[assignment]
+    try:
+        await _on_safety_incident_created(event)
+    finally:
+        _ev_module.event_bus.publish_detached = real  # type: ignore[assignment]
+    names = [n for n, _ in captured]
+    assert "contracts.risk_register_update" in names
+    assert "bi_dashboards.kpi_recompute" in names
+    risk = next(d for n, d in captured if n == "contracts.risk_register_update")
+    assert risk["project_id"] == pid
+    assert risk["incident_id"] == iid
+    assert risk["impact"] == "severe"  # high severity → severe impact
+    kpi = next(d for n, d in captured if n == "bi_dashboards.kpi_recompute")
+    assert "safety_trir" in kpi["kpi_codes"]
+
+
+@pytest.mark.asyncio
+async def test_qms_ncr_safety_check_filters_non_safety() -> None:
+    """Non-safety NCR (no safety keyword, low severity) → no fanout."""
+    import asyncio
+
+    from app.core.events import Event
+    from app.core import events as _ev_module
+    from app.modules.hse_advanced.events import _on_qms_ncr_safety_check
+
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(name, data=None, source_module=None):  # noqa: ARG001
+        captured.append((name, dict(data or {})))
+        fut: asyncio.Future = asyncio.Future()
+        fut.set_result(None)
+        return fut
+
+    event = Event(
+        name="qms.ncr.raised",
+        data={
+            "ncr_id": str(uuid.uuid4()),
+            "project_id": str(uuid.uuid4()),
+            "severity": "minor",
+            "title": "Painting touch-up required",
+        },
+        source_module="qms",
+    )
+    real = _ev_module.event_bus.publish_detached
+    _ev_module.event_bus.publish_detached = _spy  # type: ignore[assignment]
+    try:
+        await _on_qms_ncr_safety_check(event)
+    finally:
+        _ev_module.event_bus.publish_detached = real  # type: ignore[assignment]
+    assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_qms_ncr_safety_check_fans_out_on_critical() -> None:
+    """Critical NCR → publishes hse_advanced.if_safety_related."""
+    import asyncio
+
+    from app.core.events import Event
+    from app.core import events as _ev_module
+    from app.modules.hse_advanced.events import _on_qms_ncr_safety_check
+
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(name, data=None, source_module=None):  # noqa: ARG001
+        captured.append((name, dict(data or {})))
+        fut: asyncio.Future = asyncio.Future()
+        fut.set_result(None)
+        return fut
+
+    event = Event(
+        name="qms.ncr.raised",
+        data={
+            "ncr_id": str(uuid.uuid4()),
+            "project_id": str(uuid.uuid4()),
+            "severity": "critical",
+            "title": "Structural deficiency in column C-14",
+        },
+        source_module="qms",
+    )
+    real = _ev_module.event_bus.publish_detached
+    _ev_module.event_bus.publish_detached = _spy  # type: ignore[assignment]
+    try:
+        await _on_qms_ncr_safety_check(event)
+    finally:
+        _ev_module.event_bus.publish_detached = real  # type: ignore[assignment]
+    names = [n for n, _ in captured]
+    assert "hse_advanced.if_safety_related" in names
+
+
+@pytest.mark.asyncio
+async def test_hse_register_subscribers_idempotent() -> None:
+    """register_subscribers is safe to call repeatedly."""
+    from app.modules.hse_advanced.events import register_subscribers
+
+    register_subscribers()
+    register_subscribers()

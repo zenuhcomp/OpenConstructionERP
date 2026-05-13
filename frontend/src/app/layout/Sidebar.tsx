@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LogoWithText } from '@/shared/ui';
+import { Logo, LogoWithText } from '@/shared/ui';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 import {
@@ -78,6 +78,12 @@ import { useGlobalSearchStore } from '@/stores/useGlobalSearchStore';
 import { getModuleNavItems } from '@/modules/_registry';
 import { APP_VERSION } from '@/shared/lib/version';
 import { useSidebarBadges } from '@/shared/hooks/useSidebarBadges';
+import { useIsRTL } from '@/shared/hooks/useIsRTL';
+import {
+  useSidebarCollapseStore,
+  SIDEBAR_WIDTH_FULL,
+  SIDEBAR_WIDTH_ICON,
+} from '@/stores/useSidebarCollapseStore';
 import { RequestCustomModuleDialog } from '@/features/modules/RequestCustomModuleDialog';
 
 
@@ -449,6 +455,22 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const isAdvanced = useViewModeStore((s) => s.isAdvanced);
   const badgeCounts = useSidebarBadges();
   const openSearch = useGlobalSearchStore((s) => s.openModal);
+  const iconified = useSidebarCollapseStore((s) => s.iconified);
+  const toggleIconified = useSidebarCollapseStore((s) => s.toggle);
+  const isRTL = useIsRTL();
+
+  // Drive the global CSS variable so both the aside (`w-sidebar`) and
+  // the main-content offset (`lg:pl-sidebar`) shrink/grow in lockstep.
+  // The variable lives on :root so it survives across remounts; we
+  // reset it to the full width when the component unmounts only if it
+  // was the one that shrunk it, to avoid stranding a 64px gutter when
+  // the user logs out.
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      '--oe-sidebar-width',
+      iconified ? SIDEBAR_WIDTH_ICON : SIDEBAR_WIDTH_FULL,
+    );
+  }, [iconified]);
 
   // Map route paths → open-item counts for sidebar badges
   const badgeMap: Record<string, number> = {
@@ -620,12 +642,25 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         }
       `}</style>
 
-      {/* Logo + mobile close button */}
-      <div className="relative flex h-header items-center justify-between px-5">
-        <a href="https://openconstructionerp.com/?utm_source=app" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 transition-opacity">
-          <LogoWithText size="xs" />
+      {/* Logo + mobile close button. The desktop collapse/expand
+          toggle lives as a floating pill on the right edge — see the
+          <CollapseTab/> right below — not in the header. */}
+      <div
+        className={clsx(
+          'relative flex h-header items-center px-5',
+          iconified ? 'justify-center px-0' : 'justify-between',
+        )}
+      >
+        <a
+          href="https://openconstructionerp.com/?utm_source=app"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:opacity-80 transition-opacity"
+          title={iconified ? 'OpenConstructionERP' : undefined}
+        >
+          {iconified ? <Logo size="sm" /> : <LogoWithText size="xs" />}
         </a>
-        {onClose && (
+        {!iconified && onClose && (
           <button
             onClick={onClose}
             className="lg:hidden flex h-7 w-7 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
@@ -638,40 +673,118 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         <div className="absolute bottom-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
       </div>
 
+      {/* Floating collapse/expand tab — pill-shaped, half-protruding
+          from the right edge of the sidebar at vertical centre.
+          Desktop-only (mobile uses overlay drawer with its own X).
+          Same button toggles both directions; the chevron flips to
+          show which way the click will move the panel. */}
+      <button
+        onClick={toggleIconified}
+        aria-label={
+          iconified
+            ? t('sidebar.expand', { defaultValue: 'Expand sidebar' })
+            : t('sidebar.collapse', { defaultValue: 'Collapse sidebar' })
+        }
+        title={
+          iconified
+            ? t('sidebar.expand', { defaultValue: 'Expand sidebar' })
+            : t('sidebar.collapse', { defaultValue: 'Collapse sidebar' })
+        }
+        className={clsx(
+          // Position: vertical centre, sitting on the outer border with
+          // half its width protruding into the main content area.
+          // LTR → outer = right; RTL → outer = left.
+          'hidden lg:flex absolute top-1/2 z-10',
+          isRTL ? 'left-0' : 'right-0',
+          // Size + shape: tall pill, narrow.
+          'h-12 w-5 items-center justify-center rounded-full',
+          // Surface: clean white with a subtle ring; hover lifts to the
+          // brand colour. Smooth transition on both background and the
+          // chevron rotation, so the toggle feels intentional.
+          'border border-border-light bg-surface-primary text-content-tertiary shadow-sm',
+          'hover:border-oe-blue hover:bg-oe-blue hover:text-white hover:shadow-md hover:shadow-oe-blue/20',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/40',
+          'transition-all duration-200 ease-oe',
+        )}
+        style={{
+          // Manual translate: Tailwind has no logical translate-x, so
+          // we compose Y-centre and X-protrude in one transform.
+          // RTL flips the X sign so the pill still protrudes outward.
+          transform: isRTL
+            ? 'translateY(-50%) translateX(-50%)'
+            : 'translateY(-50%) translateX(50%)',
+        }}
+      >
+        <ChevronRight
+          size={12}
+          strokeWidth={2.5}
+          className={clsx(
+            'transition-transform duration-200 ease-oe',
+            // The chevron always points in the direction the click will
+            // move the panel. In RTL the outward direction flips, so
+            // the rotation logic flips too.
+            isRTL
+              ? iconified
+                ? 'rotate-180'
+                : 'rotate-0'
+              : iconified
+                ? 'rotate-0'
+                : 'rotate-180',
+          )}
+        />
+      </button>
+
       {/* Search-as-jumper — Linear-style. Triggers the existing global
           semantic-search palette. Keeps the visible affordance for
           users who don't know the ⌘K shortcut, while still surfacing
-          it for those who do. */}
-      <div className="px-3 pt-3 pb-1">
+          it for those who do. When iconified, collapses to a single
+          icon button — the ⌘K shortcut still works regardless. */}
+      <div className={clsx('pt-3 pb-1', iconified ? 'px-2 flex justify-center' : 'px-3')}>
         <button
           type="button"
           onClick={() => openSearch()}
-          className="group flex w-full items-center gap-2 rounded-md border border-border-light bg-surface-secondary/60 px-2.5 py-1.5 text-[12px] text-content-tertiary hover:border-content-quaternary/30 hover:bg-surface-secondary hover:text-content-secondary transition-colors"
+          className={clsx(
+            'group flex items-center gap-2 rounded-md border border-border-light bg-surface-secondary/60 text-[12px] text-content-tertiary hover:border-content-quaternary/30 hover:bg-surface-secondary hover:text-content-secondary transition-colors',
+            iconified ? 'h-8 w-8 justify-center' : 'w-full px-2.5 py-1.5',
+          )}
           aria-label={t('search.open', { defaultValue: 'Open search' })}
+          title={iconified ? t('search.open', { defaultValue: 'Open search' }) : undefined}
         >
           <Search size={13} strokeWidth={1.75} className="shrink-0" />
-          <span className="truncate">
-            {t('search.placeholder', { defaultValue: 'Search…' })}
-          </span>
-          <kbd className="ms-auto hidden sm:inline-flex items-center gap-0.5 rounded border border-border-light bg-surface-primary px-1 py-px text-[9px] font-medium text-content-quaternary group-hover:text-content-tertiary">
-            ⌘K
-          </kbd>
+          {!iconified && (
+            <>
+              <span className="truncate">
+                {t('search.placeholder', { defaultValue: 'Search…' })}
+              </span>
+              <kbd className="ms-auto hidden sm:inline-flex items-center gap-0.5 rounded border border-border-light bg-surface-primary px-1 py-px text-[9px] font-medium text-content-quaternary group-hover:text-content-tertiary">
+                ⌘K
+              </kbd>
+            </>
+          )}
         </button>
       </div>
 
       {/* Main navigation — grouped with collapsible headers */}
-      <nav className="flex-1 overflow-y-auto px-3 pt-2 pb-3" data-engine="cwicr">
+      <nav
+        className={clsx(
+          'flex-1 overflow-y-auto pt-2 pb-3',
+          iconified ? 'px-2' : 'px-3',
+        )}
+        data-engine="cwicr"
+      >
         {/* Pinned section — appears at the top when the user has
             pinned at least one item. No collapsible chevron; just a
             small label + the pinned items in their stored order. */}
         {pinnedItems.length > 0 && (
           <div className="mb-2">
-            <div className="mt-2 mb-0.5 flex items-center gap-1.5 px-2.5">
-              <Pin size={9} strokeWidth={2.25} className="text-content-quaternary" />
-              <span className="text-2xs font-medium uppercase tracking-wider text-content-tertiary">
-                {t('nav.pinned', { defaultValue: 'Pinned' })}
-              </span>
-            </div>
+            {!iconified && (
+              <div className="mt-2 mb-0.5 flex items-center gap-1.5 px-2.5">
+                <Pin size={9} strokeWidth={2.25} className="text-content-quaternary" />
+                <span className="text-2xs font-medium uppercase tracking-wider text-content-tertiary">
+                  {t('nav.pinned', { defaultValue: 'Pinned' })}
+                </span>
+              </div>
+            )}
             <ul className="space-y-0.5">
               {pinnedItems.map((item, i) => (
                 <li
@@ -687,10 +800,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                     isPinned={true}
                     onTogglePin={togglePin}
                     activeRoute={activeRoute}
+                    iconified={iconified}
                   />
                 </li>
               ))}
             </ul>
+            {iconified && (
+              <div className="my-2 mx-auto h-px w-6 bg-border-light" aria-hidden />
+            )}
           </div>
         )}
         {navGroups.map((group) => {
@@ -730,6 +847,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               label={t(group.labelKey, { defaultValue: group.id })}
               isCollapsed={isCollapsed}
               onToggle={() => toggleGroup(group.id)}
+              iconified={iconified}
             >
               <ul className="space-y-0.5">
                 {visibleItems.map((item, i) => (
@@ -746,6 +864,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                       isPinned={pinned.includes(item.to)}
                       onTogglePin={togglePin}
                       activeRoute={activeRoute}
+                      iconified={iconified}
                     />
                   </li>
                 ))}
@@ -757,24 +876,32 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
              the very end of the main nav groups so it reads as "keep going,
              there's more — build your own". Navigates into the in-app
              developer guide rather than to the marketplace, which gives
-             contributors a clearer first step. */}
-        <li className="px-3 pt-2 pb-1">
+             contributors a clearer first step. When iconified, shrinks
+             to a centred icon-only square — the dashed border still
+             signals "add something". */}
+        <li className={clsx('pt-2 pb-1', iconified ? 'px-0 flex justify-center' : 'px-3')}>
           <NavLink
             to="/modules/developer-guide"
             onClick={onClose}
-            className="group flex items-center gap-2.5 rounded-lg border border-dashed border-oe-blue/40 bg-gradient-to-br from-oe-blue/5 via-transparent to-blue-50/40 dark:from-oe-blue/10 dark:via-transparent dark:to-slate-900/30 px-2.5 py-2 hover:border-oe-blue hover:from-oe-blue/10 hover:shadow-sm transition-all"
+            title={iconified ? t('nav.add_module', { defaultValue: 'Add module' }) : undefined}
+            className={clsx(
+              'group flex items-center rounded-lg border border-dashed border-oe-blue/40 bg-gradient-to-br from-oe-blue/5 via-transparent to-blue-50/40 dark:from-oe-blue/10 dark:via-transparent dark:to-slate-900/30 hover:border-oe-blue hover:from-oe-blue/10 hover:shadow-sm transition-all',
+              iconified ? 'h-9 w-9 justify-center' : 'gap-2.5 px-2.5 py-2',
+            )}
           >
             <span className="shrink-0 flex h-7 w-7 items-center justify-center rounded-md bg-oe-blue/10 text-oe-blue group-hover:bg-oe-blue group-hover:text-white transition-colors">
               <Plus size={14} strokeWidth={2.5} />
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-xs font-semibold text-content-primary leading-tight">
-                {t('nav.add_module', { defaultValue: 'Add module‌⁠‍' })}
+            {!iconified && (
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs font-semibold text-content-primary leading-tight">
+                  {t('nav.add_module', { defaultValue: 'Add module‌⁠‍' })}
+                </span>
+                <span className="block text-[10px] text-content-tertiary leading-tight mt-0.5 truncate">
+                  {t('nav.add_module_hint', { defaultValue: 'Build your own · developer guide‌⁠‍' })}
+                </span>
               </span>
-              <span className="block text-[10px] text-content-tertiary leading-tight mt-0.5 truncate">
-                {t('nav.add_module_hint', { defaultValue: 'Build your own · developer guide‌⁠‍' })}
-              </span>
-            </span>
+            )}
           </NavLink>
         </li>
         {/* Request-a-custom-module CTA — second dashed tile, purple
@@ -789,40 +916,60 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
              on purpose: contributors who want to build a module
              themselves use the guide; users who want us to build it
              for them use this dialog. */}
-        <li className="px-3 pt-1 pb-3">
+        <li className={clsx('pt-1 pb-3', iconified ? 'px-0 flex justify-center' : 'px-3')}>
           <button
             type="button"
             onClick={() => {
               setCustomModuleOpen(true);
               onClose?.();
             }}
-            className="w-full group flex items-center gap-2.5 rounded-lg border border-dashed border-purple-400/40 bg-gradient-to-br from-purple-500/5 via-transparent to-purple-50/40 dark:from-purple-500/10 dark:via-transparent dark:to-slate-900/30 px-2.5 py-2 hover:border-purple-500 hover:from-purple-500/10 hover:shadow-sm transition-all text-left"
+            title={
+              iconified
+                ? t('nav.request_custom_module', { defaultValue: 'Request a custom module' })
+                : undefined
+            }
+            className={clsx(
+              'group flex items-center rounded-lg border border-dashed border-purple-400/40 bg-gradient-to-br from-purple-500/5 via-transparent to-purple-50/40 dark:from-purple-500/10 dark:via-transparent dark:to-slate-900/30 hover:border-purple-500 hover:from-purple-500/10 hover:shadow-sm transition-all text-left',
+              iconified ? 'h-9 w-9 justify-center' : 'w-full gap-2.5 px-2.5 py-2',
+            )}
             aria-haspopup="dialog"
             aria-expanded={customModuleOpen}
           >
             <span className="shrink-0 flex h-7 w-7 items-center justify-center rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300 group-hover:bg-purple-600 group-hover:text-white transition-colors">
               <Sparkles size={14} strokeWidth={2.25} />
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-xs font-semibold text-content-primary leading-tight">
-                {t('nav.request_custom_module', {
-                  defaultValue: 'Request a custom module‌⁠‍',
-                })}
+            {!iconified && (
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs font-semibold text-content-primary leading-tight">
+                  {t('nav.request_custom_module', {
+                    defaultValue: 'Request a custom module‌⁠‍',
+                  })}
+                </span>
+                <span className="block text-[10px] text-content-tertiary leading-tight mt-0.5 truncate">
+                  {t('nav.request_custom_module_hint', {
+                    defaultValue: 'Missing something? Tell us what you need‌⁠‍',
+                  })}
+                </span>
               </span>
-              <span className="block text-[10px] text-content-tertiary leading-tight mt-0.5 truncate">
-                {t('nav.request_custom_module_hint', {
-                  defaultValue: 'Missing something? Tell us what you need‌⁠‍',
-                })}
-              </span>
-            </span>
+            )}
           </button>
         </li>
       </nav>
 
       {/* Bottom navigation — soft hairline separator instead of a hard
           1px border; subtle paper-tint background. */}
-      <div className="relative px-3 py-2 bg-black/[0.02] dark:bg-white/[0.02]">
-        <div className="absolute top-0 left-3 right-3 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+      <div
+        className={clsx(
+          'relative py-2 bg-black/[0.02] dark:bg-white/[0.02]',
+          iconified ? 'px-2' : 'px-3',
+        )}
+      >
+        <div
+          className={clsx(
+            'absolute top-0 h-px bg-gradient-to-r from-transparent via-border to-transparent',
+            iconified ? 'left-2 right-2' : 'left-3 right-3',
+          )}
+        />
         <ul className="space-y-0.5">
           {bottomNav.map((item) => (
             <li key={item.to}>
@@ -833,6 +980,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                 isPinned={pinned.includes(item.to)}
                 onTogglePin={togglePin}
                 activeRoute={activeRoute}
+                iconified={iconified}
               />
             </li>
           ))}
@@ -840,60 +988,88 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
         {/* Update notification — compact clickable card in the sidebar; the
             whole card opens a full-screen modal with highlights + install
-            commands when the user clicks it. */}
-        <UpdateNotification />
+            commands when the user clicks it. Hidden in icon-only mode
+            because the card is text-heavy; users will still see it after
+            expanding the sidebar. */}
+        {!iconified && <UpdateNotification />}
 
         {/* Version + AGPL + GitHub link
             Layout: GitHub icon (left) · version · AGPL link.
             The GitHub link uses Lucide's Github mark — keeps the row aligned
             with the rest of the sidebar's lucide icons and gives a clear
             visual entry point to the source repo. */}
-        {/* Two-row footer in unified neutral gray. Row 1 = version meta
-            (centred, quiet). Row 2 = two equal-width pills — GitHub on
-            the left, Telegram on the right — both in the same surface
-            colour so neither louder than the other. */}
-        <div className="px-2 pb-2 pt-1 flex flex-col gap-1.5">
-          <div className="flex items-center gap-1.5">
+        {iconified ? (
+          // Icon-only footer: GitHub + Telegram stacked. The expand
+          // toggle lives on the floating edge-pill, not down here, so
+          // users see only one toggle entry-point — no duplicate UI.
+          <div className="pt-2 pb-1 flex flex-col items-center gap-1">
             <a
               href="https://github.com/datadrivenconstruction/OpenConstructionERP"
               target="_blank"
               rel="noopener noreferrer"
-              title="GitHub repository"
+              title={`GitHub repository (v${APP_VERSION})`}
               aria-label="GitHub repository"
-              className="flex-1 flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated transition-all"
             >
               <Github size={13} strokeWidth={1.75} className="text-content-secondary" />
-              <span className="text-xs font-medium text-content-secondary">GitHub</span>
             </a>
             <a
               href="https://t.me/datadrivenconstruction"
               target="_blank"
               rel="noopener noreferrer"
-              title="Join the Telegram community"
+              title={t('sidebar.community_title', { defaultValue: 'Community' })}
               aria-label="Telegram community"
-              className="flex-1 flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated transition-all"
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-[13px] w-[13px] text-content-secondary" aria-hidden>
                 <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71l-4.14-3.06-1.99 1.93c-.23.23-.42.42-.83.42z" />
               </svg>
-              <span className="text-xs font-medium text-content-secondary">
-                {t('sidebar.community_title', { defaultValue: 'Community' })}
-              </span>
             </a>
           </div>
-          <div className="flex items-center justify-center gap-1.5 min-w-0">
-            <span className="text-2xs text-content-tertiary">v{APP_VERSION}</span>
-            <span className="text-2xs text-content-quaternary/40">·</span>
-            <a
-              href="/api/source"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-2xs text-content-tertiary hover:text-content-secondary transition-colors"
-            >
-              AGPL-3.0
-            </a>
+        ) : (
+          <div className="px-2 pb-2 pt-1 flex flex-col gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <a
+                href="https://github.com/datadrivenconstruction/OpenConstructionERP"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="GitHub repository"
+                aria-label="GitHub repository"
+                className="flex-1 flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
+              >
+                <Github size={13} strokeWidth={1.75} className="text-content-secondary" />
+                <span className="text-xs font-medium text-content-secondary">GitHub</span>
+              </a>
+              <a
+                href="https://t.me/datadrivenconstruction"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Join the Telegram community"
+                aria-label="Telegram community"
+                className="flex-1 flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" className="h-[13px] w-[13px] text-content-secondary" aria-hidden>
+                  <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71l-4.14-3.06-1.99 1.93c-.23.23-.42.42-.83.42z" />
+                </svg>
+                <span className="text-xs font-medium text-content-secondary">
+                  {t('sidebar.community_title', { defaultValue: 'Community' })}
+                </span>
+              </a>
+            </div>
+            <div className="flex items-center justify-center gap-1.5 min-w-0">
+              <span className="text-2xs text-content-tertiary">v{APP_VERSION}</span>
+              <span className="text-2xs text-content-quaternary/40">·</span>
+              <a
+                href="/api/source"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-2xs text-content-tertiary hover:text-content-secondary transition-colors"
+              >
+                AGPL-3.0
+              </a>
+            </div>
           </div>
-        </div>
+        )}
       </div>
       {/* Mounted at the aside root so the dialog escapes any
           z-index / overflow trap imposed by the inner nav scroller.
@@ -912,13 +1088,27 @@ function NavGroupSection({
   isCollapsed,
   onToggle,
   children,
+  iconified,
 }: {
   label: string;
   isCollapsed: boolean;
   onToggle: () => void;
   children: React.ReactNode;
+  iconified?: boolean;
 }) {
   const { t } = useTranslation();
+  // In icon-only mode there is no room for the group header chevron;
+  // we surface group boundaries as a thin centred hairline and keep
+  // the items always-expanded (per-group collapse is irrelevant when
+  // labels aren't visible).
+  if (iconified) {
+    return (
+      <div className="mb-1">
+        <div className="my-1.5 mx-auto h-px w-6 bg-border-light/60" aria-hidden />
+        {children}
+      </div>
+    );
+  }
   return (
     <div className="mb-0.5">
       <button
@@ -953,6 +1143,7 @@ function SidebarItem({
   isPinned,
   onTogglePin,
   activeRoute,
+  iconified,
 }: {
   item: NavItem;
   label: string;
@@ -961,6 +1152,7 @@ function SidebarItem({
   isPinned?: boolean;
   onTogglePin?: (route: string) => void;
   activeRoute?: string | null;
+  iconified?: boolean;
 }) {
   const { t } = useTranslation();
   const Icon = item.icon;
@@ -977,6 +1169,43 @@ function SidebarItem({
   // lights up (no more "/bim" + "/bim/rules" both glowing blue).
   const isActive = activeRoute === item.to;
   const hasQuery = item.to.includes('?');
+
+  // Icon-only branch — short-circuits the full row layout. Native
+  // `title` surfaces the label on hover; the active-state dot replaces
+  // the 2px accent bar (which would clip the centred icon at 48px wide).
+  if (iconified) {
+    const hasBadge =
+      (numericBadge != null && numericBadge > 0) || Boolean(item.badge);
+    return (
+      <NavLink
+        to={item.to}
+        end={item.to === '/' || hasQuery}
+        onClick={onClick}
+        title={label}
+        aria-label={label}
+        {...(item.tourId ? { 'data-tour': item.tourId } : {})}
+        className={() =>
+          clsx(
+            'relative mx-auto flex h-9 w-9 items-center justify-center rounded-md transition-colors duration-fast ease-oe',
+            isActive
+              ? 'bg-oe-blue/[0.14] text-oe-blue shadow-[inset_0_0_0_1px_rgba(0,122,255,0.18)] dark:bg-oe-blue/25'
+              : 'text-content-secondary hover:bg-surface-secondary hover:text-content-primary',
+          )
+        }
+      >
+        <Icon size={16} strokeWidth={isActive ? 2 : 1.75} />
+        {hasBadge && (
+          <span
+            className={clsx(
+              'absolute top-1 right-1 h-1.5 w-1.5 rounded-full',
+              isActive ? 'bg-oe-blue' : 'bg-semantic-error/80',
+            )}
+            aria-hidden
+          />
+        )}
+      </NavLink>
+    );
+  }
 
   return (
       <NavLink

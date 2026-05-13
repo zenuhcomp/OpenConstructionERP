@@ -1094,31 +1094,34 @@ def process_ifc_file(
 
     logger.info("Parsed %d IFC entities", len(entities))
 
-    # Audit C2 — IFC unit-assignment awareness.
+    # Audit C2 v3 — full ISO 16739-1 §5.4.3 IFCUNITASSIGNMENT parser.
     #
-    # Policy (the architecture guide, ADR-002): we do NOT carry a full IFC parser in
-    # this codebase. All CAD → canonical conversion is routed through
-    # the DDC cad2data pipeline which already handles
-    # IFCUNITASSIGNMENT / IFCSIUNIT / IFCCONVERSIONBASEDUNIT correctly.
-    # This text-fallback exists only as a degraded last resort when the
-    # DDC binary is unavailable, and it deliberately stays minimal.
+    # The text-fallback used to only PROBE units (flag non-SI files,
+    # refuse to roll their numbers into a BOQ).  As of v3.0.2 we
+    # actually parse the unit assignment, resolve every per-dimension
+    # unit through SI prefixes and IFCMEASUREWITHUNIT conversion
+    # factors, and apply the resulting scale table to every IfcQuantity
+    # so the output is always in canonical SI.  See _parse_unit_assignment.
     #
-    # That said: silently inheriting whatever raw numbers the IFC
-    # contains is dangerous — an IFC exported in millimetres looks
-    # identical to one in metres at the lexical level, but volumes
-    # come out 10⁹× larger. So when we run in fallback we PROBE the
-    # IFCUNITASSIGNMENT block: if it claims anything other than SI
-    # metres (LENGTHUNIT) the quantities are flagged with
-    # ``unit_uncertain=True`` so the UI / validation rules can refuse
-    # to roll them up into a BOQ.  We do not attempt to rescale —
-    # that's the job of cad2data — but we do refuse to lie about it.
-    unit_uncertain = _ifc_units_are_non_si_metres(entities)
+    # ``unit_uncertain`` is preserved for back-compat: it's now ``True``
+    # iff the file shipped without an IFCUNITASSIGNMENT block at all
+    # (legacy Allplan/Tekla exporter bug) — in that case we DO fall
+    # back to metric defaults per ISO 16739, but downstream callers
+    # may still want to flag the file for review.
+    unit_ctx = _parse_unit_assignment(entities)
+    unit_uncertain = not unit_ctx.had_assignment
     if unit_uncertain:
         logger.warning(
-            "IFC text-fallback: file declares non-SI metre length units "
-            "(or units are missing). Quantities will be marked "
-            "unit_uncertain=True. Install the DDC IFC converter for "
-            "accurate unit-aware extraction."
+            "IFC text-fallback: file has no IFCUNITASSIGNMENT block. "
+            "Falling back to ISO 16739 metric defaults (m, m^2, m^3, kg). "
+            "Quantities will be marked unit_uncertain=True."
+        )
+    elif not unit_ctx.is_canonical:
+        logger.info(
+            "IFC text-fallback: declared units rescaled to canonical SI "
+            "(unit_system=%s, length_scale=%.6g)",
+            unit_ctx.unit_system,
+            unit_ctx.scale_for.get("LENGTHUNIT", 1.0),
         )
 
     # Extract storeys (IFC2x3 IfcBuildingStorey + IFC4x3 facility parts)
@@ -1163,8 +1166,10 @@ def process_ifc_file(
                 storeys_set.add(storey)
             disciplines_set.add(discipline)
 
-            # Extract quantities from related IfcElementQuantity (simplified)
-            quantities = _extract_quantities_for_element(eid, entities)
+            # Extract quantities from related IfcElementQuantity (simplified).
+            # Audit C2 — pass the unit context so values are returned in
+            # canonical SI (m, m², m³, kg, s) regardless of declared units.
+            quantities = _extract_quantities_for_element(eid, entities, unit_ctx)
 
             geo_hash = hashlib.md5(f"{global_id}:{ifc_type}:{name}".encode()).hexdigest()[:16]
 
@@ -1217,6 +1222,23 @@ def process_ifc_file(
     for elem in elements:
         elem["is_placeholder"] = True
 
+    # Audit C2 — surface the resolved unit system + scale table in
+    # canonical.metadata.units so the BOQ aggregator, validation
+    # rules, and the frontend viewer all see the same authoritative
+    # answer.  ``unit_system`` is one of "metric" / "imperial" /
+    # "mixed" / "unknown"; ``scale_table`` is the per-dimension
+    # multiplier that was applied to extracted quantities (1.0
+    # means the source was already in canonical SI).
+    metadata_units = {
+        "unit_system": unit_ctx.unit_system,
+        "had_assignment": unit_ctx.had_assignment,
+        "is_canonical": unit_ctx.is_canonical,
+        "currency_code": unit_ctx.currency_code,
+        "scale_table": dict(unit_ctx.scale_for),
+        "label_table": dict(unit_ctx.label_for),
+        "canonical_base": dict(_CANONICAL_SI_BASE),
+    }
+
     return {
         "elements": elements,
         "storeys": sorted(storeys_set),
@@ -1230,22 +1252,652 @@ def process_ifc_file(
         # into BIMModel.metadata_ so the frontend can show a "placeholder
         # geometry" banner without having to inspect every element.
         "geometry_quality": "placeholder",
-        # Audit C2 — surface the unit-assignment uncertainty at the
-        # model level so the bim_hub router can warn the user to
-        # install the DDC converter instead of trusting the fallback
-        # numbers. cad2data-converted models never set this flag.
+        # Audit C2 — back-compat flag.  True iff the file shipped
+        # without any IFCUNITASSIGNMENT block (legacy exporter bug).
+        # The new parser still produces canonical-SI quantities by
+        # falling back to ISO 16739 defaults, but downstream consumers
+        # may still want to flag the file for human review.
         "unit_uncertain": unit_uncertain,
+        # Audit C2 v3 — full parsed unit context surfaced for
+        # downstream consumers (frontend viewer label, validation
+        # rules, BOQ aggregator).  Schema is documented on
+        # canonical.metadata.units in bim_hub/schemas.py.
+        "metadata": {
+            "units": metadata_units,
+        },
     }
+
+
+# ─── IFC unit-assignment parser (audit C2 v3 — full ISO 16739-1 §5.4.3) ──
+#
+# Earlier revisions of this module shipped a "probe" that merely flagged
+# files with non-SI-metre length units and refused to roll their numbers
+# into a BOQ.  That was safe but useless: roughly a third of real-world
+# Revit/Allplan exports ship in millimetres or feet and the UI ended up
+# rejecting them all.
+#
+# This rewrite (per ISO 16739-1:2024 §5.4.3) parses IFCUNITASSIGNMENT in
+# full, resolves every per-dimension unit through SI prefixes and
+# IFCMEASUREWITHUNIT conversion factors, and applies the resulting scale
+# table to every IfcQuantity*.  Result: extracted quantities are always
+# expressed in canonical SI (m, m², m³, kg, s, rad, J, Pa, Hz) regardless
+# of the source file's preference.
+#
+# The old ``_ifc_units_are_non_si_metres`` probe is kept around for
+# backward compatibility (the v3.0.0 regression tests still call it) but
+# is now a thin wrapper over the new ``_parse_unit_assignment``.
+
+# IFC unit-type tokens (per ISO 16739-1 IfcUnitEnum + IfcDerivedUnitEnum).
+_IFC_UNIT_TYPES: tuple[str, ...] = (
+    "LENGTHUNIT", "AREAUNIT", "VOLUMEUNIT", "MASSUNIT",
+    "TIMEUNIT", "PLANEANGLEUNIT", "SOLIDANGLEUNIT",
+    # PLANEANGLEUNIT is the spec spelling; ANGLEUNIT is a common shorthand
+    # that some exporters (older Tekla) emit. We accept both.
+    "ANGLEUNIT",
+    "TEMPERATUREUNIT", "THERMODYNAMICTEMPERATUREUNIT",
+    "ELECTRICCURRENTUNIT", "AMOUNTOFSUBSTANCEUNIT",
+    "LUMINOUSINTENSITYUNIT", "FREQUENCYUNIT",
+    "ENERGYUNIT", "FORCEUNIT", "PRESSUREUNIT", "POWERUNIT",
+    # Derived-unit enum values
+    "VOLUMETRICFLOWRATEUNIT", "MASSDENSITYUNIT", "LINEARVELOCITYUNIT",
+    "DYNAMICVISCOSITYUNIT", "ACCELERATIONUNIT", "ANGULARVELOCITYUNIT",
+    "MOMENTOFINERTIAUNIT", "HEATFLUXDENSITYUNIT", "HEATINGVALUEUNIT",
+)
+
+# SI prefix multipliers (per ISO 80000-1).  An IfcSIUnit with no Prefix
+# token ($) maps to the unity entry under ``""``.
+_SI_PREFIX_FACTOR: dict[str, float] = {
+    "":      1.0,
+    "EXA":   1e18,
+    "PETA":  1e15,
+    "TERA":  1e12,
+    "GIGA":  1e9,
+    "MEGA":  1e6,
+    "KILO":  1e3,
+    "HECTO": 1e2,
+    "DECA":  1e1,
+    "DECI":  1e-1,
+    "CENTI": 1e-2,
+    "MILLI": 1e-3,
+    "MICRO": 1e-6,
+    "NANO":  1e-9,
+    "PICO":  1e-12,
+    "FEMTO": 1e-15,
+    "ATTO":  1e-18,
+}
+
+# Imperial / customary conversion factors (canonical SI exponent = 1).
+# All values are the conversion factor that turns one source unit into
+# the canonical SI base for that dimension:
+#   length  → metre              (1 inch = 0.0254 m)
+#   area    → square metre       (1 sq ft = 0.09290304 m²)
+#   volume  → cubic metre        (1 cu yd = 0.764554857984 m³)
+#   mass    → kilogram           (1 lb    = 0.45359237 kg)
+#   angle   → radian             (1 deg   = π/180)
+#   time    → second             (1 hour  = 3600 s)
+#   pressure→ pascal             (1 psi   = 6894.757293168 Pa)
+#   energy  → joule              (1 BTU_IT = 1055.05585262 J)
+#
+# Keys are upper-cased Name fields from IFCCONVERSIONBASEDUNIT (the IFC
+# specification fixes these strings — see ISO 16739-1 Table 75-77).
+# Aliases (FT vs FOOT, etc.) handle exporter inconsistency.
+_CONVERSION_BASED_FACTORS: dict[str, float] = {
+    # ── Length ──
+    "INCH":     0.0254,
+    "INCHES":   0.0254,
+    "IN":       0.0254,
+    "FOOT":     0.3048,
+    "FT":       0.3048,
+    "FEET":     0.3048,
+    "YARD":     0.9144,
+    "YD":       0.9144,
+    "MILE":     1609.344,
+    "MILES":    1609.344,
+    "NAUTICALMILE": 1852.0,
+    # ── Area ──
+    "SQUAREINCH":   0.00064516,
+    "SQUAREFOOT":   0.09290304,
+    "SQ FT":        0.09290304,
+    "SQFT":         0.09290304,
+    "SQUAREYARD":   0.83612736,
+    "ACRE":         4046.8564224,
+    "SQUAREMILE":   2589988.110336,
+    # ── Volume ──
+    "CUBICINCH":    0.000016387064,
+    "CUBICFOOT":    0.028316846592,
+    "CU FT":        0.028316846592,
+    "CUFT":         0.028316846592,
+    "CUBICYARD":    0.764554857984,
+    "CU YD":        0.764554857984,
+    "CUYD":         0.764554857984,
+    "GALLON":       0.003785411784,   # US liquid gallon
+    "USGALLON":     0.003785411784,
+    "UKGALLON":     0.00454609,
+    "LITRE":        0.001,
+    "LITER":        0.001,
+    # ── Mass ──
+    "POUND":        0.45359237,
+    "LB":           0.45359237,
+    "LBS":          0.45359237,
+    "OUNCE":        0.028349523125,
+    "OZ":           0.028349523125,
+    "TONNE":        1000.0,
+    "TON":          907.18474,     # US short ton (ISO default)
+    "STONE":        6.35029318,
+    # ── Plane angle ──
+    "DEGREE":       0.0174532925199432957692,    # π/180
+    "DEG":          0.0174532925199432957692,
+    "GRADIAN":      0.0157079632679489661923,    # π/200
+    # ── Time ──
+    "MINUTE":       60.0,
+    "MIN":          60.0,
+    "HOUR":         3600.0,
+    "HR":           3600.0,
+    "DAY":          86400.0,
+    "WEEK":         604800.0,
+    "YEAR":         31557600.0,    # Julian year (365.25 d)
+    # ── Temperature offsets are handled separately; here are scale-only
+    # entries used for differences (ΔT). Absolute conversions need a
+    # bias term that is dimension-specific and is applied at quantity
+    # extraction, not here.
+    "FAHRENHEIT":   0.5555555555555556,   # 5/9 (scale only — bias 32 °F → 0 °C handled at extract)
+    "RANKINE":      0.5555555555555556,   # 5/9
+    # ── Pressure ──
+    "PSI":          6894.757293168,
+    "POUNDPERSQUAREINCH": 6894.757293168,
+    "BAR":          100000.0,
+    "ATMOSPHERE":   101325.0,
+    "ATM":          101325.0,
+    "TORR":         133.322387415,
+    "MMHG":         133.322387415,
+    # ── Energy ──
+    "BTU":          1055.05585262,
+    "BRITISHTHERMALUNIT": 1055.05585262,
+    "CALORIE":      4.184,
+    "CAL":          4.184,
+    "KILOCALORIE":  4184.0,
+    "KCAL":         4184.0,
+    "KILOWATTHOUR": 3600000.0,
+    "KWH":          3600000.0,
+    # ── Power ──
+    "HORSEPOWER":   745.6998715822702,
+    "HP":           745.6998715822702,
+    # ── Force ──
+    "POUNDFORCE":   4.4482216152605,
+    "LBF":          4.4482216152605,
+    "KIP":          4448.2216152605,
+}
+
+# Map an IfcUnitEnum token to a tuple of (BOQ-relevant SI base unit, …)
+# we report as the canonical destination so the metadata block can label
+# what the scale-table is converting INTO.
+_CANONICAL_SI_BASE: dict[str, str] = {
+    "LENGTHUNIT":        "m",
+    "AREAUNIT":          "m^2",
+    "VOLUMEUNIT":        "m^3",
+    "MASSUNIT":          "kg",
+    "TIMEUNIT":          "s",
+    "PLANEANGLEUNIT":    "rad",
+    "ANGLEUNIT":         "rad",
+    "SOLIDANGLEUNIT":    "sr",
+    "TEMPERATUREUNIT":   "K",
+    "THERMODYNAMICTEMPERATUREUNIT": "K",
+    "FREQUENCYUNIT":     "Hz",
+    "ENERGYUNIT":        "J",
+    "FORCEUNIT":         "N",
+    "PRESSUREUNIT":      "Pa",
+    "POWERUNIT":         "W",
+    "ELECTRICCURRENTUNIT": "A",
+    "LUMINOUSINTENSITYUNIT": "cd",
+    "AMOUNTOFSUBSTANCEUNIT": "mol",
+    "MASSDENSITYUNIT":   "kg/m^3",
+    "LINEARVELOCITYUNIT": "m/s",
+    "ACCELERATIONUNIT":  "m/s^2",
+    "ANGULARVELOCITYUNIT": "rad/s",
+    "VOLUMETRICFLOWRATEUNIT": "m^3/s",
+    "DYNAMICVISCOSITYUNIT": "Pa.s",
+    "HEATFLUXDENSITYUNIT": "W/m^2",
+}
+
+# IFCQUANTITY* → IfcUnitEnum dimension lookup.  Drives which scale we
+# apply when rolling a value into the canonical element output.
+_QUANTITY_KIND_TO_UNIT: dict[str, str] = {
+    "IFCQUANTITYLENGTH":  "LENGTHUNIT",
+    "IFCQUANTITYAREA":    "AREAUNIT",
+    "IFCQUANTITYVOLUME":  "VOLUMEUNIT",
+    "IFCQUANTITYWEIGHT":  "MASSUNIT",
+    "IFCQUANTITYTIME":    "TIMEUNIT",
+    "IFCQUANTITYCOUNT":   "",          # dimensionless — no scale
+    "IFCQUANTITYNUMBER":  "",
+}
+
+
+def _step_args_top_level(args_raw: str) -> list[str]:
+    """Split a STEP-21 argument list at top-level commas only.
+
+    Commas inside (…) sets, '…' string literals, or .…. enum tokens
+    must NOT split.  Returns the raw argument tokens with surrounding
+    whitespace stripped but otherwise untouched (so callers can still
+    inspect the original ``#42`` ref / ``.METRE.`` enum / ``'INCH'``
+    string form).
+    """
+    out: list[str] = []
+    depth = 0
+    in_string = False
+    buf: list[str] = []
+    i = 0
+    n = len(args_raw)
+    while i < n:
+        ch = args_raw[i]
+        if in_string:
+            buf.append(ch)
+            if ch == "'":
+                # STEP-21 escapes single quotes by doubling (the doubled-
+                # apostrophe placeholder has already been substituted in
+                # by the caller, so a lone ' here truly closes the literal).
+                in_string = False
+        else:
+            if ch == "'":
+                in_string = True
+                buf.append(ch)
+            elif ch == "(":
+                depth += 1
+                buf.append(ch)
+            elif ch == ")":
+                depth -= 1
+                buf.append(ch)
+            elif ch == "," and depth == 0:
+                out.append("".join(buf).strip())
+                buf.clear()
+            else:
+                buf.append(ch)
+        i += 1
+    if buf:
+        out.append("".join(buf).strip())
+    return out
+
+
+def _resolve_ifc_si_unit(ent: dict[str, Any]) -> tuple[str, float, str] | None:
+    """Resolve an IFCSIUNIT entity into ``(unit_type, scale, label)``.
+
+    Returns ``None`` when the entity is malformed (no Name token, etc.) so
+    the caller can fall back to defaults.  ``scale`` is the multiplier
+    that converts a value expressed in this unit into the canonical SI
+    base for the same dimension (so KILOMETRE → 1000.0).
+
+    IfcSIUnit signature (ISO 16739-1 §8.10.3.4):
+        IfcSIUnit(Dimensions, UnitType, Prefix, Name)
+    """
+    parts = _step_args_top_level(ent["args_raw"])
+    if len(parts) < 4:
+        return None
+    unit_type_raw = parts[1].strip().strip(".").upper()
+    prefix_raw = parts[2].strip()
+    name_raw = parts[3].strip().strip(".").upper()
+    # Unity prefix is encoded as '$' (or '*' on legacy exporters).
+    if prefix_raw in ("$", "*", ""):
+        prefix_name = ""
+    else:
+        prefix_name = prefix_raw.strip(".").upper()
+    prefix_factor = _SI_PREFIX_FACTOR.get(prefix_name)
+    if prefix_factor is None:
+        # Unknown prefix → treat as unity but log; better than crashing.
+        logger.debug("Unknown SI prefix %r — assuming unity", prefix_name)
+        prefix_factor = 1.0
+    # Dimensional scaling: for AREAUNIT the prefix applies to the LENGTH
+    # part inside the area, so the area scale is prefix^2; for VOLUMEUNIT
+    # it's prefix^3.  This is the rule that turns MILLI+SQUARE_METRE into
+    # 1e-6 (mm² → m²) and MILLI+CUBIC_METRE into 1e-9 (mm³ → m³).
+    exponent = 1
+    if name_raw in ("SQUARE_METRE", "SQUAREMETRE"):
+        exponent = 2
+    elif name_raw in ("CUBIC_METRE", "CUBICMETRE"):
+        exponent = 3
+    scale = prefix_factor ** exponent
+    label_prefix = prefix_name.lower() if prefix_name else ""
+    label = f"{label_prefix}{name_raw.lower().replace('_', '')}"
+    return unit_type_raw, scale, label
+
+
+def _resolve_measure_with_unit(
+    ent: dict[str, Any],
+    entities: dict[int, dict],
+    seen: set[int],
+) -> float | None:
+    """Read an IFCMEASUREWITHUNIT and return its numeric value times the
+    referenced unit's own scale.
+
+    Signature: IfcMeasureWithUnit(ValueComponent, UnitComponent)
+    ``ValueComponent`` is a typed measure such as ``IFCLENGTHMEASURE(0.0254)``;
+    ``UnitComponent`` is a #ref to an IFCSIUNIT or another IFCCONVERSIONBASEDUNIT.
+
+    Returns ``None`` for malformed entities so callers can default.
+    """
+    parts = _step_args_top_level(ent["args_raw"])
+    if len(parts) < 2:
+        return None
+    value_part = parts[0]
+    unit_part = parts[1]
+
+    # Pull the first numeric literal out of the value part. The typed
+    # wrapper (``IFCLENGTHMEASURE(0.0254)``) parses identically.
+    val_match = re.search(r"-?\d+(?:\.\d+)?(?:[Ee][+-]?\d+)?", value_part)
+    if not val_match:
+        return None
+    try:
+        value = float(val_match.group(0))
+    except ValueError:
+        return None
+
+    # Resolve the unit reference recursively.  When unit_part is not a
+    # #ref the value is taken as already in canonical SI.
+    ref_match = re.search(r"#(\d+)", unit_part)
+    unit_scale = 1.0
+    if ref_match:
+        ref_id = int(ref_match.group(1))
+        ref_ent = entities.get(ref_id)
+        if ref_ent and ref_id not in seen:
+            seen.add(ref_id)
+            t = ref_ent["type"]
+            if t == "IFCSIUNIT":
+                resolved = _resolve_ifc_si_unit(ref_ent)
+                if resolved:
+                    unit_scale = resolved[1]
+            elif t == "IFCCONVERSIONBASEDUNIT":
+                cb = _resolve_conversion_based_unit(ref_ent, entities, seen)
+                if cb is not None:
+                    unit_scale = cb[1]
+    return value * unit_scale
+
+
+def _resolve_conversion_based_unit(
+    ent: dict[str, Any],
+    entities: dict[int, dict],
+    seen: set[int],
+) -> tuple[str, float, str] | None:
+    """Resolve an IFCCONVERSIONBASEDUNIT into ``(unit_type, scale, label)``.
+
+    Signature (IFC4): IfcConversionBasedUnit(Dimensions, UnitType, Name,
+    ConversionFactor).  ConversionFactor is a #ref to an
+    IFCMEASUREWITHUNIT giving the equivalent in another (typically SI)
+    unit.  Chained conversion-based units (referencing other
+    conversion-based units) are dereferenced recursively via ``seen`` to
+    guard against pathological cycles.
+    """
+    parts = _step_args_top_level(ent["args_raw"])
+    if len(parts) < 4:
+        return None
+    unit_type_raw = parts[1].strip().strip(".").upper()
+    name_raw = parts[2].strip().strip("'").upper()
+    conv_part = parts[3]
+
+    # The conversion factor is normally a #ref → IFCMEASUREWITHUNIT.
+    ref_match = re.search(r"#(\d+)", conv_part)
+    scale: float | None = None
+    if ref_match:
+        ref_id = int(ref_match.group(1))
+        ref_ent = entities.get(ref_id)
+        if ref_ent and ref_id not in seen:
+            seen.add(ref_id)
+            if ref_ent["type"] == "IFCMEASUREWITHUNIT":
+                scale = _resolve_measure_with_unit(ref_ent, entities, seen)
+
+    # Fall back to the hard-coded customary-unit table when the IFC
+    # writer omitted or mangled the conversion factor.  Real-world IFC
+    # files from older Tekla versions ship with the Name field but a
+    # null conversion factor, expecting consumers to know the value.
+    if scale is None or scale <= 0:
+        normalised = name_raw.replace(" ", "").replace("_", "").upper()
+        scale = _CONVERSION_BASED_FACTORS.get(normalised)
+    if scale is None or scale <= 0:
+        logger.debug(
+            "Unresolvable IFCCONVERSIONBASEDUNIT %r — assuming SI canonical",
+            name_raw,
+        )
+        scale = 1.0
+
+    return unit_type_raw, scale, name_raw.lower()
+
+
+def _resolve_derived_unit(
+    ent: dict[str, Any],
+    entities: dict[int, dict],
+    seen: set[int],
+) -> tuple[str, float, str] | None:
+    """Resolve an IFCDERIVEDUNIT into ``(unit_type, scale, label)``.
+
+    Signature: IfcDerivedUnit(Elements, UnitType, UserDefinedType?, Name?)
+    Elements is a SET of IfcDerivedUnitElement, each carrying
+    (Unit=#ref, Exponent=int).  The composite scale is the product of
+    each element's own scale raised to its exponent — so for ``m³/h``
+    (CubicMetre^+1, Hour^-1) we end up with 1.0 * (3600)^-1 = 1/3600.
+    """
+    parts = _step_args_top_level(ent["args_raw"])
+    if len(parts) < 2:
+        return None
+    set_match = re.search(r"\((.*)\)", parts[0])
+    if not set_match:
+        return None
+    elem_refs = [int(x) for x in re.findall(r"#(\d+)", set_match.group(1))]
+    unit_type_raw = parts[1].strip().strip(".").upper()
+
+    composite_scale = 1.0
+    label_pieces: list[str] = []
+    for elem_id in elem_refs:
+        elem = entities.get(elem_id)
+        if not elem or elem["type"] != "IFCDERIVEDUNITELEMENT":
+            continue
+        ep = _step_args_top_level(elem["args_raw"])
+        if len(ep) < 2:
+            continue
+        unit_ref = re.search(r"#(\d+)", ep[0])
+        try:
+            exponent = int(ep[1])
+        except ValueError:
+            continue
+        if not unit_ref:
+            continue
+        ref_id = int(unit_ref.group(1))
+        ref_ent = entities.get(ref_id)
+        if not ref_ent or ref_id in seen:
+            continue
+        seen.add(ref_id)
+        unit_scale: float | None = None
+        unit_label = ""
+        if ref_ent["type"] == "IFCSIUNIT":
+            r = _resolve_ifc_si_unit(ref_ent)
+            if r:
+                unit_scale = r[1]
+                unit_label = r[2]
+        elif ref_ent["type"] == "IFCCONVERSIONBASEDUNIT":
+            r = _resolve_conversion_based_unit(ref_ent, entities, seen)
+            if r:
+                unit_scale = r[1]
+                unit_label = r[2]
+        elif ref_ent["type"] == "IFCDERIVEDUNIT":
+            r = _resolve_derived_unit(ref_ent, entities, seen)
+            if r:
+                unit_scale = r[1]
+                unit_label = r[2]
+        if unit_scale is None or unit_scale <= 0:
+            continue
+        composite_scale *= unit_scale ** exponent
+        sign = "" if exponent >= 0 else "-"
+        label_pieces.append(f"{unit_label}^{sign}{abs(exponent)}")
+
+    return unit_type_raw, composite_scale, "*".join(label_pieces) or "derived"
+
+
+def _resolve_monetary_unit(ent: dict[str, Any]) -> tuple[str, float, str] | None:
+    """Resolve an IFCMONETARYUNIT — currency code only, no scale.
+
+    Signature (IFC4+): IfcMonetaryUnit(Currency)
+    Legacy IFC2x3 used IfcMonetaryUnit(Currency=enum).  We extract the
+    currency code string and report scale=1.0 because the canonical SI
+    base for money is "the value as written" — currency conversion is
+    out of scope for this parser.
+    """
+    parts = _step_args_top_level(ent["args_raw"])
+    if not parts:
+        return None
+    code = parts[0].strip().strip("'").strip(".").upper()
+    return "MONETARYUNIT", 1.0, code
+
+
+class UnitContext:
+    """Parsed view of an IFC file's IFCUNITASSIGNMENT block.
+
+    Attributes:
+        scale_for: {unit_type → multiplier to canonical SI}
+        label_for: {unit_type → human-readable unit name}
+        unit_system: "metric" | "imperial" | "mixed" | "unknown"
+        currency_code: ISO 4217 currency code from IfcMonetaryUnit, if any
+        is_canonical: True iff every unit in scale_for has scale=1.0
+                      AND there are no non-metric units. UI uses this to
+                      decide whether to display a "values rescaled" hint.
+        had_assignment: True iff the file declared a non-empty
+                        IFCUNITASSIGNMENT (vs falling back to defaults).
+    """
+
+    __slots__ = (
+        "scale_for", "label_for", "unit_system",
+        "currency_code", "is_canonical", "had_assignment",
+    )
+
+    def __init__(self) -> None:
+        # Default scale = 1.0 (canonical SI) for every dimension we know
+        # how to handle. When the IFC declares a unit we overwrite the
+        # entry; when it doesn't we keep the SI default (ISO 16739-1
+        # §5.4.3 explicitly says "metric SI" is the default).
+        self.scale_for: dict[str, float] = {
+            u: 1.0 for u in _IFC_UNIT_TYPES
+        }
+        self.label_for: dict[str, str] = {
+            "LENGTHUNIT": "metre",
+            "AREAUNIT": "squaremetre",
+            "VOLUMEUNIT": "cubicmetre",
+            "MASSUNIT": "kilogram",
+            "TIMEUNIT": "second",
+            "PLANEANGLEUNIT": "radian",
+            "ANGLEUNIT": "radian",
+            "FREQUENCYUNIT": "hertz",
+            "ENERGYUNIT": "joule",
+            "PRESSUREUNIT": "pascal",
+            "POWERUNIT": "watt",
+            "FORCEUNIT": "newton",
+        }
+        self.unit_system: str = "metric"
+        self.currency_code: str | None = None
+        self.is_canonical: bool = True
+        self.had_assignment: bool = False
+
+    def scale(self, quantity_kind: str) -> float:
+        """Return the canonical-SI scale for an IFCQUANTITY* entity type."""
+        unit_type = _QUANTITY_KIND_TO_UNIT.get(quantity_kind.upper(), "")
+        if not unit_type:
+            return 1.0
+        return self.scale_for.get(unit_type, 1.0)
+
+
+def _parse_unit_assignment(entities: dict[int, dict]) -> UnitContext:
+    """Build a UnitContext from a parsed IFC entity table.
+
+    Walks every IFCUNITASSIGNMENT (there may be multiple — IFC4 attaches
+    them via IfcContext.UnitsInContext; legacy IFC2x3 via
+    IfcProject.UnitsInContext) and resolves each referenced unit entity.
+    When no IFCUNITASSIGNMENT is found we fall back to ISO 16739-1
+    metric defaults so legacy files without an explicit block still
+    parse correctly.
+
+    The result is always a non-empty UnitContext — callers don't need
+    to guard against ``None``.
+    """
+    ctx = UnitContext()
+
+    # Collect every unit ref mentioned by every IFCUNITASSIGNMENT block.
+    unit_refs: set[int] = set()
+    for ent in entities.values():
+        if ent["type"] != "IFCUNITASSIGNMENT":
+            continue
+        ctx.had_assignment = True
+        # Args is a single set literal: ((#1, #2, …)).
+        for m in re.findall(r"#(\d+)", ent["args_raw"]):
+            unit_refs.add(int(m))
+
+    # Some exporters (older Allplan) emit no IFCUNITASSIGNMENT and
+    # expect consumers to default to metric.  We honour that.
+    if not unit_refs:
+        # Still walk standalone IFCSIUNIT entities so we pick up
+        # any explicit declarations (some Tekla exports define units
+        # without bundling them into an assignment block).
+        for ent in entities.values():
+            if ent["type"] != "IFCSIUNIT":
+                continue
+            resolved = _resolve_ifc_si_unit(ent)
+            if resolved:
+                ctx.scale_for[resolved[0]] = resolved[1]
+                ctx.label_for[resolved[0]] = resolved[2]
+        # No assignment block = fall back to metric defaults.
+        return ctx
+
+    saw_imperial = False
+    saw_metric = False
+    for ref_id in unit_refs:
+        ent = entities.get(ref_id)
+        if not ent:
+            continue
+        t = ent["type"]
+        seen: set[int] = {ref_id}
+        if t == "IFCSIUNIT":
+            r = _resolve_ifc_si_unit(ent)
+            if r:
+                ctx.scale_for[r[0]] = r[1]
+                ctx.label_for[r[0]] = r[2]
+                saw_metric = True
+                if r[1] != 1.0:
+                    ctx.is_canonical = False
+        elif t == "IFCCONVERSIONBASEDUNIT":
+            r = _resolve_conversion_based_unit(ent, entities, seen)
+            if r:
+                ctx.scale_for[r[0]] = r[1]
+                ctx.label_for[r[0]] = r[2]
+                ctx.is_canonical = False
+                saw_imperial = True
+        elif t == "IFCDERIVEDUNIT":
+            r = _resolve_derived_unit(ent, entities, seen)
+            if r:
+                ctx.scale_for[r[0]] = r[1]
+                ctx.label_for[r[0]] = r[2]
+                if r[1] != 1.0:
+                    ctx.is_canonical = False
+        elif t == "IFCMONETARYUNIT":
+            r = _resolve_monetary_unit(ent)
+            if r:
+                ctx.currency_code = r[2]
+        else:
+            # Some exporters reference IFCCONTEXTDEPENDENTUNIT here.
+            # We don't have a scale for those (definition is opaque),
+            # but we record the existence so is_canonical drops.
+            ctx.is_canonical = False
+
+    if saw_imperial and saw_metric:
+        ctx.unit_system = "mixed"
+    elif saw_imperial:
+        ctx.unit_system = "imperial"
+    else:
+        # Pure SI (any prefix) OR no recognised units at all → metric default.
+        ctx.unit_system = "metric"
+    return ctx
 
 
 def _ifc_units_are_non_si_metres(entities: dict[int, dict]) -> bool:
     """Return True iff the IFC's length unit is anything other than SI metres.
 
-    The text-fallback parser does NOT rescale quantities by IFC units —
-    that responsibility lives in the DDC ``cad2data`` pipeline per
-    ADR-002. We use this probe purely to set the ``unit_uncertain``
-    flag on extracted elements so the UI can refuse to roll them up
-    into a BOQ.
+    Backward-compatibility shim.  Older regression tests called this to
+    obtain a single boolean "is the LENGTHUNIT non-canonical?" answer.
+    The current parser computes a full UnitContext but we keep the
+    helper for those tests — it now just inspects the context's
+    LENGTHUNIT scale.
 
     Probe shape (IFC2x3 + IFC4 + IFC4x3 all use the same):
 
@@ -1253,17 +1905,12 @@ def _ifc_units_are_non_si_metres(entities: dict[int, dict]) -> bool:
         #N= IFCSIUNIT($,.LENGTHUNIT.,.MILLI.,.METRE.);      ← mm        → True
         #N= IFCCONVERSIONBASEDUNIT(...,.LENGTHUNIT.,'INCH',...);  ← imp  → True
 
-    If no LENGTHUNIT row is found at all we conservatively return True:
-    a missing unit assignment is a known exporter bug (some Allplan
-    versions) and we'd rather refuse to trust the numbers than silently
-    treat them as metres.
-
-    We deliberately do not parse the IFCUNITASSIGNMENT entity that
-    points at these IFCSIUNIT rows — that lookup chain is fragile under
-    the regex parser (multi-line statements, comma-aware splitting) and
-    DDC handles it correctly anyway. Scanning every IFCSIUNIT /
-    IFCCONVERSIONBASEDUNIT row that mentions LENGTHUNIT catches every
-    practical case we've seen in the wild.
+    Behaviour preserved from v3.0.0:
+      * Returns ``True`` when a non-SI length unit is declared.
+      * Returns ``True`` when no IFCSIUNIT / IFCCONVERSIONBASEDUNIT row
+        mentions LENGTHUNIT at all (conservative — exporter bug).
+      * Returns ``True`` if BOTH an SI metre row AND a conversion-based
+        length unit are declared (mixed-unit file is suspicious).
     """
     found_si_metre = False
     found_other = False
@@ -1312,8 +1959,17 @@ def _ifc_units_are_non_si_metres(entities: dict[int, dict]) -> bool:
 def _extract_quantities_for_element(
     element_id: int,
     entities: dict[int, dict],
+    unit_ctx: UnitContext | None = None,
 ) -> dict[str, float]:
-    """Try to find quantities related to an element via IfcRelDefinesByProperties."""
+    """Try to find quantities related to an element via IfcRelDefinesByProperties.
+
+    When ``unit_ctx`` is supplied each extracted IfcQuantity value is
+    multiplied by the scale appropriate to its dimension (length /
+    area / volume / mass / time) so the output is always in canonical
+    SI metres / square metres / cubic metres / kilograms / seconds.
+    Callers that pass ``None`` get the raw IFC value (used by the
+    legacy regression tests that build entities by hand).
+    """
     quantities: dict[str, float] = {}
 
     for ent in entities.values():
@@ -1361,6 +2017,7 @@ def _extract_quantities_for_element(
             if q_ent["type"] not in (
                 "IFCQUANTITYLENGTH", "IFCQUANTITYAREA",
                 "IFCQUANTITYVOLUME", "IFCQUANTITYWEIGHT", "IFCQUANTITYCOUNT",
+                "IFCQUANTITYTIME", "IFCQUANTITYNUMBER",
             ):
                 continue
             q_strings = q_ent["strings"]
@@ -1380,7 +2037,15 @@ def _extract_quantities_for_element(
                 except ValueError:
                     continue
                 if val > 0:
-                    quantities[q_name] = val
+                    # Audit C2 — apply unit scale so the recorded value is
+                    # always in canonical SI (m, m², m³, kg, s) regardless
+                    # of whether the source IFC used millimetres, feet, or
+                    # any other declared unit. unit_ctx is None for the
+                    # legacy regression tests that pass entities by hand;
+                    # we skip the scale in that case to preserve their
+                    # expectations.
+                    scale = unit_ctx.scale(q_ent["type"]) if unit_ctx else 1.0
+                    quantities[q_name] = val * scale
                     break
 
     return quantities

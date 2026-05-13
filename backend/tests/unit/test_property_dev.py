@@ -715,3 +715,88 @@ async def test_warranty_invalid_transition_raises() -> None:
     with pytest.raises(HTTPException) as exc:
         await svc.warranty_accept(claim.id)
     assert exc.value.status_code == 409
+
+
+# ── Residual development appraisal (RICS Red Book) ──────────────────────
+
+
+def test_residual_appraisal_viable_project() -> None:
+    """A standard residential development with healthy margins."""
+    from app.modules.property_dev.service import compute_residual_appraisal
+
+    out = compute_residual_appraisal(
+        gross_development_value=Decimal("10000000"),
+        construction_cost=Decimal("6000000"),
+        professional_fees_pct=Decimal("10"),
+        finance_cost=Decimal("200000"),
+        sales_costs_pct=Decimal("3"),
+        developer_profit_target_pct=Decimal("20"),
+        contingency_pct=Decimal("5"),
+    )
+    # Professional fees = 6m * 10% = 600k; contingency = 6m * 5% = 300k.
+    assert out["professional_fees"] == Decimal("600000.00")
+    assert out["contingency"] == Decimal("300000.00")
+    # Sales 3% of 10m = 300k; profit 20% of 10m = 2m.
+    assert out["sales_costs"] == Decimal("300000.00")
+    assert out["developer_profit"] == Decimal("2000000.00")
+    # Residual = 10m − (6m + 600k + 300k + 200k + 300k + 2m) = 600k.
+    assert out["residual_land_value"] == Decimal("600000.00")
+    assert out["viable"] is True
+    assert "RICS" in out["method"]
+
+
+def test_residual_appraisal_unviable_when_cost_exceeds_gdv() -> None:
+    from app.modules.property_dev.service import compute_residual_appraisal
+
+    out = compute_residual_appraisal(
+        gross_development_value=Decimal("5000000"),
+        construction_cost=Decimal("6000000"),
+        professional_fees_pct=Decimal("12"),
+        developer_profit_target_pct=Decimal("20"),
+        contingency_pct=Decimal("5"),
+    )
+    assert out["residual_land_value"] < 0
+    assert out["viable"] is False
+
+
+def test_residual_appraisal_profit_metrics() -> None:
+    from app.modules.property_dev.service import compute_residual_appraisal
+
+    out = compute_residual_appraisal(
+        gross_development_value=Decimal("1000000"),
+        construction_cost=Decimal("500000"),
+        professional_fees_pct=Decimal("0"),
+        finance_cost=Decimal("0"),
+        sales_costs_pct=Decimal("0"),
+        developer_profit_target_pct=Decimal("20"),
+        contingency_pct=Decimal("0"),
+    )
+    # Profit 200k vs total dev cost 500k → 40% on cost; 20% on GDV.
+    assert out["profit_on_cost"] == Decimal("0.4000")
+    assert out["profit_on_gdv"] == Decimal("0.2000")
+
+
+def test_sales_velocity_typical_pace() -> None:
+    from app.modules.property_dev.service import compute_sales_velocity
+
+    out = compute_sales_velocity(sold_units=12, total_units=48, months_on_market=4)
+    # 12 / 4 = 3 units / month; 36 remaining → 12 months to sellout.
+    assert out["velocity_units_per_month"] == Decimal("3.00")
+    assert out["absorption_pct"] == Decimal("25.00")
+    assert out["months_to_sellout"] == Decimal("12.0")
+
+
+def test_sales_velocity_zero_months_safe() -> None:
+    from app.modules.property_dev.service import compute_sales_velocity
+
+    out = compute_sales_velocity(sold_units=0, total_units=20, months_on_market=0)
+    assert out["velocity_units_per_month"] == Decimal("0")
+    assert out["months_to_sellout"] is None
+
+
+def test_sales_velocity_complete_sellout() -> None:
+    from app.modules.property_dev.service import compute_sales_velocity
+
+    out = compute_sales_velocity(sold_units=20, total_units=20, months_on_market=10)
+    assert out["absorption_pct"] == Decimal("100.00")
+    assert out["months_to_sellout"] == Decimal("0")

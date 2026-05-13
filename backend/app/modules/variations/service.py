@@ -480,6 +480,146 @@ def compute_disruption_lost_hours(
     )
 
 
+# ── FIDIC 20.1 time-bar (Red/Yellow/Silver 2017) ──────────────────────────
+
+
+def check_fidic_time_bar(
+    event_occurred_at: dt_date | str,
+    notice_issued_at: dt_date | str | None,
+    *,
+    notice_window_days: int = 28,
+) -> dict[str, Any]:
+    """Check whether a contractor's notice was issued within the time-bar.
+
+    FIDIC 2017 Sub-Clause 20.2.1 — the Contractor shall give Notice within
+    28 days after they became aware (or should have become aware) of the
+    event giving rise to a claim. Failure to issue notice in time bars
+    the claim ("time-bar effect"), subject to Sub-Clause 20.2.4 exceptions.
+
+    Args:
+        event_occurred_at: date / ISO string when the event arose.
+        notice_issued_at: date / ISO string when notice was sent (None =
+            not yet sent → still computes days remaining).
+        notice_window_days: bar window in days (default 28 per Cl. 20.2.1).
+
+    Returns:
+        ``{"days_elapsed": int, "deadline_at": str, "within_time_bar": bool,
+        "days_remaining": int | None}``. ``days_remaining`` is None when
+        the notice has been issued (no longer relevant).
+
+    Pure: no I/O.
+    """
+    from datetime import timedelta as _td
+
+    def _coerce(v: Any) -> dt_date | None:
+        if v is None:
+            return None
+        if isinstance(v, dt_date):
+            return v
+        try:
+            return dt_date.fromisoformat(str(v)[:10])
+        except (ValueError, TypeError):
+            return None
+
+    event_d = _coerce(event_occurred_at)
+    notice_d = _coerce(notice_issued_at)
+    if event_d is None:
+        return {
+            "days_elapsed": 0,
+            "deadline_at": "",
+            "within_time_bar": True,
+            "days_remaining": notice_window_days,
+        }
+    deadline = event_d + _td(days=notice_window_days)
+    if notice_d is not None:
+        elapsed = (notice_d - event_d).days
+        within = notice_d <= deadline
+        return {
+            "days_elapsed": elapsed,
+            "deadline_at": deadline.isoformat(),
+            "within_time_bar": within,
+            "days_remaining": None,
+        }
+    today = dt_date.today()
+    elapsed = (today - event_d).days
+    remaining = (deadline - today).days
+    return {
+        "days_elapsed": elapsed,
+        "deadline_at": deadline.isoformat(),
+        "within_time_bar": today <= deadline,
+        "days_remaining": remaining,
+    }
+
+
+# ── Schedule-of-rates re-rating (±15% quantity variance trigger) ──────────
+
+
+def recommend_rerate(
+    boq_quantity: Decimal | float | int | str,
+    actual_quantity: Decimal | float | int | str,
+    *,
+    threshold_pct: Decimal | float | int | str = Decimal("15"),
+) -> dict[str, Any]:
+    """Decide whether the re-rating of a BoQ item is justified.
+
+    The 15% rule of thumb comes from JCT SBC Cl 5.6.1.3 and NEC4 Cl 60.4 /
+    60.6 — when the actual quantity differs from the BoQ quantity by more
+    than ±threshold_pct, the rate may be re-negotiated to reflect a
+    different unit-cost.
+
+    Args:
+        boq_quantity: tendered / contracted quantity.
+        actual_quantity: measured / executed quantity.
+        threshold_pct: percentage trigger (default 15 per JCT 5.6.1.3).
+
+    Returns:
+        ``{"variance_pct": Decimal, "rerate_required": bool,
+        "direction": "increase" | "decrease" | "none", "reason": str}``.
+
+    Pure: no I/O.
+    """
+    bq = _to_decimal(boq_quantity)
+    aq = _to_decimal(actual_quantity)
+    thr = _to_decimal(threshold_pct)
+    if bq == 0:
+        # Division by zero — treat as 100% variance if actual > 0.
+        if aq > 0:
+            return {
+                "variance_pct": Decimal("100.00"),
+                "rerate_required": True,
+                "direction": "increase",
+                "reason": "BoQ quantity was zero — rate must be agreed",
+            }
+        return {
+            "variance_pct": Decimal("0.00"),
+            "rerate_required": False,
+            "direction": "none",
+            "reason": "Both quantities are zero",
+        }
+    variance = ((aq - bq) / bq) * Decimal("100")
+    abs_var = abs(variance)
+    rerate = abs_var > thr
+    if not rerate:
+        direction = "none"
+    elif variance > 0:
+        direction = "increase"
+    else:
+        direction = "decrease"
+    reason = (
+        f"Quantity variance {variance.quantize(Decimal('0.01'))}% exceeds "
+        f"±{thr}% threshold — re-rating recommended"
+        if rerate
+        else f"Quantity variance {variance.quantize(Decimal('0.01'))}% "
+        f"within ±{thr}% threshold — contract rate stands"
+    )
+    return {
+        "variance_pct": variance.quantize(Decimal("0.01")),
+        "rerate_required": rerate,
+        "direction": direction,
+        "reason": reason,
+    }
+
+
 # ── Async event helper ─────────────────────────────────────────────────────
 
 

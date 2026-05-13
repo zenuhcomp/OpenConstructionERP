@@ -15,6 +15,42 @@ from pydantic import BaseModel, ConfigDict, Field
 # ── BIMModel schemas ─────────────────────────────────────────────────────────
 
 
+class BIMUnitsMetadata(BaseModel):
+    """Resolved IFCUNITASSIGNMENT for a converted BIM model.
+
+    Populated by the IFC text-fallback parser
+    (``bim_hub/ifc_processor.py::_parse_unit_assignment``) per ISO
+    16739-1:2024 §5.4.3 and copied into ``BIMModel.metadata_['units']``
+    by the bim_hub router.  Surfaces the unit system the IFC was
+    authored in PLUS the scale table that was applied to convert
+    extracted quantities into canonical SI (metres, m², m³, kg, s).
+
+    Quantities stored on ``BIMElement.quantities`` are always already
+    in canonical SI — this block exists so the frontend viewer can
+    display the SOURCE unit label ("12.5 mm originally → 0.0125 m"),
+    validation rules can branch on imperial vs metric authoring, and
+    the BOQ aggregator can detect mixed-system projects.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    # ``metric`` | ``imperial`` | ``mixed`` | ``unknown``
+    unit_system: str = "metric"
+    # True iff the IFC declared an IFCUNITASSIGNMENT block.  False
+    # means the parser fell back to ISO 16739 metric defaults.
+    had_assignment: bool = False
+    # True iff every declared unit has scale 1.0 (canonical SI).
+    is_canonical: bool = True
+    # ISO 4217 currency code resolved from IfcMonetaryUnit, if any.
+    currency_code: str | None = None
+    # {IfcUnitEnum → scale multiplier applied to source values}
+    scale_table: dict[str, float] = Field(default_factory=dict)
+    # {IfcUnitEnum → human-readable unit name as resolved}
+    label_table: dict[str, str] = Field(default_factory=dict)
+    # {IfcUnitEnum → canonical SI base symbol (e.g. "m", "m^2")}
+    canonical_base: dict[str, str] = Field(default_factory=dict)
+
+
 class BIMModelCreate(BaseModel):
     """‌⁠‍Create a new BIM model record."""
 
@@ -31,6 +67,8 @@ class BIMModelCreate(BaseModel):
     original_file_id: str | None = Field(default=None, max_length=36)
     canonical_file_path: str | None = Field(default=None, max_length=500)
     parent_model_id: UUID | None = None
+    # The ``metadata`` blob accepts an optional ``units`` sub-key
+    # following the ``BIMUnitsMetadata`` schema above — see audit C2.
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

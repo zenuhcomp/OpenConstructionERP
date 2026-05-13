@@ -24,6 +24,9 @@ import {
   EmptyState,
   Breadcrumb,
   SkeletonTable,
+  WideModal,
+  WideModalSection,
+  WideModalField,
 } from '@/shared/ui';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
@@ -112,8 +115,6 @@ const AUDIT_STATUS_VARIANT: Record<string, 'neutral' | 'blue' | 'success' | 'war
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
-
-const labelCls = 'block text-xs font-medium text-content-secondary mb-1';
 
 export function QMSPage() {
   const { t } = useTranslation();
@@ -1223,290 +1224,250 @@ function CreateModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">{tabCreateLabel(kind, t)}</h2>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-surface-secondary">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {kind === 'itp' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('qms.name', { defaultValue: 'Name' })} *</label>
-                <input value={itpForm.name} onChange={(e) => setItpForm({ ...itpForm, name: e.target.value })} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>{t('qms.work_type', { defaultValue: 'Work type' })} *</label>
-                <input
-                  value={itpForm.work_type}
-                  onChange={(e) => setItpForm({ ...itpForm, work_type: e.target.value })}
-                  className={inputCls}
-                  placeholder="concrete / mep / finishes / …"
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('qms.wbs', { defaultValue: 'WBS ref' })}</label>
-                <input value={itpForm.wbs_ref} onChange={(e) => setItpForm({ ...itpForm, wbs_ref: e.target.value })} className={inputCls} />
-              </div>
-            </>
-          )}
-
-          {kind === 'inspections' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('qms.itp_item', { defaultValue: 'ITP control point (optional)' })}</label>
-                <select
-                  value={inspForm.itp_item_id}
-                  onChange={(e) => setInspForm({ ...inspForm, itp_item_id: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">—</option>
-                  {itpPlans.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>{t('qms.location', { defaultValue: 'Location' })}</label>
-                <input
-                  value={inspForm.location_ref}
-                  onChange={(e) => setInspForm({ ...inspForm, location_ref: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('qms.scheduled_at', { defaultValue: 'Scheduled at' })}</label>
-                <input
-                  type="datetime-local"
-                  value={inspForm.scheduled_at}
-                  onChange={(e) => setInspForm({ ...inspForm, scheduled_at: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('qms.notes', { defaultValue: 'Notes' })}</label>
-                <textarea
-                  value={inspForm.notes}
-                  onChange={(e) => setInspForm({ ...inspForm, notes: e.target.value })}
-                  rows={2}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-            </>
-          )}
-
-          {kind === 'ncrs' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('qms.title_col', { defaultValue: 'Title' })} *</label>
-                <input value={ncrForm.title} onChange={(e) => setNcrForm({ ...ncrForm, title: e.target.value })} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>{t('qms.description', { defaultValue: 'Description' })} *</label>
-                <textarea
-                  value={ncrForm.description}
-                  onChange={(e) => setNcrForm({ ...ncrForm, description: e.target.value })}
-                  rows={3}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('qms.severity', { defaultValue: 'Severity' })}</label>
-                  <select
-                    value={ncrForm.severity}
-                    onChange={(e) => setNcrForm({ ...ncrForm, severity: e.target.value as NCRSeverity })}
-                    className={inputCls}
-                  >
-                    {(['minor', 'major', 'critical'] as NCRSeverity[]).map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>
-                    {t('qms.linked_inspection', { defaultValue: 'Linked inspection' })}
-                  </label>
-                  <select
-                    value={ncrForm.linked_inspection_id}
-                    onChange={(e) => setNcrForm({ ...ncrForm, linked_inspection_id: e.target.value })}
-                    className={inputCls}
-                  >
-                    <option value="">—</option>
-                    {inspections.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.location_ref || i.id.slice(0, 8)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('qms.cost_impact', { defaultValue: 'Cost impact' })}</label>
-                  <input
-                    type="number"
-                    value={ncrForm.cost_impact_amount}
-                    onChange={(e) => setNcrForm({ ...ncrForm, cost_impact_amount: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('common.currency', { defaultValue: 'Currency' })}</label>
-                  <input
-                    value={ncrForm.cost_impact_currency}
-                    onChange={(e) => setNcrForm({ ...ncrForm, cost_impact_currency: e.target.value })}
-                    className={inputCls}
-                    maxLength={3}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {kind === 'punch' && (
-            <>
-              <div>
-                <label className={labelCls}>{t('qms.title_col', { defaultValue: 'Title' })} *</label>
-                <input
-                  value={punchForm.title}
-                  onChange={(e) => setPunchForm({ ...punchForm, title: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('qms.description', { defaultValue: 'Description' })}</label>
-                <textarea
-                  value={punchForm.description}
-                  onChange={(e) => setPunchForm({ ...punchForm, description: e.target.value })}
-                  rows={2}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('qms.room', { defaultValue: 'Room / area' })}</label>
-                  <input
-                    value={punchForm.room_ref}
-                    onChange={(e) => setPunchForm({ ...punchForm, room_ref: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls}>{t('qms.category')}</label>
-                  <select
-                    value={punchForm.category}
-                    onChange={(e) =>
-                      setPunchForm({ ...punchForm, category: e.target.value as PunchCategory | '' })
-                    }
-                    className={inputCls}
-                  >
-                    <option value="">—</option>
-                    {(['architectural', 'mechanical', 'electrical', 'finishes', 'structure'] as PunchCategory[]).map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('qms.severity')}</label>
-                  <select
-                    value={punchForm.severity}
-                    onChange={(e) => setPunchForm({ ...punchForm, severity: e.target.value as NCRSeverity })}
-                    className={inputCls}
-                  >
-                    {(['minor', 'major', 'critical'] as NCRSeverity[]).map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>{t('qms.due_date')}</label>
-                  <input
-                    type="date"
-                    value={punchForm.due_date}
-                    onChange={(e) => setPunchForm({ ...punchForm, due_date: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {kind === 'audits' && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>{t('qms.audit_type')}</label>
-                  <select
-                    value={auditForm.audit_type}
-                    onChange={(e) =>
-                      setAuditForm({ ...auditForm, audit_type: e.target.value as 'internal' | 'external' | 'supplier' })
-                    }
-                    className={inputCls}
-                  >
-                    <option value="internal">internal</option>
-                    <option value="external">external</option>
-                    <option value="supplier">supplier</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>{t('qms.standard', { defaultValue: 'Standard' })}</label>
-                  <input
-                    value={auditForm.standard_ref}
-                    onChange={(e) => setAuditForm({ ...auditForm, standard_ref: e.target.value })}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>{t('qms.planned_date', { defaultValue: 'Planned date' })}</label>
-                <input
-                  type="date"
-                  value={auditForm.planned_date}
-                  onChange={(e) => setAuditForm({ ...auditForm, planned_date: e.target.value })}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('qms.audit_scope', { defaultValue: 'Scope' })}</label>
-                <textarea
-                  value={auditForm.audit_scope}
-                  onChange={(e) => setAuditForm({ ...auditForm, audit_scope: e.target.value })}
-                  rows={2}
-                  className={clsx(inputCls, 'h-auto py-2')}
-                />
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 mt-5">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      busy={busy}
+      size="xl"
+      title={tabCreateLabel(kind, t)}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button variant="primary" onClick={submit} loading={busy} icon={busy ? <Loader2 size={14} /> : <Plus size={14} />}>
             {t('common.create', { defaultValue: 'Create' })}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {kind === 'itp' && (
+        <WideModalSection columns={2}>
+          <WideModalField label={t('qms.name', { defaultValue: 'Name' })} required span={2}>
+            <input value={itpForm.name} onChange={(e) => setItpForm({ ...itpForm, name: e.target.value })} className={inputCls} />
+          </WideModalField>
+          <WideModalField label={t('qms.work_type', { defaultValue: 'Work type' })} required>
+            <input
+              value={itpForm.work_type}
+              onChange={(e) => setItpForm({ ...itpForm, work_type: e.target.value })}
+              className={inputCls}
+              placeholder="concrete / mep / finishes / …"
+            />
+          </WideModalField>
+          <WideModalField label={t('qms.wbs', { defaultValue: 'WBS ref' })}>
+            <input value={itpForm.wbs_ref} onChange={(e) => setItpForm({ ...itpForm, wbs_ref: e.target.value })} className={inputCls} />
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'inspections' && (
+        <WideModalSection columns={2}>
+          <WideModalField
+            label={t('qms.itp_item', { defaultValue: 'ITP control point (optional)' })}
+            span={2}
+          >
+            <select
+              value={inspForm.itp_item_id}
+              onChange={(e) => setInspForm({ ...inspForm, itp_item_id: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">—</option>
+              {itpPlans.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </WideModalField>
+          <WideModalField label={t('qms.location', { defaultValue: 'Location' })}>
+            <input
+              value={inspForm.location_ref}
+              onChange={(e) => setInspForm({ ...inspForm, location_ref: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('qms.scheduled_at', { defaultValue: 'Scheduled at' })}>
+            <input
+              type="datetime-local"
+              value={inspForm.scheduled_at}
+              onChange={(e) => setInspForm({ ...inspForm, scheduled_at: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('qms.notes', { defaultValue: 'Notes' })} span={2}>
+            <textarea
+              value={inspForm.notes}
+              onChange={(e) => setInspForm({ ...inspForm, notes: e.target.value })}
+              rows={2}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'ncrs' && (
+        <WideModalSection columns={2}>
+          <WideModalField label={t('qms.title_col', { defaultValue: 'Title' })} required span={2}>
+            <input value={ncrForm.title} onChange={(e) => setNcrForm({ ...ncrForm, title: e.target.value })} className={inputCls} />
+          </WideModalField>
+          <WideModalField label={t('qms.description', { defaultValue: 'Description' })} required span={2}>
+            <textarea
+              value={ncrForm.description}
+              onChange={(e) => setNcrForm({ ...ncrForm, description: e.target.value })}
+              rows={3}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+          <WideModalField label={t('qms.severity', { defaultValue: 'Severity' })}>
+            <select
+              value={ncrForm.severity}
+              onChange={(e) => setNcrForm({ ...ncrForm, severity: e.target.value as NCRSeverity })}
+              className={inputCls}
+            >
+              {(['minor', 'major', 'critical'] as NCRSeverity[]).map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </WideModalField>
+          <WideModalField label={t('qms.linked_inspection', { defaultValue: 'Linked inspection' })}>
+            <select
+              value={ncrForm.linked_inspection_id}
+              onChange={(e) => setNcrForm({ ...ncrForm, linked_inspection_id: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">—</option>
+              {inspections.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.location_ref || i.id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </WideModalField>
+          <WideModalField label={t('qms.cost_impact', { defaultValue: 'Cost impact' })}>
+            <input
+              type="number"
+              value={ncrForm.cost_impact_amount}
+              onChange={(e) => setNcrForm({ ...ncrForm, cost_impact_amount: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('common.currency', { defaultValue: 'Currency' })}>
+            <input
+              value={ncrForm.cost_impact_currency}
+              onChange={(e) => setNcrForm({ ...ncrForm, cost_impact_currency: e.target.value })}
+              className={inputCls}
+              maxLength={3}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'punch' && (
+        <WideModalSection columns={2}>
+          <WideModalField label={t('qms.title_col', { defaultValue: 'Title' })} required span={2}>
+            <input
+              value={punchForm.title}
+              onChange={(e) => setPunchForm({ ...punchForm, title: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('qms.description', { defaultValue: 'Description' })} span={2}>
+            <textarea
+              value={punchForm.description}
+              onChange={(e) => setPunchForm({ ...punchForm, description: e.target.value })}
+              rows={2}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+          <WideModalField label={t('qms.room', { defaultValue: 'Room / area' })}>
+            <input
+              value={punchForm.room_ref}
+              onChange={(e) => setPunchForm({ ...punchForm, room_ref: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('qms.category')}>
+            <select
+              value={punchForm.category}
+              onChange={(e) =>
+                setPunchForm({ ...punchForm, category: e.target.value as PunchCategory | '' })
+              }
+              className={inputCls}
+            >
+              <option value="">—</option>
+              {(['architectural', 'mechanical', 'electrical', 'finishes', 'structure'] as PunchCategory[]).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </WideModalField>
+          <WideModalField label={t('qms.severity')}>
+            <select
+              value={punchForm.severity}
+              onChange={(e) => setPunchForm({ ...punchForm, severity: e.target.value as NCRSeverity })}
+              className={inputCls}
+            >
+              {(['minor', 'major', 'critical'] as NCRSeverity[]).map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </WideModalField>
+          <WideModalField label={t('qms.due_date')}>
+            <input
+              type="date"
+              value={punchForm.due_date}
+              onChange={(e) => setPunchForm({ ...punchForm, due_date: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+
+      {kind === 'audits' && (
+        <WideModalSection columns={2}>
+          <WideModalField label={t('qms.audit_type')}>
+            <select
+              value={auditForm.audit_type}
+              onChange={(e) =>
+                setAuditForm({ ...auditForm, audit_type: e.target.value as 'internal' | 'external' | 'supplier' })
+              }
+              className={inputCls}
+            >
+              <option value="internal">internal</option>
+              <option value="external">external</option>
+              <option value="supplier">supplier</option>
+            </select>
+          </WideModalField>
+          <WideModalField label={t('qms.standard', { defaultValue: 'Standard' })}>
+            <input
+              value={auditForm.standard_ref}
+              onChange={(e) => setAuditForm({ ...auditForm, standard_ref: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('qms.planned_date', { defaultValue: 'Planned date' })} span={2}>
+            <input
+              type="date"
+              value={auditForm.planned_date}
+              onChange={(e) => setAuditForm({ ...auditForm, planned_date: e.target.value })}
+              className={inputCls}
+            />
+          </WideModalField>
+          <WideModalField label={t('qms.audit_scope', { defaultValue: 'Scope' })} span={2}>
+            <textarea
+              value={auditForm.audit_scope}
+              onChange={(e) => setAuditForm({ ...auditForm, audit_scope: e.target.value })}
+              rows={2}
+              className={clsx(inputCls, 'h-auto py-2')}
+            />
+          </WideModalField>
+        </WideModalSection>
+      )}
+    </WideModal>
   );
 }

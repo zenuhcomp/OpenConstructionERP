@@ -56,6 +56,10 @@ import app.modules.bim_hub.models  # noqa: E402,F401
 import app.modules.boq.models  # noqa: E402,F401
 import app.modules.takeoff.models  # noqa: E402,F401
 import app.modules.users.models  # noqa: E402,F401
+# Audit-log model needs to be registered with Base.metadata before
+# create_all() so the FSM audit-log writes have somewhere to land.
+import app.core.audit_log  # noqa: E402,F401
+import app.core.audit  # noqa: E402,F401
 
 
 # ── Synchronous event publishing in tests ──────────────────────────────────

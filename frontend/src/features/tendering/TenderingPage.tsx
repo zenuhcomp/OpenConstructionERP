@@ -17,9 +17,13 @@ import {
   Minus,
   Download,
   FileText,
-  X,
 } from 'lucide-react';
 import { Button, Card, Badge, EmptyState, Skeleton, InfoHint, SkeletonTable, Breadcrumb, ConfirmDialog } from '@/shared/ui';
+import {
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui/WideModal';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { apiGet, apiPost, apiPatch } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
@@ -282,76 +286,19 @@ function CreatePackageDialog({
     },
   });
 
+  const fieldCls =
+    'h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in">
-      <Card className="w-full max-w-md animate-scale-in" role="dialog" aria-label={t('tendering.new_package', 'New Tender Package')}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('tendering.new_package', 'New Tender Package')}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', 'Close')}
-            className="rounded-md p-1 text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('tendering.package_name', 'Package Name')}
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('tendering.package_name_placeholder', 'e.g. Concrete Works Package')}
-              className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('tendering.source_boq', 'Source BOQ')}
-            </label>
-            <SelectDropdown
-              value={boqId}
-              onChange={setBoqId}
-              options={boqs.map((b) => ({ value: b.id, label: b.name }))}
-              placeholder={t('tendering.select_boq', 'Select a BOQ...')}
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('tendering.description', 'Description')}
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={2}
-              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
-              placeholder={t('tendering.description_placeholder', 'Brief description of the package scope...')}
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('tendering.deadline', 'Deadline')}
-            </label>
-            <input
-              type="date"
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
-              className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-            />
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={t('tendering.new_package', 'New Tender Package')}
+      size="lg"
+      busy={createMutation.isPending}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={createMutation.isPending}>
             {t('common.cancel', 'Cancel')}
           </Button>
           <Button
@@ -362,9 +309,53 @@ function CreatePackageDialog({
           >
             {t('tendering.create_package', 'Create Package')}
           </Button>
-        </div>
-      </Card>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('tendering.package_name', 'Package Name')}
+          required
+          span={2}
+        >
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('tendering.package_name_placeholder', 'e.g. Concrete Works Package')}
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('tendering.source_boq', 'Source BOQ')} required>
+          <SelectDropdown
+            value={boqId}
+            onChange={setBoqId}
+            options={boqs.map((b) => ({ value: b.id, label: b.name }))}
+            placeholder={t('tendering.select_boq', 'Select a BOQ...')}
+          />
+        </WideModalField>
+        <WideModalField label={t('tendering.deadline', 'Deadline')}>
+          <input
+            type="date"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('tendering.description', 'Description')}
+          span={2}
+        >
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+            className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
+            placeholder={t('tendering.description_placeholder', 'Brief description of the package scope...')}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 
@@ -417,78 +408,19 @@ function AddBidDialog({
     },
   });
 
+  const fieldCls =
+    'h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in">
-      <Card className="w-full max-w-md animate-scale-in" role="dialog" aria-label={t('tendering.add_bid', 'Add Bid')}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('tendering.add_bid', 'Add Bid')}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', 'Close')}
-            className="rounded-md p-1 text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('tendering.company_name', 'Company Name')}
-            </label>
-            <input
-              type="text"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              placeholder={t('tendering.company_placeholder', 'e.g. Schmidt Bau GmbH')}
-              className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('tendering.contact_email', 'Contact Email')}
-            </label>
-            <input
-              type="email"
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              placeholder="contact@example.com"
-              className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('tendering.total_amount', 'Total Amount')} ({currency})
-            </label>
-            <input
-              type="number"
-              value={totalAmount}
-              onChange={(e) => setTotalAmount(e.target.value)}
-              placeholder="0"
-              className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('tendering.notes', 'Notes')}
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
-              placeholder={t('tendering.notes_placeholder', 'Optional notes...')}
-            />
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={t('tendering.add_bid', 'Add Bid')}
+      size="lg"
+      busy={createMutation.isPending}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={createMutation.isPending}>
             {t('common.cancel', 'Cancel')}
           </Button>
           <Button
@@ -499,9 +431,54 @@ function AddBidDialog({
           >
             {t('tendering.submit_bid', 'Submit Bid')}
           </Button>
-        </div>
-      </Card>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('tendering.company_name', 'Company Name')}
+          required
+          span={2}
+        >
+          <input
+            type="text"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder={t('tendering.company_placeholder', 'e.g. Schmidt Bau GmbH')}
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('tendering.contact_email', 'Contact Email')}>
+          <input
+            type="email"
+            value={contactEmail}
+            onChange={(e) => setContactEmail(e.target.value)}
+            placeholder="contact@example.com"
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={`${t('tendering.total_amount', 'Total Amount')} (${currency})`}
+        >
+          <input
+            type="number"
+            value={totalAmount}
+            onChange={(e) => setTotalAmount(e.target.value)}
+            placeholder="0"
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('tendering.notes', 'Notes')} span={2}>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={2}
+            className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm text-content-primary placeholder:text-content-tertiary transition-all focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
+            placeholder={t('tendering.notes_placeholder', 'Optional notes...')}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 

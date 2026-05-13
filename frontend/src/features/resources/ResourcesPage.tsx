@@ -24,6 +24,9 @@ import {
   EmptyState,
   Breadcrumb,
   SkeletonTable,
+  WideModal,
+  WideModalSection,
+  WideModalField,
 } from '@/shared/ui';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
@@ -70,8 +73,6 @@ const ASSIGN_VARIANT: Record<AssignmentStatus, 'neutral' | 'blue' | 'success' | 
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
-
-const labelCls = 'block text-xs font-medium text-content-secondary mb-1';
 
 function isoNow(offsetDays = 0): string {
   const d = new Date();
@@ -1134,33 +1135,45 @@ function CreateResourceModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <ModalShell title={t('resources.new_resource', { defaultValue: 'New Resource' })} onClose={onClose}>
-      <div className="space-y-3">
-        <div>
-          <label className={labelCls}>
-            {t('resources.code', { defaultValue: 'Code' })} *
-          </label>
+    <WideModal
+      open
+      onClose={onClose}
+      busy={busy}
+      size="lg"
+      title={t('resources.new_resource', { defaultValue: 'New Resource' })}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={submit}
+            loading={busy}
+            icon={busy ? <Loader2 size={14} /> : <Plus size={14} />}
+          >
+            {t('common.create', { defaultValue: 'Create' })}
+          </Button>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField label={t('resources.code', { defaultValue: 'Code' })} required>
           <input
             value={form.code}
             onChange={(e) => setForm({ ...form, code: e.target.value })}
             className={inputCls}
             placeholder="e.g. CR-001"
           />
-        </div>
-        <div>
-          <label className={labelCls}>
-            {t('resources.name', { defaultValue: 'Name' })} *
-          </label>
+        </WideModalField>
+        <WideModalField label={t('resources.name', { defaultValue: 'Name' })} required>
           <input
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             className={inputCls}
           />
-        </div>
-        <div>
-          <label className={labelCls}>
-            {t('resources.col_type', { defaultValue: 'Type' })}
-          </label>
+        </WideModalField>
+        <WideModalField label={t('resources.col_type', { defaultValue: 'Type' })} span={2}>
           <select
             value={form.resource_type}
             onChange={(e) =>
@@ -1177,48 +1190,27 @@ function CreateResourceModal({ onClose }: { onClose: () => void }) {
               {t('resources.type_subcontractor', { defaultValue: 'Subcontractor' })}
             </option>
           </select>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={labelCls}>
-              {t('resources.rate', { defaultValue: 'Rate' })}
-            </label>
-            <input
-              type="number"
-              value={form.default_cost_rate}
-              onChange={(e) =>
-                setForm({ ...form, default_cost_rate: e.target.value })
-              }
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>
-              {t('common.currency', { defaultValue: 'Currency' })}
-            </label>
-            <input
-              value={form.currency}
-              onChange={(e) => setForm({ ...form, currency: e.target.value })}
-              maxLength={3}
-              className={inputCls}
-            />
-          </div>
-        </div>
-      </div>
-      <div className="flex justify-end gap-2 mt-5">
-        <Button variant="ghost" onClick={onClose}>
-          {t('common.cancel', { defaultValue: 'Cancel' })}
-        </Button>
-        <Button
-          variant="primary"
-          onClick={submit}
-          loading={busy}
-          icon={busy ? <Loader2 size={14} /> : <Plus size={14} />}
-        >
-          {t('common.create', { defaultValue: 'Create' })}
-        </Button>
-      </div>
-    </ModalShell>
+        </WideModalField>
+        <WideModalField label={t('resources.rate', { defaultValue: 'Rate' })}>
+          <input
+            type="number"
+            value={form.default_cost_rate}
+            onChange={(e) =>
+              setForm({ ...form, default_cost_rate: e.target.value })
+            }
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('common.currency', { defaultValue: 'Currency' })}>
+          <input
+            value={form.currency}
+            onChange={(e) => setForm({ ...form, currency: e.target.value })}
+            maxLength={3}
+            className={inputCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 
@@ -1280,15 +1272,34 @@ function ProposeAssignmentModal({
   }
 
   return (
-    <ModalShell
-      title={t('resources.propose', { defaultValue: 'Propose Assignment' })}
+    <WideModal
+      open
       onClose={onClose}
+      busy={busy}
+      size="lg"
+      title={t('resources.propose', { defaultValue: 'Propose Assignment' })}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={submit}
+            loading={busy}
+            icon={busy ? <Loader2 size={14} /> : <CheckCircle2 size={14} />}
+          >
+            {t('resources.propose', { defaultValue: 'Propose' })}
+          </Button>
+        </>
+      }
     >
-      <div className="space-y-3">
-        <div>
-          <label className={labelCls}>
-            {t('resources.resource', { defaultValue: 'Resource' })} *
-          </label>
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('resources.resource', { defaultValue: 'Resource' })}
+          required
+          span={2}
+        >
           <select
             value={form.resource_id}
             onChange={(e) => setForm({ ...form, resource_id: e.target.value })}
@@ -1303,35 +1314,27 @@ function ProposeAssignmentModal({
               </option>
             ))}
           </select>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={labelCls}>
-              {t('resources.start', { defaultValue: 'Start' })}
-            </label>
-            <input
-              type="datetime-local"
-              value={form.start_at}
-              onChange={(e) => setForm({ ...form, start_at: e.target.value })}
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>
-              {t('resources.end', { defaultValue: 'End' })}
-            </label>
-            <input
-              type="datetime-local"
-              value={form.end_at}
-              onChange={(e) => setForm({ ...form, end_at: e.target.value })}
-              className={inputCls}
-            />
-          </div>
-        </div>
-        <div>
-          <label className={labelCls}>
-            {t('resources.allocation', { defaultValue: 'Allocation %' })}
-          </label>
+        </WideModalField>
+        <WideModalField label={t('resources.start', { defaultValue: 'Start' })}>
+          <input
+            type="datetime-local"
+            value={form.start_at}
+            onChange={(e) => setForm({ ...form, start_at: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('resources.end', { defaultValue: 'End' })}>
+          <input
+            type="datetime-local"
+            value={form.end_at}
+            onChange={(e) => setForm({ ...form, end_at: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('resources.allocation', { defaultValue: 'Allocation %' })}
+          span={2}
+        >
           <input
             type="number"
             min={0}
@@ -1342,14 +1345,16 @@ function ProposeAssignmentModal({
             }
             className={inputCls}
           />
-        </div>
-        {(skillsQ.data?.length ?? 0) > 0 && (
-          <div>
-            <label className={labelCls}>
-              <Wrench size={11} className="inline mr-1" />
-              {t('resources.required_skills', { defaultValue: 'Required skills' })}
-            </label>
-            <div className="flex flex-wrap gap-1.5 mt-1">
+        </WideModalField>
+      </WideModalSection>
+
+      {(skillsQ.data?.length ?? 0) > 0 && (
+        <WideModalSection
+          title={t('resources.required_skills', { defaultValue: 'Required skills' })}
+          columns={1}
+        >
+          <WideModalField label={t('resources.required_skills_pick', { defaultValue: 'Pick relevant skills' })}>
+            <div className="flex flex-wrap gap-1.5">
               {(skillsQ.data ?? []).slice(0, 20).map((s) => {
                 const checked = form.required_skills.includes(s.id);
                 return (
@@ -1371,60 +1376,16 @@ function ProposeAssignmentModal({
                         : 'border-border-light text-content-secondary hover:bg-surface-secondary',
                     )}
                   >
+                    <Wrench size={10} className="inline mr-1" />
                     {s.name}
                   </button>
                 );
               })}
             </div>
-          </div>
-        )}
-      </div>
-      <div className="flex justify-end gap-2 mt-5">
-        <Button variant="ghost" onClick={onClose}>
-          {t('common.cancel', { defaultValue: 'Cancel' })}
-        </Button>
-        <Button
-          variant="primary"
-          onClick={submit}
-          loading={busy}
-          icon={busy ? <Loader2 size={14} /> : <CheckCircle2 size={14} />}
-        >
-          {t('resources.propose', { defaultValue: 'Propose' })}
-        </Button>
-      </div>
-    </ModalShell>
-  );
-}
-
-function ModalShell({
-  title,
-  children,
-  onClose,
-}: {
-  title: string;
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+          </WideModalField>
+        </WideModalSection>
+      )}
+    </WideModal>
   );
 }
 

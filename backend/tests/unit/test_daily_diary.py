@@ -1074,3 +1074,91 @@ def test_summarise_open_meteo_with_realistic_payload() -> None:
     assert out["conditions_code"] == "partly_cloudy"  # code 2 dominates
     assert out["rain_hours"] == 1  # only 1 hour > 0.1mm
     assert float(out["temperature_c"]) == pytest.approx(13.23, abs=0.05)
+
+
+# ── Wave M4: cross-module wiring ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_diary_closed_subscriber_fans_out_actuals_and_kpi() -> None:
+    """``daily_diary.closed`` → schedule actuals + BI kpi recompute."""
+    import asyncio
+    import uuid as _uuid
+
+    from app.core.events import Event
+    from app.core import events as _ev_module
+    from app.modules.daily_diary.events import _on_diary_closed
+
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(name, data=None, source_module=None):  # noqa: ARG001
+        captured.append((name, dict(data or {})))
+        fut: asyncio.Future = asyncio.Future()
+        fut.set_result(None)
+        return fut
+
+    event = Event(
+        name="daily_diary.closed",
+        data={
+            "diary_id": str(_uuid.uuid4()),
+            "project_id": str(_uuid.uuid4()),
+            "diary_date": "2026-05-13",
+            "closed_by": "user-x",
+        },
+        source_module="daily_diary",
+    )
+    real = _ev_module.event_bus.publish_detached
+    _ev_module.event_bus.publish_detached = _spy  # type: ignore[assignment]
+    try:
+        await _on_diary_closed(event)
+    finally:
+        _ev_module.event_bus.publish_detached = real  # type: ignore[assignment]
+    names = [n for n, _ in captured]
+    assert "schedule_advanced.actuals_update" in names
+    assert "bi_dashboards.kpi_recompute" in names
+    actuals = next(d for n, d in captured if n == "schedule_advanced.actuals_update")
+    assert actuals["diary_date"] == "2026-05-13"
+    assert actuals["scope"] == "all_tasks_for_date"
+
+
+@pytest.mark.asyncio
+async def test_diary_signed_subscriber_emits_kpi_recompute() -> None:
+    """``daily_diary.signed`` → BI kpi recompute (scl_protocol_compliance, diary_signed_rate)."""
+    import asyncio
+    import uuid as _uuid
+
+    from app.core.events import Event
+    from app.core import events as _ev_module
+    from app.modules.daily_diary.events import _on_diary_signed
+
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(name, data=None, source_module=None):  # noqa: ARG001
+        captured.append((name, dict(data or {})))
+        fut: asyncio.Future = asyncio.Future()
+        fut.set_result(None)
+        return fut
+
+    event = Event(
+        name="daily_diary.signed",
+        data={"diary_id": str(_uuid.uuid4()), "project_id": str(_uuid.uuid4())},
+        source_module="daily_diary",
+    )
+    real = _ev_module.event_bus.publish_detached
+    _ev_module.event_bus.publish_detached = _spy  # type: ignore[assignment]
+    try:
+        await _on_diary_signed(event)
+    finally:
+        _ev_module.event_bus.publish_detached = real  # type: ignore[assignment]
+    kpi = next(d for n, d in captured if n == "bi_dashboards.kpi_recompute")
+    assert "diary_signed_rate" in kpi["kpi_codes"]
+    assert "scl_protocol_compliance" in kpi["kpi_codes"]
+
+
+@pytest.mark.asyncio
+async def test_diary_register_subscribers_idempotent() -> None:
+    """register_subscribers wiring is safe to call repeatedly."""
+    from app.modules.daily_diary.events import register_subscribers
+
+    register_subscribers()
+    register_subscribers()

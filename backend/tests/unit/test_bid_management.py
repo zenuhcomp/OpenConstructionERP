@@ -889,3 +889,51 @@ def test_permissions_registered() -> None:
     assert not permission_registry.role_has_permission(
         Role.VIEWER, "bid_management.publish"
     )
+
+
+# ── Outlier detection (±σ) ──────────────────────────────────────────────
+
+
+def test_detect_bid_outliers_flags_low_and_high() -> None:
+    """A clear low-baller and a clear high-baller should be flagged."""
+    from app.modules.bid_management.service import detect_bid_outliers
+
+    bids = [
+        SimpleNamespace(id="b1", total_amount=Decimal("100000")),
+        SimpleNamespace(id="b2", total_amount=Decimal("110000")),
+        SimpleNamespace(id="b3", total_amount=Decimal("105000")),
+        SimpleNamespace(id="b4", total_amount=Decimal("108000")),
+        SimpleNamespace(id="b5", total_amount=Decimal("50000")),   # low
+        SimpleNamespace(id="b6", total_amount=Decimal("180000")),  # high
+    ]
+    out = detect_bid_outliers(bids, sigma_threshold=Decimal("1"))
+    low_ids = {row["id"] for row in out["low_outliers"]}
+    high_ids = {row["id"] for row in out["high_outliers"]}
+    assert "b5" in low_ids
+    assert "b6" in high_ids
+    assert out["mean"] > 0
+    assert out["std_dev"] > 0
+
+
+def test_detect_bid_outliers_single_bid_returns_empty() -> None:
+    from app.modules.bid_management.service import detect_bid_outliers
+
+    out = detect_bid_outliers(
+        [SimpleNamespace(id="only", total_amount=Decimal("100000"))],
+    )
+    assert out["low_outliers"] == []
+    assert out["high_outliers"] == []
+
+
+def test_detect_bid_outliers_skips_zero_totals() -> None:
+    from app.modules.bid_management.service import detect_bid_outliers
+
+    bids = [
+        SimpleNamespace(id="b1", total_amount=Decimal("100000")),
+        SimpleNamespace(id="b2", total_amount=Decimal("0")),  # ignored
+        SimpleNamespace(id="b3", total_amount=Decimal("105000")),
+    ]
+    out = detect_bid_outliers(bids, sigma_threshold=Decimal("2"))
+    # All non-zero bids are within ±2σ of their mean.
+    assert out["low_outliers"] == []
+    assert out["high_outliers"] == []

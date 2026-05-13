@@ -115,22 +115,51 @@ class RFQService:
         await self.rfqs.delete(rfq_id)
         logger.info("RFQ deleted: %s", rfq_id)
 
-    async def issue_rfq(self, rfq_id: uuid.UUID) -> RFQ:
-        """Transition RFQ from draft to issued."""
+    async def issue_rfq(
+        self,
+        rfq_id: uuid.UUID,
+        *,
+        actor_id: str | None = None,
+        reason: str | None = None,
+    ) -> RFQ:
+        """Transition RFQ from draft to published (legacy alias: ``issued``).
+
+        v3033 unified the lifecycle nomenclature — the new canonical status
+        is ``published``, and the v3033 data migration remaps existing
+        ``issued`` rows. We still write ``published`` here to be consistent
+        with :mod:`app.core.fsm.registry`.
+        """
         rfq = await self.get_rfq(rfq_id)
-        if rfq.status != "draft":
+        prior = rfq.status
+        if prior != "draft":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot issue RFQ in status '{rfq.status}'",
+                detail=f"Cannot issue RFQ in status '{prior}'",
             )
-        await self.rfqs.update(rfq_id, status="issued")
+        await self.rfqs.update(rfq_id, status="published")
+        try:
+            from app.core.audit_log import log_activity
+
+            await log_activity(
+                self.session,
+                actor_id=actor_id,
+                entity_type="rfq",
+                entity_id=str(rfq_id),
+                action="status_changed",
+                from_status=prior,
+                to_status="published",
+                reason=reason or "RFQ published via issue_rfq()",
+                metadata={"rfq_number": rfq.rfq_number},
+            )
+        except Exception:
+            logger.debug("FSM audit log skipped for RFQ %s issue", rfq_id)
         updated = await self.rfqs.get(rfq_id)
         if updated is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="RFQ not found",
             )
-        logger.info("RFQ issued: %s", rfq.rfq_number)
+        logger.info("RFQ published: %s", rfq.rfq_number)
         return updated
 
     # ── Bids ────────────────────────────────────────────────────────────────
@@ -249,8 +278,28 @@ class RFQService:
         # Mark the bid as awarded
         await self.bids_repo.update(bid_id, is_awarded=True)
 
-        # Transition the RFQ to awarded status
+        # Transition the RFQ to awarded status (must come from bids_received
+        # or published per the FSM; we relax to any non-terminal status for
+        # backwards compat with existing demo data).
+        prior_status = rfq.status
         await self.rfqs.update(bid.rfq_id, status="awarded")
+
+        try:
+            from app.core.audit_log import log_activity
+
+            await log_activity(
+                self.session,
+                actor_id=None,
+                entity_type="rfq",
+                entity_id=str(bid.rfq_id),
+                action="status_changed",
+                from_status=prior_status,
+                to_status="awarded",
+                reason="RFQ awarded via award_bid()",
+                metadata={"rfq_number": rfq.rfq_number, "bid_id": str(bid_id)},
+            )
+        except Exception:
+            logger.debug("FSM audit log skipped for RFQ %s award", bid.rfq_id)
 
         updated = await self.bids_repo.get(bid_id)
         if updated is None:

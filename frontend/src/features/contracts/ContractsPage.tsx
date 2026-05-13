@@ -26,6 +26,11 @@ import {
   Breadcrumb,
   SkeletonTable,
 } from '@/shared/ui';
+import {
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui/WideModal';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { useToastStore } from '@/stores/useToastStore';
@@ -125,7 +130,6 @@ const CLAIM_STATUSES: ClaimStatus[] = [
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
-const labelCls = 'block text-xs font-medium text-content-secondary mb-1';
 
 function toNum(v: number | string | null | undefined): number {
   if (v === null || v === undefined) return 0;
@@ -1375,159 +1379,15 @@ function CreateContractModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">
-            {t('contracts.new_contract', { defaultValue: 'New Contract' })}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className={labelCls}>
-              {t('contracts.code', { defaultValue: 'Code' })} *
-            </label>
-            <input
-              value={form.code}
-              onChange={(e) => setForm({ ...form, code: e.target.value })}
-              className={inputCls}
-              placeholder="C-2026-001"
-            />
-          </div>
-          <div>
-            <label className={labelCls}>
-              {t('contracts.title_col', { defaultValue: 'Title' })}
-            </label>
-            <input
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              className={inputCls}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>
-                {t('contracts.type', { defaultValue: 'Type' })}
-              </label>
-              <select
-                value={form.contract_type}
-                onChange={(e) =>
-                  setForm({ ...form, contract_type: e.target.value as ContractType })
-                }
-                className={inputCls}
-              >
-                {CONTRACT_TYPES.map((tp) => (
-                  <option key={tp} value={tp}>
-                    {t(`contracts.type_${tp}`, {
-                      defaultValue: tp === 'tm' ? 'T&M' : tp.replace(/_/g, ' '),
-                    })}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>
-                {t('contracts.counterparty', { defaultValue: 'Counterparty' })}
-              </label>
-              <select
-                value={form.counterparty_type}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    counterparty_type: e.target.value as CounterpartyType,
-                  })
-                }
-                className={inputCls}
-              >
-                <option value="client">
-                  {t('contracts.cp_client', { defaultValue: 'Client' })}
-                </option>
-                <option value="subcontractor">
-                  {t('contracts.cp_subcontractor', {
-                    defaultValue: 'Subcontractor',
-                  })}
-                </option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>
-                {t('contracts.value', { defaultValue: 'Value' })}
-              </label>
-              <input
-                type="number"
-                value={form.total_value}
-                onChange={(e) => setForm({ ...form, total_value: e.target.value })}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>
-                {t('contracts.currency', { defaultValue: 'Currency' })}
-              </label>
-              <input
-                value={form.currency}
-                onChange={(e) => setForm({ ...form, currency: e.target.value })}
-                className={inputCls}
-                maxLength={3}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className={labelCls}>
-                {t('contracts.retention_pct', { defaultValue: 'Retention %' })}
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                value={form.retention_percent}
-                onChange={(e) =>
-                  setForm({ ...form, retention_percent: e.target.value })
-                }
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>
-                {t('contracts.start_date', { defaultValue: 'Start' })}
-              </label>
-              <input
-                type="date"
-                value={form.start_date}
-                onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>
-                {t('contracts.end_date', { defaultValue: 'End' })}
-              </label>
-              <input
-                type="date"
-                value={form.end_date}
-                onChange={(e) => setForm({ ...form, end_date: e.target.value })}
-                className={inputCls}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 mt-5">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={t('contracts.new_contract', { defaultValue: 'New Contract' })}
+      size="xl"
+      busy={busy}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button
@@ -1538,9 +1398,138 @@ function CreateContractModal({
           >
             {t('common.create', { defaultValue: 'Create' })}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection
+        title={t('contracts.section_basic', { defaultValue: 'Basic info' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('contracts.code', { defaultValue: 'Code' })}
+          required
+        >
+          <input
+            value={form.code}
+            onChange={(e) => setForm({ ...form, code: e.target.value })}
+            className={inputCls}
+            placeholder="C-2026-001"
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('contracts.title_col', { defaultValue: 'Title' })}
+        >
+          <input
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('contracts.type', { defaultValue: 'Type' })}>
+          <select
+            value={form.contract_type}
+            onChange={(e) =>
+              setForm({ ...form, contract_type: e.target.value as ContractType })
+            }
+            className={inputCls}
+          >
+            {CONTRACT_TYPES.map((tp) => (
+              <option key={tp} value={tp}>
+                {t(`contracts.type_${tp}`, {
+                  defaultValue: tp === 'tm' ? 'T&M' : tp.replace(/_/g, ' '),
+                })}
+              </option>
+            ))}
+          </select>
+        </WideModalField>
+        <WideModalField
+          label={t('contracts.counterparty', { defaultValue: 'Counterparty' })}
+        >
+          <select
+            value={form.counterparty_type}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                counterparty_type: e.target.value as CounterpartyType,
+              })
+            }
+            className={inputCls}
+          >
+            <option value="client">
+              {t('contracts.cp_client', { defaultValue: 'Client' })}
+            </option>
+            <option value="subcontractor">
+              {t('contracts.cp_subcontractor', {
+                defaultValue: 'Subcontractor',
+              })}
+            </option>
+          </select>
+        </WideModalField>
+      </WideModalSection>
+
+      <WideModalSection
+        title={t('contracts.section_value', { defaultValue: 'Value' })}
+        columns={3}
+      >
+        <WideModalField label={t('contracts.value', { defaultValue: 'Value' })}>
+          <input
+            type="number"
+            value={form.total_value}
+            onChange={(e) => setForm({ ...form, total_value: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('contracts.currency', { defaultValue: 'Currency' })}
+        >
+          <input
+            value={form.currency}
+            onChange={(e) => setForm({ ...form, currency: e.target.value })}
+            className={inputCls}
+            maxLength={3}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('contracts.retention_pct', { defaultValue: 'Retention %' })}
+        >
+          <input
+            type="number"
+            step="0.1"
+            value={form.retention_percent}
+            onChange={(e) =>
+              setForm({ ...form, retention_percent: e.target.value })
+            }
+            className={inputCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      <WideModalSection
+        title={t('contracts.section_schedule', { defaultValue: 'Schedule' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('contracts.start_date', { defaultValue: 'Start' })}
+        >
+          <input
+            type="date"
+            value={form.start_date}
+            onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('contracts.end_date', { defaultValue: 'End' })}
+        >
+          <input
+            type="date"
+            value={form.end_date}
+            onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 
@@ -1601,95 +1590,15 @@ function NewClaimModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">
-            {t('contracts.new_claim', { defaultValue: 'New Progress Claim' })}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className={labelCls}>
-              {t('contracts.contract', { defaultValue: 'Contract' })} *
-            </label>
-            <select
-              value={form.contract_id}
-              onChange={(e) => setForm({ ...form, contract_id: e.target.value })}
-              className={inputCls}
-            >
-              <option value="">
-                — {t('common.select', { defaultValue: 'Select' })} —
-              </option>
-              {contracts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code} — {c.title || ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={labelCls}>
-              {t('contracts.claim_number', { defaultValue: 'Claim number' })}
-            </label>
-            <input
-              value={form.claim_number}
-              onChange={(e) => setForm({ ...form, claim_number: e.target.value })}
-              className={inputCls}
-              placeholder={t('contracts.auto', { defaultValue: 'auto' })}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>
-                {t('contracts.period_start', { defaultValue: 'Period start' })}
-              </label>
-              <input
-                type="date"
-                value={form.period_start}
-                onChange={(e) => setForm({ ...form, period_start: e.target.value })}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>
-                {t('contracts.period_end', { defaultValue: 'Period end' })}
-              </label>
-              <input
-                type="date"
-                value={form.period_end}
-                onChange={(e) => setForm({ ...form, period_end: e.target.value })}
-                className={inputCls}
-              />
-            </div>
-          </div>
-          <div>
-            <label className={labelCls}>
-              {t('contracts.currency', { defaultValue: 'Currency' })}
-            </label>
-            <input
-              value={form.currency}
-              onChange={(e) => setForm({ ...form, currency: e.target.value })}
-              className={inputCls}
-              maxLength={3}
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 mt-5">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={t('contracts.new_claim', { defaultValue: 'New Progress Claim' })}
+      size="lg"
+      busy={busy}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button
@@ -1700,8 +1609,71 @@ function NewClaimModal({
           >
             {t('common.create', { defaultValue: 'Create' })}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('contracts.contract', { defaultValue: 'Contract' })}
+          required
+          span={2}
+        >
+          <select
+            value={form.contract_id}
+            onChange={(e) => setForm({ ...form, contract_id: e.target.value })}
+            className={inputCls}
+          >
+            <option value="">
+              — {t('common.select', { defaultValue: 'Select' })} —
+            </option>
+            {contracts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.code} — {c.title || ''}
+              </option>
+            ))}
+          </select>
+        </WideModalField>
+        <WideModalField
+          label={t('contracts.claim_number', { defaultValue: 'Claim number' })}
+        >
+          <input
+            value={form.claim_number}
+            onChange={(e) => setForm({ ...form, claim_number: e.target.value })}
+            className={inputCls}
+            placeholder={t('contracts.auto', { defaultValue: 'auto' })}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('contracts.currency', { defaultValue: 'Currency' })}
+        >
+          <input
+            value={form.currency}
+            onChange={(e) => setForm({ ...form, currency: e.target.value })}
+            className={inputCls}
+            maxLength={3}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('contracts.period_start', { defaultValue: 'Period start' })}
+        >
+          <input
+            type="date"
+            value={form.period_start}
+            onChange={(e) => setForm({ ...form, period_start: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('contracts.period_end', { defaultValue: 'Period end' })}
+        >
+          <input
+            type="date"
+            value={form.period_end}
+            onChange={(e) => setForm({ ...form, period_end: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }

@@ -14,10 +14,14 @@ import {
   Clock,
   AlertTriangle,
   Trash2,
-  X,
   Download,
 } from 'lucide-react';
 import { Button, Card, Badge, EmptyState, Breadcrumb, InfoHint, ConfirmDialog } from '@/shared/ui';
+import {
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui/WideModal';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { apiGet, apiPost, apiDelete } from '@/shared/lib/api';
 import { getIntlLocale } from '@/shared/lib/formatters';
@@ -187,91 +191,19 @@ function CreateDialog({
     },
   });
 
+  const fieldCls =
+    'h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose} role="presentation">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('changeorders.new', { defaultValue: 'New Change Order' })}
-        className="w-full max-w-lg rounded-xl bg-surface-primary p-6 shadow-xl border border-border"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('changeorders.new', { defaultValue: 'New Change Order' })}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="text-content-tertiary hover:text-content-primary"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="co-title" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('common.title', { defaultValue: 'Title' })} *
-            </label>
-            <input
-              id="co-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={t('changeorders.title_placeholder', { defaultValue: 'e.g. Additional foundation work' })}
-              className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="co-description" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('common.description', { defaultValue: 'Description' })}
-            </label>
-            <textarea
-              id="co-description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="co-reason" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('changeorders.reason', { defaultValue: 'Reason' })}
-              </label>
-              <select
-                id="co-reason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-              >
-                {Object.entries(getReasonLabels(t)).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="co-schedule-days" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('changeorders.schedule_days', { defaultValue: 'Schedule Impact (days)' })}
-              </label>
-              <input
-                id="co-schedule-days"
-                type="number"
-                min={0}
-                value={scheduleDays}
-                onChange={(e) => setScheduleDays(parseInt(e.target.value) || 0)}
-                className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={t('changeorders.new', { defaultValue: 'New Change Order' })}
+      size="lg"
+      busy={mutation.isPending}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button
@@ -283,9 +215,69 @@ function CreateDialog({
               ? t('common.creating', { defaultValue: 'Creating...' })
               : t('common.create', { defaultValue: 'Create' })}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('common.title', { defaultValue: 'Title' })}
+          required
+          span={2}
+          htmlFor="co-title"
+        >
+          <input
+            id="co-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={t('changeorders.title_placeholder', { defaultValue: 'e.g. Additional foundation work' })}
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('common.description', { defaultValue: 'Description' })}
+          span={2}
+          htmlFor="co-description"
+        >
+          <textarea
+            id="co-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+            className="w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue resize-none"
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('changeorders.reason', { defaultValue: 'Reason' })}
+          htmlFor="co-reason"
+        >
+          <select
+            id="co-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className={fieldCls}
+          >
+            {Object.entries(getReasonLabels(t)).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </WideModalField>
+        <WideModalField
+          label={t('changeorders.schedule_days', { defaultValue: 'Schedule Impact (days)' })}
+          htmlFor="co-schedule-days"
+        >
+          <input
+            id="co-schedule-days"
+            type="number"
+            min={0}
+            value={scheduleDays}
+            onChange={(e) => setScheduleDays(parseInt(e.target.value) || 0)}
+            className={fieldCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 
@@ -338,143 +330,19 @@ function AddItemDialog({
 
   const costDelta = (newQty * newRate) - (origQty * origRate);
 
+  const fieldCls =
+    'h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose} role="presentation">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('changeorders.add_item', { defaultValue: 'Add Item' })}
-        className="w-full max-w-lg rounded-xl bg-surface-primary p-6 shadow-xl border border-border"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('changeorders.add_item', { defaultValue: 'Add Item' })}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="text-content-tertiary hover:text-content-primary"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="item-description" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('common.description', { defaultValue: 'Description' })} *
-            </label>
-            <input
-              id="item-description"
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="item-change-type" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('changeorders.change_type', { defaultValue: 'Change Type' })}
-              </label>
-              <select
-                id="item-change-type"
-                value={changeType}
-                onChange={(e) => setChangeType(e.target.value)}
-                className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-              >
-                <option value="added">{t('changeorders.type_added', { defaultValue: 'Added' })}</option>
-                <option value="removed">{t('changeorders.type_removed', { defaultValue: 'Removed' })}</option>
-                <option value="modified">{t('changeorders.type_modified', { defaultValue: 'Modified' })}</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="item-unit" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('common.unit', { defaultValue: 'Unit' })}
-              </label>
-              <input
-                id="item-unit"
-                value={unit}
-                onChange={(e) => setUnit(e.target.value)}
-                placeholder={t('changeorders.unit_placeholder', { defaultValue: 'm2, m3, pcs...' })}
-                className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="item-orig-qty" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('changeorders.orig_qty', { defaultValue: 'Original Qty' })}
-              </label>
-              <input
-                id="item-orig-qty"
-                type="number"
-                min={0}
-                step="any"
-                value={origQty}
-                onChange={(e) => setOrigQty(parseFloat(e.target.value) || 0)}
-                className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-              />
-            </div>
-            <div>
-              <label htmlFor="item-new-qty" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('changeorders.new_qty', { defaultValue: 'New Qty' })}
-              </label>
-              <input
-                id="item-new-qty"
-                type="number"
-                min={0}
-                step="any"
-                value={newQty}
-                onChange={(e) => setNewQty(parseFloat(e.target.value) || 0)}
-                className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="item-orig-rate" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('changeorders.orig_rate', { defaultValue: 'Original Rate' })}
-              </label>
-              <input
-                id="item-orig-rate"
-                type="number"
-                min={0}
-                step="any"
-                value={origRate}
-                onChange={(e) => setOrigRate(parseFloat(e.target.value) || 0)}
-                className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-              />
-            </div>
-            <div>
-              <label htmlFor="item-new-rate" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('changeorders.new_rate', { defaultValue: 'New Rate' })}
-              </label>
-              <input
-                id="item-new-rate"
-                type="number"
-                min={0}
-                step="any"
-                value={newRate}
-                onChange={(e) => setNewRate(parseFloat(e.target.value) || 0)}
-                className="h-10 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-lg bg-surface-secondary p-3 text-sm">
-            <span className="text-content-secondary">{t('changeorders.cost_delta', { defaultValue: 'Cost Delta' })}:</span>{' '}
-            <span className={costDelta >= 0 ? 'font-semibold text-semantic-error' : 'font-semibold text-semantic-success'}>
-              {costDelta >= 0 ? '+' : ''}{formatCurrency(costDelta, currency)}
-            </span>
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      title={t('changeorders.add_item', { defaultValue: 'Add Item' })}
+      size="xl"
+      busy={mutation.isPending}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button
@@ -486,9 +354,123 @@ function AddItemDialog({
               ? t('common.adding', { defaultValue: 'Adding...' })
               : t('changeorders.add_item', { defaultValue: 'Add Item' })}
           </Button>
+        </>
+      }
+    >
+      <WideModalSection
+        title={t('changeorders.section_basic', { defaultValue: 'Item details' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('common.description', { defaultValue: 'Description' })}
+          required
+          span={2}
+          htmlFor="item-description"
+        >
+          <input
+            id="item-description"
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('changeorders.change_type', { defaultValue: 'Change Type' })}
+          htmlFor="item-change-type"
+        >
+          <select
+            id="item-change-type"
+            value={changeType}
+            onChange={(e) => setChangeType(e.target.value)}
+            className={fieldCls}
+          >
+            <option value="added">{t('changeorders.type_added', { defaultValue: 'Added' })}</option>
+            <option value="removed">{t('changeorders.type_removed', { defaultValue: 'Removed' })}</option>
+            <option value="modified">{t('changeorders.type_modified', { defaultValue: 'Modified' })}</option>
+          </select>
+        </WideModalField>
+        <WideModalField
+          label={t('common.unit', { defaultValue: 'Unit' })}
+          htmlFor="item-unit"
+        >
+          <input
+            id="item-unit"
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+            placeholder={t('changeorders.unit_placeholder', { defaultValue: 'm2, m3, pcs...' })}
+            className={fieldCls}
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      <WideModalSection
+        title={t('changeorders.section_quantities', { defaultValue: 'Quantities & rates' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('changeorders.orig_qty', { defaultValue: 'Original Qty' })}
+          htmlFor="item-orig-qty"
+        >
+          <input
+            id="item-orig-qty"
+            type="number"
+            min={0}
+            step="any"
+            value={origQty}
+            onChange={(e) => setOrigQty(parseFloat(e.target.value) || 0)}
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('changeorders.new_qty', { defaultValue: 'New Qty' })}
+          htmlFor="item-new-qty"
+        >
+          <input
+            id="item-new-qty"
+            type="number"
+            min={0}
+            step="any"
+            value={newQty}
+            onChange={(e) => setNewQty(parseFloat(e.target.value) || 0)}
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('changeorders.orig_rate', { defaultValue: 'Original Rate' })}
+          htmlFor="item-orig-rate"
+        >
+          <input
+            id="item-orig-rate"
+            type="number"
+            min={0}
+            step="any"
+            value={origRate}
+            onChange={(e) => setOrigRate(parseFloat(e.target.value) || 0)}
+            className={fieldCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('changeorders.new_rate', { defaultValue: 'New Rate' })}
+          htmlFor="item-new-rate"
+        >
+          <input
+            id="item-new-rate"
+            type="number"
+            min={0}
+            step="any"
+            value={newRate}
+            onChange={(e) => setNewRate(parseFloat(e.target.value) || 0)}
+            className={fieldCls}
+          />
+        </WideModalField>
+        <div className="sm:col-span-2 rounded-lg bg-surface-secondary p-3 text-sm">
+          <span className="text-content-secondary">{t('changeorders.cost_delta', { defaultValue: 'Cost Delta' })}:</span>{' '}
+          <span className={costDelta >= 0 ? 'font-semibold text-semantic-error' : 'font-semibold text-semantic-success'}>
+            {costDelta >= 0 ? '+' : ''}{formatCurrency(costDelta, currency)}
+          </span>
         </div>
-      </div>
-    </div>
+      </WideModalSection>
+    </WideModal>
   );
 }
 

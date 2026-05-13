@@ -795,3 +795,93 @@ def test_permission_constants_registered() -> None:
             if p.startswith("variations.")
         }
     assert expected.issubset(registered), f"missing: {expected - registered}"
+
+
+# ── FIDIC 20.1 time-bar ─────────────────────────────────────────────────
+
+
+def test_fidic_time_bar_notice_within_window() -> None:
+    """Contractor notice issued 10 days after event — well within the 28d bar."""
+    from app.modules.variations.service import check_fidic_time_bar
+
+    out = check_fidic_time_bar(
+        event_occurred_at="2026-01-01",
+        notice_issued_at="2026-01-11",
+    )
+    assert out["within_time_bar"] is True
+    assert out["days_elapsed"] == 10
+    assert out["deadline_at"] == "2026-01-29"
+    assert out["days_remaining"] is None
+
+
+def test_fidic_time_bar_notice_beyond_window() -> None:
+    """Notice issued 35 days after event — time-barred under Cl. 20.2.1."""
+    from app.modules.variations.service import check_fidic_time_bar
+
+    out = check_fidic_time_bar(
+        event_occurred_at="2026-01-01",
+        notice_issued_at="2026-02-05",
+    )
+    assert out["within_time_bar"] is False
+    assert out["days_elapsed"] == 35
+
+
+def test_fidic_time_bar_no_notice_yet_shows_remaining() -> None:
+    from app.modules.variations.service import check_fidic_time_bar
+    from datetime import date as _d, timedelta as _td
+
+    # Event was 5 days ago — should show ~23 days remaining.
+    event = (_d.today() - _td(days=5)).isoformat()
+    out = check_fidic_time_bar(event_occurred_at=event, notice_issued_at=None)
+    assert out["days_remaining"] is not None
+    assert 22 <= int(out["days_remaining"]) <= 24
+
+
+def test_fidic_time_bar_custom_window() -> None:
+    from app.modules.variations.service import check_fidic_time_bar
+
+    # NEC4 Cl 61.3 — 8 weeks (56d). Notice on day 60 is barred.
+    out = check_fidic_time_bar(
+        event_occurred_at="2026-01-01",
+        notice_issued_at="2026-03-02",  # 60 days
+        notice_window_days=56,
+    )
+    assert out["within_time_bar"] is False
+
+
+# ── Schedule-of-rates re-rating ─────────────────────────────────────────
+
+
+def test_rerate_within_threshold_keeps_contract_rate() -> None:
+    from app.modules.variations.service import recommend_rerate
+
+    out = recommend_rerate(boq_quantity=100, actual_quantity=110)
+    assert out["rerate_required"] is False
+    assert out["direction"] == "none"
+    assert out["variance_pct"] == Decimal("10.00")
+
+
+def test_rerate_increase_beyond_threshold() -> None:
+    from app.modules.variations.service import recommend_rerate
+
+    out = recommend_rerate(boq_quantity=100, actual_quantity=120)
+    assert out["rerate_required"] is True
+    assert out["direction"] == "increase"
+    assert out["variance_pct"] == Decimal("20.00")
+
+
+def test_rerate_decrease_beyond_threshold() -> None:
+    from app.modules.variations.service import recommend_rerate
+
+    out = recommend_rerate(boq_quantity=100, actual_quantity=80)
+    assert out["rerate_required"] is True
+    assert out["direction"] == "decrease"
+    assert out["variance_pct"] == Decimal("-20.00")
+
+
+def test_rerate_zero_boq_quantity_handled() -> None:
+    from app.modules.variations.service import recommend_rerate
+
+    out = recommend_rerate(boq_quantity=0, actual_quantity=50)
+    assert out["rerate_required"] is True
+    assert out["variance_pct"] == Decimal("100.00")

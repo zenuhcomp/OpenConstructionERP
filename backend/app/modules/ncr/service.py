@@ -175,6 +175,7 @@ class NCRService:
 
         # Validate status transition if status is being changed
         new_status = fields.get("status")
+        prior_status = ncr.status
         if new_status is not None and new_status != ncr.status:
             allowed = _NCR_STATUS_TRANSITIONS.get(ncr.status, set())
             if new_status not in allowed:
@@ -191,6 +192,26 @@ class NCRService:
 
         await self.repo.update_fields(ncr_id, **fields)
         await self.session.refresh(ncr)
+
+        # FSM audit row when status changed
+        if new_status is not None and new_status != prior_status:
+            try:
+                from app.core.audit_log import log_activity
+
+                await log_activity(
+                    self.session,
+                    actor_id=None,
+                    entity_type="ncr",
+                    entity_id=str(ncr_id),
+                    action="status_changed",
+                    from_status=prior_status,
+                    to_status=new_status,
+                    reason="NCR status updated via update_ncr()",
+                    metadata={"ncr_number": ncr.ncr_number},
+                )
+            except Exception:
+                logger.debug("FSM audit log skipped for NCR %s update", ncr_id)
+
         logger.info("NCR updated: %s (fields=%s)", ncr_id, list(fields.keys()))
         return ncr
 
@@ -223,8 +244,27 @@ class NCRService:
                 detail="Cannot close an NCR without a corrective action",
             )
 
+        prior_status = ncr.status
         await self.repo.update_fields(ncr_id, status="closed")
         await self.session.refresh(ncr)
+
+        try:
+            from app.core.audit_log import log_activity
+
+            await log_activity(
+                self.session,
+                actor_id=None,
+                entity_type="ncr",
+                entity_id=str(ncr_id),
+                action="status_changed",
+                from_status=prior_status,
+                to_status="closed",
+                reason="NCR closed via close_ncr()",
+                metadata={"ncr_number": ncr.ncr_number},
+            )
+        except Exception:
+            logger.debug("FSM audit log skipped for NCR %s close", ncr_id)
+
         logger.info("NCR closed: %s", ncr_id)
 
         # Emit event for variation creation when cost impact exists

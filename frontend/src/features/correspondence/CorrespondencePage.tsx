@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -7,7 +7,6 @@ import {
   Mail,
   Search,
   Plus,
-  X,
   ChevronDown,
   ChevronRight,
   ArrowDownLeft,
@@ -15,10 +14,19 @@ import {
   FileText,
   Cloud,
   Webhook,
-  Users,
-  CalendarDays,
 } from 'lucide-react';
-import { Button, Card, Badge, EmptyState, Breadcrumb, DateDisplay, SkeletonTable } from '@/shared/ui';
+import {
+  Button,
+  Card,
+  Badge,
+  EmptyState,
+  Breadcrumb,
+  DateDisplay,
+  SkeletonTable,
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui';
 import { ContactSearchInput } from '@/shared/ui/ContactSearchInput';
 import { apiGet } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
@@ -141,259 +149,15 @@ function CreateCorrespondenceModal({
     if (canSubmit) onSubmit(form);
   };
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in" role="dialog" aria-modal="true" aria-label={t('correspondence.new_entry', { defaultValue: 'New Entry‌⁠‍' })}>
-      <div className="w-full max-w-2xl bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('correspondence.new_entry', { defaultValue: 'New Entry‌⁠‍' })}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="px-6 py-4 space-y-5">
-          {/* ── Direction Cards ── */}
-          <div>
-            <label id="corr-direction-label" className="block text-sm font-medium text-content-primary mb-2">
-              {t('correspondence.field_direction', { defaultValue: 'Direction‌⁠‍' })}
-            </label>
-            <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-labelledby="corr-direction-label">
-              {(['incoming', 'outgoing'] as CorrespondenceDirection[]).map((dir) => {
-                const cfg = DIRECTION_CARD_CONFIG[dir];
-                const DirIcon = cfg.icon;
-                const selected = form.direction === dir;
-                return (
-                  <button
-                    key={dir}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => set('direction', dir)}
-                    className={clsx(
-                      'flex items-center gap-3 rounded-lg border-2 px-4 py-3 transition-all text-left',
-                      selected
-                        ? cfg.selectedColor
-                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
-                    )}
-                  >
-                    <DirIcon size={22} className="shrink-0" />
-                    <div>
-                      <span className="text-sm font-semibold block">
-                        {t(`correspondence.dir_${dir}`, {
-                          defaultValue: dir === 'incoming' ? 'Incoming' : 'Outgoing',
-                        })}
-                      </span>
-                      <span className="text-2xs opacity-70">
-                        {t(`correspondence.dir_${dir}_desc`, {
-                          defaultValue: cfg.description,
-                        })}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* ── Type as visual badges ── */}
-          <div>
-            <label id="corr-type-label" className="block text-sm font-medium text-content-primary mb-2">
-              {t('correspondence.field_type', { defaultValue: 'Type' })}
-            </label>
-            <div className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="corr-type-label">
-              {CORR_TYPES_LIST.map((tp) => {
-                const selected = form.type === tp;
-                return (
-                  <button
-                    key={tp}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => set('type', tp)}
-                    className={clsx(
-                      'inline-flex items-center rounded-full border-2 px-3.5 py-1.5 text-xs font-semibold transition-all',
-                      selected
-                        ? TYPE_BADGE_COLORS[tp] + ' ring-2 ring-oe-blue/30'
-                        : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
-                    )}
-                  >
-                    {t(`correspondence.type_${tp}`, { defaultValue: TYPE_LABELS[tp] })}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* ── Correspondence Details Section ── */}
-          <div className="flex items-center gap-2 pt-2 pb-1">
-            <Mail size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('correspondence.section_details', { defaultValue: 'Correspondence Details‌⁠‍' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
-
-          {/* Subject */}
-          <div>
-            <label htmlFor="corr-subject" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('correspondence.field_subject', { defaultValue: 'Subject‌⁠‍' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              id="corr-subject"
-              value={form.subject}
-              onChange={(e) => {
-                set('subject', e.target.value);
-                setTouched(true);
-              }}
-              placeholder={t('correspondence.subject_placeholder', {
-                defaultValue: 'e.g. Notice of delay - Foundation works',
-              })}
-              className={clsx(
-                inputCls,
-                subjectError &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-              autoFocus
-            />
-            {subjectError && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {t('correspondence.subject_required', { defaultValue: 'Subject is required' })}
-              </p>
-            )}
-          </div>
-
-          {/* ── Parties Section ── */}
-          <div className="flex items-center gap-2 pt-2 pb-1">
-            <Users size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('correspondence.section_parties', { defaultValue: 'Parties' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
-
-          {/* From + To */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="corr-from" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('correspondence.field_from', { defaultValue: 'From' })}{' '}
-                <span className="text-semantic-error">*</span>
-              </label>
-              <ContactSearchInput
-                value={form.from_contact}
-                displayValue={form.from_display}
-                onChange={(contactId, displayName) => {
-                  setForm((prev) => ({
-                    ...prev,
-                    from_contact: displayName || contactId,
-                    from_display: displayName,
-                  }));
-                  setTouched(true);
-                }}
-                placeholder={t('correspondence.from_placeholder', {
-                  defaultValue: 'Search contacts or type name...',
-                })}
-              />
-              {fromError && (
-                <p className="mt-1 text-xs text-semantic-error">
-                  {t('correspondence.from_required', { defaultValue: 'From is required' })}
-                </p>
-              )}
-            </div>
-            <div>
-              <label htmlFor="corr-to" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('correspondence.field_to', { defaultValue: 'To' })}
-              </label>
-              <ContactSearchInput
-                value={form.to_contacts}
-                displayValue={form.to_display}
-                onChange={(contactId, displayName) => {
-                  setForm((prev) => ({
-                    ...prev,
-                    to_contacts: displayName || contactId,
-                    to_display: displayName,
-                  }));
-                }}
-                placeholder={t('correspondence.to_placeholder', {
-                  defaultValue: 'Search contacts or type name...',
-                })}
-              />
-            </div>
-          </div>
-
-          {/* ── Dates Section ── */}
-          <div className="flex items-center gap-2 pt-2 pb-1">
-            <CalendarDays size={14} className="text-content-tertiary" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-content-tertiary">
-              {t('correspondence.section_dates', { defaultValue: 'Dates' })}
-            </span>
-            <div className="flex-1 h-px bg-border-light" />
-          </div>
-
-          {/* Two-column: Date Sent + Date Received */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="corr-date-sent" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('correspondence.field_date_sent', { defaultValue: 'Date Sent' })}
-              </label>
-              <input
-                id="corr-date-sent"
-                type="date"
-                value={form.date_sent}
-                onChange={(e) => set('date_sent', e.target.value)}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label htmlFor="corr-date-received" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('correspondence.field_date_received', { defaultValue: 'Date Received' })}
-              </label>
-              <input
-                id="corr-date-received"
-                type="date"
-                value={form.date_received}
-                onChange={(e) => set('date_received', e.target.value)}
-                className={inputCls}
-              />
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label htmlFor="corr-notes" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('correspondence.field_notes', { defaultValue: 'Notes' })}
-            </label>
-            <textarea
-              id="corr-notes"
-              value={form.notes}
-              onChange={(e) => set('notes', e.target.value)}
-              rows={3}
-              className={textareaCls}
-              placeholder={t('correspondence.notes_placeholder', {
-                defaultValue: 'Additional notes...',
-              })}
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light">
+    <WideModal
+      open
+      onClose={onClose}
+      busy={isPending}
+      size="xl"
+      title={t('correspondence.new_entry', { defaultValue: 'New Entry‌⁠‍' })}
+      footer={
+        <>
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
@@ -403,13 +167,220 @@ function CreateCorrespondenceModal({
             ) : (
               <Plus size={16} className="mr-1.5 shrink-0" />
             )}
-            <span>
-              {t('correspondence.create_entry', { defaultValue: 'Create Entry' })}
-            </span>
+            <span>{t('correspondence.create_entry', { defaultValue: 'Create Entry' })}</span>
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {/* Direction + Type pickers, side-by-side */}
+      <WideModalSection columns={2}>
+        <WideModalField label={t('correspondence.field_direction', { defaultValue: 'Direction‌⁠‍' })}>
+          <div
+            className="grid grid-cols-2 gap-3"
+            role="radiogroup"
+            aria-label={t('correspondence.field_direction', { defaultValue: 'Direction‌⁠‍' })}
+          >
+            {(['incoming', 'outgoing'] as CorrespondenceDirection[]).map((dir) => {
+              const cfg = DIRECTION_CARD_CONFIG[dir];
+              const DirIcon = cfg.icon;
+              const selected = form.direction === dir;
+              return (
+                <button
+                  key={dir}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => set('direction', dir)}
+                  className={clsx(
+                    'flex items-center gap-3 rounded-lg border-2 px-4 py-3 transition-all text-left',
+                    selected
+                      ? cfg.selectedColor
+                      : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                  )}
+                >
+                  <DirIcon size={22} className="shrink-0" />
+                  <div>
+                    <span className="text-sm font-semibold block">
+                      {t(`correspondence.dir_${dir}`, {
+                        defaultValue: dir === 'incoming' ? 'Incoming' : 'Outgoing',
+                      })}
+                    </span>
+                    <span className="text-2xs opacity-70">
+                      {t(`correspondence.dir_${dir}_desc`, { defaultValue: cfg.description })}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </WideModalField>
+
+        <WideModalField label={t('correspondence.field_type', { defaultValue: 'Type' })}>
+          <div
+            className="flex flex-wrap items-center gap-2 min-h-[2.5rem]"
+            role="radiogroup"
+            aria-label={t('correspondence.field_type', { defaultValue: 'Type' })}
+          >
+            {CORR_TYPES_LIST.map((tp) => {
+              const selected = form.type === tp;
+              return (
+                <button
+                  key={tp}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => set('type', tp)}
+                  className={clsx(
+                    'inline-flex items-center rounded-full border-2 px-3.5 py-1.5 text-xs font-semibold transition-all',
+                    selected
+                      ? TYPE_BADGE_COLORS[tp] + ' ring-2 ring-oe-blue/30'
+                      : 'border-border bg-surface-primary text-content-tertiary hover:border-border-light hover:bg-surface-secondary',
+                  )}
+                >
+                  {t(`correspondence.type_${tp}`, { defaultValue: TYPE_LABELS[tp] })}
+                </button>
+              );
+            })}
+          </div>
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Details section — full-width subject */}
+      <WideModalSection
+        title={t('correspondence.section_details', { defaultValue: 'Correspondence Details‌⁠‍' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('correspondence.field_subject', { defaultValue: 'Subject‌⁠‍' })}
+          required
+          span={2}
+          htmlFor="corr-subject"
+          error={
+            subjectError
+              ? t('correspondence.subject_required', { defaultValue: 'Subject is required' })
+              : undefined
+          }
+        >
+          <input
+            id="corr-subject"
+            value={form.subject}
+            onChange={(e) => {
+              set('subject', e.target.value);
+              setTouched(true);
+            }}
+            placeholder={t('correspondence.subject_placeholder', {
+              defaultValue: 'e.g. Notice of delay - Foundation works',
+            })}
+            className={clsx(
+              inputCls,
+              subjectError && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Parties — From / To side-by-side */}
+      <WideModalSection
+        title={t('correspondence.section_parties', { defaultValue: 'Parties' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('correspondence.field_from', { defaultValue: 'From' })}
+          required
+          htmlFor="corr-from"
+          error={
+            fromError
+              ? t('correspondence.from_required', { defaultValue: 'From is required' })
+              : undefined
+          }
+        >
+          <ContactSearchInput
+            value={form.from_contact}
+            displayValue={form.from_display}
+            onChange={(contactId, displayName) => {
+              setForm((prev) => ({
+                ...prev,
+                from_contact: displayName || contactId,
+                from_display: displayName,
+              }));
+              setTouched(true);
+            }}
+            placeholder={t('correspondence.from_placeholder', {
+              defaultValue: 'Search contacts or type name...',
+            })}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('correspondence.field_to', { defaultValue: 'To' })}
+          htmlFor="corr-to"
+        >
+          <ContactSearchInput
+            value={form.to_contacts}
+            displayValue={form.to_display}
+            onChange={(contactId, displayName) => {
+              setForm((prev) => ({
+                ...prev,
+                to_contacts: displayName || contactId,
+                to_display: displayName,
+              }));
+            }}
+            placeholder={t('correspondence.to_placeholder', {
+              defaultValue: 'Search contacts or type name...',
+            })}
+          />
+        </WideModalField>
+      </WideModalSection>
+
+      {/* Dates side-by-side, notes spans both */}
+      <WideModalSection
+        title={t('correspondence.section_dates', { defaultValue: 'Dates' })}
+        columns={2}
+      >
+        <WideModalField
+          label={t('correspondence.field_date_sent', { defaultValue: 'Date Sent' })}
+          htmlFor="corr-date-sent"
+        >
+          <input
+            id="corr-date-sent"
+            type="date"
+            value={form.date_sent}
+            onChange={(e) => set('date_sent', e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('correspondence.field_date_received', { defaultValue: 'Date Received' })}
+          htmlFor="corr-date-received"
+        >
+          <input
+            id="corr-date-received"
+            type="date"
+            value={form.date_received}
+            onChange={(e) => set('date_received', e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('correspondence.field_notes', { defaultValue: 'Notes' })}
+          span={2}
+          htmlFor="corr-notes"
+        >
+          <textarea
+            id="corr-notes"
+            value={form.notes}
+            onChange={(e) => set('notes', e.target.value)}
+            rows={3}
+            className={textareaCls}
+            placeholder={t('correspondence.notes_placeholder', {
+              defaultValue: 'Additional notes...',
+            })}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 

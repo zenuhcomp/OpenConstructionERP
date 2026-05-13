@@ -850,3 +850,87 @@ async def test_request_purchase_rejects_non_material_items() -> None:
         with pytest.raises(HTTPException) as exc_info:
             await svc.request_purchase_for_item(wo.id, item.id, user_id="engineer-1")
         assert exc_info.value.status_code == 400
+
+
+# ── Delete endpoints (wave M1 deep-pass) ──────────────────────────────────
+#
+# These tests pin the contract that 404 is raised when a delete targets a
+# row that doesn't exist (so the router doesn't have to special-case the
+# missing row itself), and that successful deletes drop the row from the
+# stub repository. They also lock down that the repo.delete call really is
+# routed through ``ServiceService`` — guarding against a regression where
+# the router would call repo.delete() directly and bypass the existence
+# check that ``get_*()`` provides.
+
+
+@pytest.mark.asyncio
+async def test_delete_contract_removes_row() -> None:
+    """Happy path — existing contract is removed from the repo."""
+    svc = _make_service()
+    contract = await _setup_contract(svc)
+    assert contract.id in svc.contract_repo.rows
+
+    await svc.delete_contract(contract.id)
+
+    assert contract.id not in svc.contract_repo.rows
+
+
+@pytest.mark.asyncio
+async def test_delete_contract_404_when_missing() -> None:
+    """Deleting a non-existent contract raises 404, not 500."""
+    svc = _make_service()
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.delete_contract(uuid.uuid4())
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_asset_removes_row() -> None:
+    svc = _make_service()
+    contract = await _setup_contract(svc)
+    with patch("app.modules.service.service.event_bus.publish_detached"):
+        asset = await svc.create_asset(
+            ServiceAssetCreate(contract_id=contract.id, asset_type="boiler"),
+        )
+    assert asset.id in svc.asset_repo.rows
+
+    await svc.delete_asset(asset.id)
+
+    assert asset.id not in svc.asset_repo.rows
+
+
+@pytest.mark.asyncio
+async def test_delete_asset_404_when_missing() -> None:
+    svc = _make_service()
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.delete_asset(uuid.uuid4())
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_ticket_removes_row() -> None:
+    svc = _make_service()
+    contract = await _setup_contract(svc)
+    with patch("app.modules.service.service.event_bus.publish_detached"):
+        ticket = await svc.create_ticket(
+            ServiceTicketCreate(
+                contract_id=contract.id,
+                title="To be deleted",
+                description="",
+                priority="med",
+            ),
+            user_id="dispatcher",
+        )
+    assert ticket.id in svc.ticket_repo.rows
+
+    await svc.delete_ticket(ticket.id)
+
+    assert ticket.id not in svc.ticket_repo.rows
+
+
+@pytest.mark.asyncio
+async def test_delete_ticket_404_when_missing() -> None:
+    svc = _make_service()
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.delete_ticket(uuid.uuid4())
+    assert exc_info.value.status_code == 404

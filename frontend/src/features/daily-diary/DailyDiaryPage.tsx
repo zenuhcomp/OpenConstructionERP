@@ -24,6 +24,9 @@ import {
   EmptyState,
   Breadcrumb,
   SkeletonTable,
+  WideModal,
+  WideModalSection,
+  WideModalField,
 } from '@/shared/ui';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { useToastStore } from '@/stores/useToastStore';
@@ -1079,81 +1082,64 @@ function CreateDiaryModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        className="relative w-full max-w-lg rounded-xl bg-surface-elevated p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">
-            {t('daily_diary.new_diary', { defaultValue: 'New Diary' })}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className={labelCls}>{t('daily_diary.date', { defaultValue: 'Date' })} *</label>
-            <input
-              type="date"
-              value={diaryDate}
-              onChange={(e) => setDiaryDate(e.target.value)}
-              className={inputCls}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>
-                {t('daily_diary.labour', { defaultValue: 'Labour' })}
-              </label>
-              <input
-                type="number"
-                min={0}
-                value={labour}
-                onChange={(e) => setLabour(Number(e.target.value) || 0)}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>
-                {t('daily_diary.equipment', { defaultValue: 'Equipment' })}
-              </label>
-              <input
-                type="number"
-                min={0}
-                value={equipment}
-                onChange={(e) => setEquipment(Number(e.target.value) || 0)}
-                className={inputCls}
-              />
-            </div>
-          </div>
-          <div>
-            <label className={labelCls}>{t('common.notes', { defaultValue: 'Notes' })}</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              className={clsx(inputCls, 'h-auto py-2')}
-            />
-          </div>
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
+    <WideModal
+      open
+      onClose={onClose}
+      busy={busy}
+      size="lg"
+      title={t('daily_diary.new_diary', { defaultValue: 'New Diary' })}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button variant="primary" onClick={submit} loading={busy}>
             {t('common.create', { defaultValue: 'Create' })}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('daily_diary.date', { defaultValue: 'Date' })}
+          required
+          span={2}
+        >
+          <input
+            type="date"
+            value={diaryDate}
+            onChange={(e) => setDiaryDate(e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('daily_diary.labour', { defaultValue: 'Labour' })}>
+          <input
+            type="number"
+            min={0}
+            value={labour}
+            onChange={(e) => setLabour(Number(e.target.value) || 0)}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('daily_diary.equipment', { defaultValue: 'Equipment' })}>
+          <input
+            type="number"
+            min={0}
+            value={equipment}
+            onChange={(e) => setEquipment(Number(e.target.value) || 0)}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('common.notes', { defaultValue: 'Notes' })} span={2}>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+            className={clsx(inputCls, 'h-auto py-2')}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 

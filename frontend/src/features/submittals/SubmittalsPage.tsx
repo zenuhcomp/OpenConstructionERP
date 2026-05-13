@@ -13,7 +13,19 @@ import {
   Info,
   Edit3,
 } from 'lucide-react';
-import { Button, Card, Badge, EmptyState, Breadcrumb, DateDisplay, SkeletonTable, ConfirmDialog } from '@/shared/ui';
+import {
+  Button,
+  Card,
+  Badge,
+  EmptyState,
+  Breadcrumb,
+  DateDisplay,
+  SkeletonTable,
+  ConfirmDialog,
+  WideModal,
+  WideModalSection,
+  WideModalField,
+} from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { apiGet } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
@@ -103,17 +115,44 @@ const EMPTY_FORM: SubmittalFormData = {
   description: '',
 };
 
-function CreateSubmittalModal({
+/**
+ * SubmittalFormModal — unified create/edit form for submittals.
+ *
+ * Both modes share the same field list (title / spec_section / type /
+ * date_required / description) and validation rules, so centralising
+ * them here keeps create + edit in lock-step. The `mode` prop swaps the
+ * heading, primary button label, and pre-fills the form from `existing`
+ * when editing. Field IDs vary per-mode so create + edit can coexist
+ * (e.g. via tests) without conflicting `htmlFor` references.
+ */
+function SubmittalFormModal({
+  mode,
+  existing,
   onClose,
   onSubmit,
   isPending,
 }: {
+  mode: 'create' | 'edit';
+  existing?: Submittal;
   onClose: () => void;
   onSubmit: (data: SubmittalFormData) => void;
   isPending: boolean;
 }) {
   const { t } = useTranslation();
-  const [form, setForm] = useState<SubmittalFormData>(EMPTY_FORM);
+  const isEdit = mode === 'edit';
+  const idPrefix = isEdit ? 'edit-submittal' : 'submittal';
+
+  const [form, setForm] = useState<SubmittalFormData>(() =>
+    isEdit && existing
+      ? {
+          title: existing.title,
+          spec_section: existing.spec_section ?? '',
+          type: existing.type,
+          date_required: existing.date_required ?? '',
+          description: existing.description ?? '',
+        }
+      : EMPTY_FORM,
+  );
   const [touched, setTouched] = useState(false);
 
   const set = <K extends keyof SubmittalFormData>(key: K, value: SubmittalFormData[K]) =>
@@ -128,352 +167,154 @@ function CreateSubmittalModal({
     if (canSubmit) onSubmit(form);
   };
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in">
-      <div className="w-full max-w-2xl bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-label={t('submittals.new_submittal', { defaultValue: 'New Submittal‌⁠‍' })}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('submittals.new_submittal', { defaultValue: 'New Submittal‌⁠‍' })}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="px-6 py-4 space-y-4">
-          {/* Title */}
-          <div>
-            <label htmlFor="submittal-title" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('submittals.field_title', { defaultValue: 'Title' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              id="submittal-title"
-              value={form.title}
-              onChange={(e) => {
-                set('title', e.target.value);
-                setTouched(true);
-              }}
-              placeholder={t('submittals.title_placeholder', {
-                defaultValue: 'e.g. Structural Steel Shop Drawings - Level 3‌⁠‍',
-              })}
-              className={clsx(
-                inputCls,
-                titleError &&
-                  'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-              autoFocus
-            />
-            {titleError && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {t('submittals.title_required', { defaultValue: 'Title is required‌⁠‍' })}
-              </p>
-            )}
-          </div>
-
-          {/* Two-column: Spec Section + Type */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="submittal-spec-section" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('submittals.field_spec_section', { defaultValue: 'Spec Section‌⁠‍' })}{' '}
-                <span className="text-semantic-error">*</span>
-              </label>
-              <input
-                id="submittal-spec-section"
-                value={form.spec_section}
-                onChange={(e) => {
-                  set('spec_section', e.target.value);
-                  setTouched(true);
-                }}
-                placeholder={t('submittals.spec_placeholder', {
-                  defaultValue: 'e.g. 05 12 00',
-                })}
-                className={clsx(
-                  inputCls,
-                  specError &&
-                    'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-                )}
-              />
-              {specError && (
-                <p className="mt-1 text-xs text-semantic-error">
-                  {t('submittals.spec_required', { defaultValue: 'Spec section is required' })}
-                </p>
-              )}
-            </div>
-            <div>
-              <label htmlFor="submittal-type" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('submittals.field_type', { defaultValue: 'Type' })}
-              </label>
-              <div className="relative">
-                <select
-                  id="submittal-type"
-                  value={form.type}
-                  onChange={(e) => set('type', e.target.value as SubmittalType)}
-                  className={inputCls + ' appearance-none pr-9'}
-                >
-                  {(Object.keys(TYPE_LABELS) as SubmittalType[]).map((tp) => (
-                    <option key={tp} value={tp}>
-                      {t(`submittals.type_${tp}`, { defaultValue: TYPE_LABELS[tp] })}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
-                  <ChevronDown size={14} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Date Required */}
-          <div>
-            <label htmlFor="submittal-date-required" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('submittals.field_date_required', { defaultValue: 'Date Required' })}
-            </label>
-            <input
-              id="submittal-date-required"
-              type="date"
-              value={form.date_required}
-              onChange={(e) => set('date_required', e.target.value)}
-              className={inputCls}
-            />
-          </div>
-
-          {/* Description */}
-          <div>
-            <label htmlFor="submittal-description" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('submittals.field_description', { defaultValue: 'Description' })}
-            </label>
-            <textarea
-              id="submittal-description"
-              value={form.description}
-              onChange={(e) => set('description', e.target.value)}
-              rows={3}
-              className={textareaCls}
-              placeholder={t('submittals.description_placeholder', {
-                defaultValue: 'Additional details about this submittal...',
-              })}
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light">
+    <WideModal
+      open
+      onClose={onClose}
+      busy={isPending}
+      size="lg"
+      title={
+        isEdit
+          ? t('submittals.edit_submittal', { defaultValue: 'Edit Submittal' })
+          : t('submittals.new_submittal', { defaultValue: 'New Submittal‌⁠‍' })
+      }
+      footer={
+        <>
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button variant="primary" onClick={handleSubmit} disabled={isPending || !canSubmit}>
             {isPending ? (
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent mr-2 shrink-0" />
-            ) : (
+            ) : !isEdit ? (
               <Plus size={16} className="mr-1.5 shrink-0" />
-            )}
-            <span>{t('submittals.create_submittal', { defaultValue: 'Create Submittal' })}</span>
+            ) : null}
+            <span>
+              {isEdit
+                ? t('submittals.save_changes', { defaultValue: 'Save Changes' })
+                : t('submittals.create_submittal', { defaultValue: 'Create Submittal' })}
+            </span>
           </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Edit Modal ───────────────────────────────────────────────────────── */
-
-function EditSubmittalModal({
-  submittal,
-  onClose,
-  onSubmit,
-  isPending,
-}: {
-  submittal: Submittal;
-  onClose: () => void;
-  onSubmit: (data: SubmittalFormData) => void;
-  isPending: boolean;
-}) {
-  const { t } = useTranslation();
-  const [form, setForm] = useState<SubmittalFormData>({
-    title: submittal.title,
-    spec_section: submittal.spec_section ?? '',
-    type: submittal.type,
-    date_required: submittal.date_required ?? '',
-    description: submittal.description ?? '',
-  });
-  const [touched, setTouched] = useState(false);
-
-  const set = <K extends keyof SubmittalFormData>(key: K, value: SubmittalFormData[K]) =>
-    setForm((prev) => ({ ...prev, [key]: value }));
-
-  const titleError = touched && form.title.trim().length === 0;
-  const specError = touched && form.spec_section.trim().length === 0;
-  const canSubmit = form.title.trim().length > 0 && form.spec_section.trim().length > 0;
-
-  const handleSubmit = () => {
-    setTouched(true);
-    if (canSubmit) onSubmit(form);
-  };
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-lg animate-fade-in">
-      <div
-        className="w-full max-w-2xl bg-surface-elevated rounded-xl shadow-xl border border-border animate-card-in mx-4 max-h-[90vh] overflow-y-auto"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('submittals.edit_submittal', { defaultValue: 'Edit Submittal' })}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border-light">
-          <h2 className="text-lg font-semibold text-content-primary">
-            {t('submittals.edit_submittal', { defaultValue: 'Edit Submittal' })}
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="px-6 py-4 space-y-4">
-          {/* Title */}
-          <div>
-            <label htmlFor="edit-submittal-title" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('submittals.field_title', { defaultValue: 'Title' })}{' '}
-              <span className="text-semantic-error">*</span>
-            </label>
-            <input
-              id="edit-submittal-title"
-              value={form.title}
-              onChange={(e) => {
-                set('title', e.target.value);
-                setTouched(true);
-              }}
-              className={clsx(
-                inputCls,
-                titleError && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-              )}
-              autoFocus
-            />
-            {titleError && (
-              <p className="mt-1 text-xs text-semantic-error">
-                {t('submittals.title_required', { defaultValue: 'Title is required' })}
-              </p>
+        </>
+      }
+    >
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('submittals.field_title', { defaultValue: 'Title' })}
+          required
+          span={2}
+          htmlFor={`${idPrefix}-title`}
+          error={
+            titleError
+              ? t('submittals.title_required', { defaultValue: 'Title is required‌⁠‍' })
+              : undefined
+          }
+        >
+          <input
+            id={`${idPrefix}-title`}
+            value={form.title}
+            onChange={(e) => {
+              set('title', e.target.value);
+              setTouched(true);
+            }}
+            placeholder={t('submittals.title_placeholder', {
+              defaultValue: 'e.g. Structural Steel Shop Drawings - Level 3‌⁠‍',
+            })}
+            className={clsx(
+              inputCls,
+              titleError &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
             )}
-          </div>
+          />
+        </WideModalField>
 
-          {/* Two-column: Spec Section + Type */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="edit-submittal-spec-section" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('submittals.field_spec_section', { defaultValue: 'Spec Section' })}{' '}
-                <span className="text-semantic-error">*</span>
-              </label>
-              <input
-                id="edit-submittal-spec-section"
-                value={form.spec_section}
-                onChange={(e) => {
-                  set('spec_section', e.target.value);
-                  setTouched(true);
-                }}
-                className={clsx(
-                  inputCls,
-                  specError && 'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
-                )}
-              />
-              {specError && (
-                <p className="mt-1 text-xs text-semantic-error">
-                  {t('submittals.spec_required', { defaultValue: 'Spec section is required' })}
-                </p>
-              )}
-            </div>
-            <div>
-              <label htmlFor="edit-submittal-type" className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('submittals.field_type', { defaultValue: 'Type' })}
-              </label>
-              <div className="relative">
-                <select
-                  id="edit-submittal-type"
-                  value={form.type}
-                  onChange={(e) => set('type', e.target.value as SubmittalType)}
-                  className={inputCls + ' appearance-none pr-9'}
-                >
-                  {(Object.keys(TYPE_LABELS) as SubmittalType[]).map((tp) => (
-                    <option key={tp} value={tp}>
-                      {t(`submittals.type_${tp}`, { defaultValue: TYPE_LABELS[tp] })}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
-                  <ChevronDown size={14} />
-                </div>
-              </div>
+        <WideModalField
+          label={t('submittals.field_spec_section', { defaultValue: 'Spec Section‌⁠‍' })}
+          required
+          htmlFor={`${idPrefix}-spec-section`}
+          error={
+            specError
+              ? t('submittals.spec_required', { defaultValue: 'Spec section is required' })
+              : undefined
+          }
+        >
+          <input
+            id={`${idPrefix}-spec-section`}
+            value={form.spec_section}
+            onChange={(e) => {
+              set('spec_section', e.target.value);
+              setTouched(true);
+            }}
+            placeholder={t('submittals.spec_placeholder', {
+              defaultValue: 'e.g. 05 12 00',
+            })}
+            className={clsx(
+              inputCls,
+              specError &&
+                'border-semantic-error focus:ring-red-300 focus:border-semantic-error',
+            )}
+          />
+        </WideModalField>
+
+        <WideModalField
+          label={t('submittals.field_type', { defaultValue: 'Type' })}
+          htmlFor={`${idPrefix}-type`}
+        >
+          <div className="relative">
+            <select
+              id={`${idPrefix}-type`}
+              value={form.type}
+              onChange={(e) => set('type', e.target.value as SubmittalType)}
+              className={inputCls + ' appearance-none pr-9'}
+            >
+              {(Object.keys(TYPE_LABELS) as SubmittalType[]).map((tp) => (
+                <option key={tp} value={tp}>
+                  {t(`submittals.type_${tp}`, { defaultValue: TYPE_LABELS[tp] })}
+                </option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
+              <ChevronDown size={14} />
             </div>
           </div>
+        </WideModalField>
 
-          {/* Date Required */}
-          <div>
-            <label htmlFor="edit-submittal-date-required" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('submittals.field_date_required', { defaultValue: 'Date Required' })}
-            </label>
-            <input
-              id="edit-submittal-date-required"
-              type="date"
-              value={form.date_required}
-              onChange={(e) => set('date_required', e.target.value)}
-              className={inputCls}
-            />
-          </div>
+        <WideModalField
+          label={t('submittals.field_date_required', { defaultValue: 'Date Required' })}
+          span={2}
+          htmlFor={`${idPrefix}-date-required`}
+        >
+          <input
+            id={`${idPrefix}-date-required`}
+            type="date"
+            value={form.date_required}
+            onChange={(e) => set('date_required', e.target.value)}
+            className={inputCls}
+          />
+        </WideModalField>
 
-          {/* Description */}
-          <div>
-            <label htmlFor="edit-submittal-description" className="block text-sm font-medium text-content-primary mb-1.5">
-              {t('submittals.field_description', { defaultValue: 'Description' })}
-            </label>
-            <textarea
-              id="edit-submittal-description"
-              value={form.description}
-              onChange={(e) => set('description', e.target.value)}
-              rows={3}
-              className={textareaCls}
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-light">
-          <Button variant="ghost" onClick={onClose} disabled={isPending}>
-            {t('common.cancel', { defaultValue: 'Cancel' })}
-          </Button>
-          <Button variant="primary" onClick={handleSubmit} disabled={isPending || !canSubmit}>
-            {isPending && (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent mr-2 shrink-0" />
-            )}
-            <span>{t('submittals.save_changes', { defaultValue: 'Save Changes' })}</span>
-          </Button>
-        </div>
-      </div>
-    </div>
+        <WideModalField
+          label={t('submittals.field_description', { defaultValue: 'Description' })}
+          span={2}
+          htmlFor={`${idPrefix}-description`}
+        >
+          <textarea
+            id={`${idPrefix}-description`}
+            value={form.description}
+            onChange={(e) => set('description', e.target.value)}
+            rows={3}
+            className={textareaCls}
+            placeholder={
+              !isEdit
+                ? t('submittals.description_placeholder', {
+                    defaultValue: 'Additional details about this submittal...',
+                  })
+                : undefined
+            }
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 
@@ -1238,7 +1079,8 @@ export function SubmittalsPage() {
 
       {/* Create Modal */}
       {showCreateModal && (
-        <CreateSubmittalModal
+        <SubmittalFormModal
+          mode="create"
           onClose={() => setShowCreateModal(false)}
           onSubmit={handleCreateSubmit}
           isPending={createMut.isPending}
@@ -1257,8 +1099,9 @@ export function SubmittalsPage() {
 
       {/* Edit Modal */}
       {editingSubmittal && (
-        <EditSubmittalModal
-          submittal={editingSubmittal}
+        <SubmittalFormModal
+          mode="edit"
+          existing={editingSubmittal}
           onClose={() => setEditingSubmittal(null)}
           onSubmit={handleEditSubmit}
           isPending={updateMut.isPending}

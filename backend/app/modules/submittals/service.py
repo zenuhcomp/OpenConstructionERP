@@ -213,8 +213,29 @@ class SubmittalService:
         created_by_s = str(submittal.created_by) if submittal.created_by else None
         submittal_number_s = getattr(submittal, "submittal_number", None)
 
+        prior_status = submittal.status
         await self.repo.update_fields(submittal_id, **fields)
         fresh = await self.repo.get_by_id(submittal_id)
+
+        try:
+            from app.core.audit_log import log_activity
+
+            await log_activity(
+                self.session,
+                actor_id=created_by_s,
+                entity_type="submittal",
+                entity_id=str(submittal_id),
+                action="status_changed",
+                from_status=prior_status,
+                to_status="submitted",
+                reason="Submittal submitted via submit_submittal()",
+                metadata={
+                    "submittal_number": submittal_number_s,
+                    "revision": fields.get("current_revision", current_rev),
+                },
+            )
+        except Exception:
+            logger.debug("FSM audit log skipped for submittal %s submit", submittal_id)
 
         await _safe_publish(
             "submittal.submitted",
@@ -274,8 +295,26 @@ class SubmittalService:
         title_s = submittal.title
         created_by_s = str(submittal.created_by) if submittal.created_by else None
 
+        prior_status = submittal.status
         await self.repo.update_fields(submittal_id, **fields)
         fresh = await self.repo.get_by_id(submittal_id)
+
+        try:
+            from app.core.audit_log import log_activity
+
+            await log_activity(
+                self.session,
+                actor_id=reviewer_id,
+                entity_type="submittal",
+                entity_id=str(submittal_id),
+                action="status_changed",
+                from_status=prior_status,
+                to_status=new_status,
+                reason=f"Submittal reviewed: decision={new_status}",
+                metadata={"reviewer_id": reviewer_id},
+            )
+        except Exception:
+            logger.debug("FSM audit log skipped for submittal %s review", submittal_id)
 
         await _safe_publish(
             "submittal.reviewed",
@@ -366,8 +405,26 @@ class SubmittalService:
         title_s = submittal.title
         created_by_s = str(submittal.created_by) if submittal.created_by else None
 
+        prior_status = submittal.status
         await self.repo.update_fields(submittal_id, **fields)
         fresh = await self.repo.get_by_id(submittal_id)
+
+        try:
+            from app.core.audit_log import log_activity
+
+            await log_activity(
+                self.session,
+                actor_id=approver_id,
+                entity_type="submittal",
+                entity_id=str(submittal_id),
+                action="status_changed",
+                from_status=prior_status,
+                to_status="approved",
+                reason="Submittal approved via approve_submittal()",
+                metadata={"approver_id": approver_id},
+            )
+        except Exception:
+            logger.debug("FSM audit log skipped for submittal %s approve", submittal_id)
 
         await _safe_publish(
             "submittal.approved",

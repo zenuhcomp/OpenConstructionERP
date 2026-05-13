@@ -337,7 +337,25 @@ class SupplierCatalogsService:
             reorder_point=data.reorder_point,
             active=True,
         )
-        return await self.items.create(item)
+        created = await self.items.create(item)
+        # Wave-M4 deep-pass: emit MATERIAL_ADDED so match_elements re-indexes
+        # the new SKU into the vector store and BI projections tick.
+        await _safe_publish(
+            ev.MATERIAL_ADDED,
+            {
+                "catalog_item_id": str(created.id),
+                "sku": created.sku,
+                "name": created.name,
+                "manufacturer": created.manufacturer or "",
+                "mpn": created.mpn or "",
+                "unit_of_measure": created.unit_of_measure,
+                "category_id": (
+                    str(created.category_id) if created.category_id else None
+                ),
+                "description": (created.description or "")[:500],
+            },
+        )
+        return created
 
     # ── Price lists & comparison ──────────────────────────────────────────────
 
