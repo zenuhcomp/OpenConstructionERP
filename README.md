@@ -136,55 +136,37 @@ Star OpenConstructionERP on GitHub and be instantly notified of new releases.
 
 ## ✨ What's New in v3.0.x
 
-The v3 stable line — milestone **v3.0.0** (May 12, 2026) rolled up 100+ v2.x patch releases; **v3.0.1** (May 13) shipped the 18-Modules Wave; **v3.0.2** is in flight with deep parser correctness, FSM/audit log, and supply-chain hardening.
+The v3 stable line — milestone **v3.0.0** rolled up 100+ v2.x patch releases; **v3.0.1** shipped the 18-Modules Wave; **v3.0.2** brought IFC parser correctness and supply-chain hardening.
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
 **🧱 18-Modules Wave — 88 modules total**
-Three grouped categories added on top of the existing estimation / takeoff / collaboration core:
-- **Field Operations** — Service & Maintenance · Equipment & Fleet · Daily Diary (SCL Protocol contemporary records) · Subcontractor Portal · Resources & Crew (LEM rollup)
-- **Commercial** — CRM (BANT scoring, weighted forecast) · Contracts (FIDIC Red/Yellow/Silver, JCT SBC, NEC4 ECC, AIA A201, ConsensusDocs) · Subcontractor Mgmt · Bid Management (EU Dir 2014/24 Art 69 outlier detection) · Variations (FIDIC 20.2.1 time-bar, JCT 5.6.1.3 re-rate) · Supplier Catalogs · Property Development (RICS Red Book residual appraisal)
-- **Schedule & Quality** — Advanced Schedule (Last Planner, CPM Kahn, EVM) · QMS (ISO 9001:2015) · HSE (ISO 45001 / OSHA 1904.39 / RIDDOR / DGUV) · Carbon & ESG (EN 15978 LCA, GHG Scope 1/2/3) · BI Dashboards
+- **Field Operations** — Service · Equipment & Fleet · Daily Diary · Subcontractor Portal · Resources & Crew
+- **Commercial** — CRM · Contracts (FIDIC / JCT / NEC4 / AIA) · Bid Management · Variations · Supplier Catalogs · Property Development
+- **Schedule & Quality** — Advanced Schedule (Last Planner, CPM) · QMS (ISO 9001) · HSE (ISO 45001) · Carbon & ESG (EN 15978, GHG Protocol) · BI Dashboards
 
-**🌍 India stability**
-- ezdxf 1.4.x layer-visibility regression fixed (every fresh-install layer was hidden by bound-method truthiness)
-- Devanagari / Tamil / Telugu / Arabic / Chinese OCR by default
-- Lakh / crore numeral parser (`1,00,000` reads as 100 000)
-- Scanned-PDF fallback through PaddleOCR
-
-**🗺️ CRS auto-detect worldwide**
-- India UTM 42-46N · Germany Gauss-Krüger + UTM 32/33 · UK BNG · France Lambert-93 · Switzerland LV95 · Austria MGI · Netherlands RD · US State Plane + UTM 10-19N · UAE/KSA UTM 38-40N · Japan JGD2011 · Brazil SIRGAS · China CGCS2000
+**🔍 IFC parser correctness**
+Full `IfcUnitAssignment` parser per ISO 16739-1:2024 — every SI prefix, Imperial conversion, recursive `IfcConversionBasedUnit`. A 24-inch wall now reads as 0.6096 m, not raw `24`.
 
 </td>
 <td width="50%" valign="top">
 
-**🔍 IFC parser correctness (silent BOQ corruption fix)**
-- Full `IfcUnitAssignment` parser per ISO 16739-1:2024 §5.4.3 — every SI prefix (KILO/MILLI/MICRO/…), Imperial conversion (inch/foot/yard/lb/°F), recursive `IfcConversionBasedUnit`, `IfcDerivedUnit` combinatorics
-- Per-dimension scale table applied to every `IfcQuantity` value — a 24-inch wall is now 0.6096 m, not raw `24`
-- 92 unit-assignment regression tests; 108 IFC parser tests total
-
 **🔒 Security & supply chain**
-- `Settings` fail-fast guard: refuses to start in production when `JWT_SECRET` is still the bundled dev default
-- 230+ IDOR endpoints hardened across service / subcontractors / contracts / bid_management / schedule_advanced / bi_dashboards / takeoff / measurements / CAD sessions
+- `Settings` fail-fast on default `JWT_SECRET` in production
+- 230+ IDOR endpoints hardened via `verify_project_access`
+- Ed25519-signed converter manifests with SHA-256 verification
 - BOQ lock/unlock uses CAS UPDATE — eliminates TOCTOU race
-- Converter installer: host allow-list, symlink/TOCTOU guard, 512MB per-file + 1.5GB cumulative streaming caps, Ed25519-signed manifest with SHA-256 verification, refuse-on-mismatch
 
 **📡 Qdrant native (no Docker)**
-- One-click install from official GitHub Releases via `/api/v1/match_elements/qdrant/install`
-- Self-healing cached client reset
-- Health probe + install card on `/match-elements`
-
-**🚫 Removed**
-- All file-size limits across uploads (env override remains for tenant policy)
-- Docker requirement for vector DB
+One-click install of the official Qdrant binary, supervised in-process. Vector search no longer needs Docker.
 
 </td>
 </tr>
 </table>
 
-See the [v3.0.0 release notes](https://github.com/datadrivenconstruction/OpenConstructionERP/releases/tag/v3.0.0) and the [CHANGELOG](CHANGELOG.md) for the per-release breakdown.
+See the [v3.0.x releases](https://github.com/datadrivenconstruction/OpenConstructionERP/releases) and the [CHANGELOG](CHANGELOG.md) for the per-release breakdown.
 
 ---
 
