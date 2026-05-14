@@ -5,6 +5,18 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.7] — 2026-05-14 · Resource-based cost DB import — docs, templates, downloads
+
+### Added
+
+- **Full guide for extending the cost database** — `docs/cost-database-import.md` covers both paths into `oe_costs_item`: flat-row import (CSV/XLSX via `POST /api/v1/costs/import/file/`, with column-alias table, auto-detected delimiters, encoding heuristics) and resource-based recipes (`POST /api/v1/costs/` with `components[]` referencing leaf resources by `code` + `factor`). Includes classification standards (MasterFormat / NRM / DIN 276 / Uniformat / GAEB), currency handling, Match-Elements integration, and a troubleshooting table.
+- **Three downloadable templates**, shipped in `data/templates/` and served as static assets at `/templates/*` so they download straight from the app:
+  - `cost_database_template.csv` — minimal 3-row starter (one labor, one material, one equipment line).
+  - `example_us_construction.csv` — 30-row working US database covering labor, materials, equipment, and subcontractor lines with MasterFormat codes.
+  - `cost_database_with_assemblies.json` — 6 recipe items (strip footing, CIP wall, CMU wall, 2x4 framing, drywall + paint, asphalt roofing) with full resource breakdowns.
+- **"Download a template" row on `/costs/import`** — three one-click download buttons in the *Supported formats* card, plus a pointer to the full guide.
+- **End-to-end smoke test** — `scripts/test_cost_import.py` uploads the CSV, pushes the JSON recipes, round-trips every code through `/costs/?q=…`, and verifies every recipe's component breakdown survives. Passes 4/4 stages against a clean install (idempotent — 409 "already exists" on re-run is treated as a pass).
+
 ## [3.0.6] — 2026-05-14 · DWG upload responsiveness + 6 new HF regions + sidebar branding
 
 ### Fixed (DWG upload — root cause)

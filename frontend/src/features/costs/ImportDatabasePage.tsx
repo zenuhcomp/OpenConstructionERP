@@ -1807,6 +1807,40 @@ export function ImportDatabasePage() {
                       'Columns are auto-detected. Accepted headers: Code, Description, Unit, Rate/Price/Cost, Currency, Classification.',
                   })}
                 </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium text-content-secondary mr-1">
+                    {t('costs.import_templates_label', { defaultValue: 'Download a template:' })}
+                  </span>
+                  <a
+                    href="/templates/cost_database_template.csv"
+                    download
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface-primary px-2.5 py-1 text-xs font-medium text-content-secondary hover:bg-surface-secondary hover:text-oe-blue transition-colors"
+                  >
+                    <Download size={12} />
+                    {t('costs.import_template_minimal', { defaultValue: 'Minimal CSV (3 rows)' })}
+                  </a>
+                  <a
+                    href="/templates/example_us_construction.csv"
+                    download
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface-primary px-2.5 py-1 text-xs font-medium text-content-secondary hover:bg-surface-secondary hover:text-oe-blue transition-colors"
+                  >
+                    <Download size={12} />
+                    {t('costs.import_template_example', { defaultValue: 'Example US construction (30 rows)' })}
+                  </a>
+                  <a
+                    href="/templates/cost_database_with_assemblies.json"
+                    download
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface-primary px-2.5 py-1 text-xs font-medium text-content-secondary hover:bg-surface-secondary hover:text-oe-blue transition-colors"
+                  >
+                    <Download size={12} />
+                    {t('costs.import_template_recipes', { defaultValue: 'Recipes JSON (6 assemblies)' })}
+                  </a>
+                </div>
+                <p className="mt-2 text-[11px] text-content-tertiary">
+                  {t('costs.import_template_help', {
+                    defaultValue: 'See docs/cost-database-import.md for the full resource-based costing guide.',
+                  })}
+                </p>
               </div>
             </div>
           </Card>
