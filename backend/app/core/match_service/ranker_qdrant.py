@@ -1058,6 +1058,26 @@ async def rank(
         except Exception as exc:  # pragma: no cover — parquet missing is OK
             logger.debug("ranker_qdrant: parquet lookup failed (%s); using payload only", exc)
 
+    # ── Magnet-candidate suppressor (opt-in, env-gated) ───────────────
+    # v3 payload-only snapshots breed a small set of "magnet" candidates
+    # the cross-encoder is drawn to regardless of query topic. Drop /
+    # penalise them here so the BGE rerank below sees a cleaner pool.
+    # Off by default (``OE_MATCH_MAGNET_FILTER=1`` to enable). Touching
+    # only the tail of the post-Qdrant code path keeps the parallel
+    # snapshot-enrichment agent's edits orthogonal to this hook.
+    if hits:
+        try:
+            from app.core.match_service.boosts import magnet_filter
+
+            hits = magnet_filter.apply_to_hits(
+                translated_envelope,
+                hits,
+                full_rows=full_rows,
+                query_id=str(getattr(req, "request_id", None) or project_uuid),
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.debug("ranker_qdrant: magnet_filter skipped: %s", exc)
+
     # ── Apply v3 soft boosts BEFORE the candidate cast ───────────────
     # The soft boosts are multiplicative on the raw RRF score (per
     # §4.6) so we tweak ``hit.score`` first, then let

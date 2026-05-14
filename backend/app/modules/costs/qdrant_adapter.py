@@ -139,12 +139,26 @@ def country_to_collection(country: str | None) -> str:
     Returns ``cwicr_en_v3`` when the input is empty or unrecognised so
     a misconfigured catalogue still hits a real collection rather than
     erroring out.
+
+    Enriched-collection routing
+    ---------------------------
+    When ``OE_MATCH_USE_ENRICHED=1`` is set in the environment, the
+    returned name is suffixed with ``_enriched`` (e.g.,
+    ``cwicr_en_v3_enriched``). This lets operators A/B against a
+    description-rich enrichment built by
+    ``scripts/build_enriched_snapshot.py`` without touching the
+    canonical snapshot. Falls back to the unsuffixed name automatically
+    when the enriched collection isn't present — see
+    :func:`_collection_vectors` which empty-caches missing collections.
     """
 
     from app.core.match_service.region_language import language_for
 
     lang = language_for(country)
-    return f"cwicr_{lang}{_collection_version_suffix()}"
+    base = f"cwicr_{lang}{_collection_version_suffix()}"
+    if os.environ.get("OE_MATCH_USE_ENRICHED", "").strip() in ("1", "true", "True"):
+        return f"{base}_enriched"
+    return base
 
 
 def country_filter_for(country: str | None) -> str | None:
