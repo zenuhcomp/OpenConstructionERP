@@ -323,7 +323,7 @@ def compute_photo_timeline(
             day_key, {"date": day_key, "photo_count": 0, "photo_ids": []},
         )
         bucket["photo_count"] += 1
-        bucket["photo_ids"].append(getattr(photo, "id"))
+        bucket["photo_ids"].append(photo.id)
     return sorted(buckets.values(), key=lambda b: b["date"])
 
 
@@ -385,7 +385,7 @@ def compute_before_after(
     for a in a_photos:
         best: tuple[float, Any] | None = None
         for b in b_photos:
-            if getattr(b, "id") in used_b:
+            if b.id in used_b:
                 continue
             distance = _haversine_m(
                 float(a.lat),
@@ -397,14 +397,14 @@ def compute_before_after(
                 best = (distance, b)
         if best is not None:
             distance, b = best
-            used_b.add(getattr(b, "id"))
+            used_b.add(b.id)
             pairs.append(
                 {
-                    "photo_a_id": getattr(a, "id"),
-                    "photo_b_id": getattr(b, "id"),
+                    "photo_a_id": a.id,
+                    "photo_b_id": b.id,
                     "distance_m": round(distance, 4),
-                    "date_a": getattr(a, "taken_at"),
-                    "date_b": getattr(b, "taken_at"),
+                    "date_a": a.taken_at,
+                    "date_b": b.taken_at,
                 }
             )
     return pairs
@@ -1257,6 +1257,7 @@ class DailyDiaryService:
         weathers = []
         for d in diaries:
             from sqlalchemy import select  # noqa: PLC0415 (local import)
+
             from app.modules.daily_diary.models import (  # noqa: PLC0415
                 WeatherRecord as _WR,
             )

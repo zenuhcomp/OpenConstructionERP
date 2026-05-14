@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import i18n from 'i18next';
 import clsx from 'clsx';
@@ -24,6 +24,7 @@ import {
   Pencil,
   Boxes,
   Settings2,
+  Home,
   type LucideIcon,
 } from 'lucide-react';
 import { Logo, Button, CountryFlag, Badge } from '@/shared/ui';
@@ -35,6 +36,12 @@ import { useModuleStore } from '@/stores/useModuleStore';
 import { useViewModeStore } from '@/stores/useViewModeStore';
 import { aiApi, type AIProvider } from '@/features/ai/api';
 import { apiPost } from '@/shared/lib/api';
+import {
+  ALL_MODULES,
+  MODULE_GROUPS,
+  CORE_MODULE_KEYS,
+  TOTAL_MODULE_COUNT,
+} from './modules';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -173,6 +180,7 @@ type CompanyTypeKey =
   | 'estimator'
   | 'project_management'
   | 'architecture_engineering'
+  | 'property_developer'
   | 'full_enterprise';
 
 interface CompanyPreset {
@@ -192,13 +200,15 @@ const COMPANY_PRESETS: CompanyPreset[] = [
     descriptionKey: 'onboarding.company_general_contractor_desc',
     icon: Building2,
     popular: true,
-    tags: ['BOQ', 'Finance', 'Safety'],
+    tags: ['BOQ', 'Finance', 'Safety', 'HSE'],
     enabledModules: [
-      'boq', 'projects', 'costs', 'assemblies', 'catalog', 'templates',
-      'schedule', 'finance', 'procurement', 'safety', 'inspections',
-      'punchlist', 'field-reports', 'tasks', 'meetings', 'documents',
-      'risks', 'changeorders', 'contacts', 'reports', 'reporting',
-      'analytics', 'validation', 'photos', 'ncr', 'requirements',
+      'boq', 'costs', 'assemblies', 'catalog', 'validation',
+      'schedule', 'schedule_advanced', 'tasks',
+      'finance', 'procurement', 'changeorders', 'contracts', 'variations',
+      'safety', 'hse_advanced', 'inspections', 'punchlist', 'ncr', 'qms',
+      'fieldreports', 'daily_diary', 'subcontractors', 'equipment',
+      'meetings', 'documents', 'markups',
+      'risk', 'reporting', 'requirements',
     ],
   },
   {
@@ -208,10 +218,12 @@ const COMPANY_PRESETS: CompanyPreset[] = [
     icon: Calculator,
     tags: ['BOQ', 'Costs', 'Takeoff', 'AI'],
     enabledModules: [
-      'boq', 'projects', 'costs', 'assemblies', 'catalog', 'templates',
-      'takeoff', 'pdf-takeoff', 'ai-estimate', 'advisor', 'validation',
-      'reports', 'reporting', 'analytics', 'data-explorer', 'documents',
-      'cost-benchmark',
+      'boq', 'costs', 'assemblies', 'catalog', 'validation',
+      'cost_match', 'match', 'match_elements',
+      'takeoff', 'dwg_takeoff', 'cad',
+      'ai', 'erp_chat',
+      'tendering', 'bid_management', 'supplier_catalogs',
+      'reporting', 'documents',
     ],
   },
   {
@@ -219,13 +231,13 @@ const COMPANY_PRESETS: CompanyPreset[] = [
     labelKey: 'onboarding.company_project_management',
     descriptionKey: 'onboarding.company_project_management_desc',
     icon: ClipboardList,
-    tags: ['Schedule', 'Tasks', 'Finance'],
+    tags: ['Schedule', 'Tasks', 'CDE', 'RFI'],
     enabledModules: [
-      'projects', 'schedule', 'tasks', 'meetings', 'finance',
-      'procurement', 'documents', 'cde', 'transmittals', 'rfi',
-      'submittals', 'correspondence', 'risks', 'changeorders',
-      'reporting', 'contacts', 'reports', 'analytics', 'markups',
-      'photos', 'field-reports', 'requirements', 'inspections',
+      'schedule', 'schedule_advanced', 'tasks', 'meetings',
+      'finance', 'procurement', 'changeorders', 'contracts', 'variations',
+      'documents', 'cde', 'transmittals', 'rfi', 'submittals', 'correspondence',
+      'risk', 'reporting', 'markups', 'fieldreports', 'daily_diary',
+      'requirements', 'inspections', 'eac', 'costmodel',
     ],
   },
   {
@@ -233,12 +245,28 @@ const COMPANY_PRESETS: CompanyPreset[] = [
     labelKey: 'onboarding.company_architecture',
     descriptionKey: 'onboarding.company_architecture_desc',
     icon: Pencil,
-    tags: ['Documents', 'CDE', 'BIM'],
+    tags: ['BIM', 'CDE', 'Documents'],
     enabledModules: [
-      'projects', 'documents', 'cde', 'bim', 'transmittals', 'rfi',
-      'submittals', 'correspondence', 'takeoff', 'pdf-takeoff', 'boq',
-      'costs', 'data-explorer', 'markups', 'photos', 'reports',
-      'validation', 'sustainability',
+      'documents', 'cde', 'opencde_api',
+      'bim_hub', 'bim_requirements', 'match_elements',
+      'transmittals', 'rfi', 'submittals', 'correspondence',
+      'takeoff', 'dwg_takeoff', 'cad',
+      'boq', 'costs',
+      'markups', 'validation', 'requirements', 'carbon', 'reporting',
+    ],
+  },
+  {
+    key: 'property_developer',
+    labelKey: 'onboarding.company_property_developer',
+    descriptionKey: 'onboarding.company_property_developer_desc',
+    icon: Home,
+    tags: ['Property', 'Finance', 'Carbon'],
+    enabledModules: [
+      'property_dev', 'finance', 'carbon',
+      'tendering', 'bid_management', 'contracts',
+      'documents', 'schedule', 'costs', 'boq',
+      'validation', 'reporting', 'crm', 'portal',
+      'requirements', 'meetings',
     ],
   },
   {
@@ -250,89 +278,6 @@ const COMPANY_PRESETS: CompanyPreset[] = [
     enabledModules: [], // special case: all modules
   },
 ];
-
-// ── Module catalog for review step ──────────────────────────────────────────
-
-interface ModuleDef {
-  key: string;
-  labelKey: string;
-  descriptionKey: string;
-  group: string;
-  core?: boolean;
-}
-
-const MODULE_GROUPS = [
-  { id: 'core', labelKey: 'onboarding.mod_group_core' },
-  { id: 'estimation', labelKey: 'onboarding.mod_group_estimation' },
-  { id: 'takeoff', labelKey: 'onboarding.mod_group_takeoff' },
-  { id: 'ai', labelKey: 'onboarding.mod_group_ai' },
-  { id: 'planning', labelKey: 'onboarding.mod_group_planning' },
-  { id: 'finance', labelKey: 'onboarding.mod_group_finance' },
-  { id: 'communication', labelKey: 'onboarding.mod_group_communication' },
-  { id: 'documents', labelKey: 'onboarding.mod_group_documents' },
-  { id: 'quality', labelKey: 'onboarding.mod_group_quality' },
-  { id: 'field', labelKey: 'onboarding.mod_group_field' },
-];
-
-const ALL_MODULES: ModuleDef[] = [
-  // Core (always on)
-  { key: 'dashboard', labelKey: 'nav.dashboard', descriptionKey: 'onboarding.mod_dashboard_desc', group: 'core', core: true },
-  { key: 'projects', labelKey: 'projects.title', descriptionKey: 'onboarding.mod_projects_desc', group: 'core', core: true },
-  { key: 'contacts', labelKey: 'contacts.title', descriptionKey: 'onboarding.mod_contacts_desc', group: 'core', core: true },
-  // Estimation
-  { key: 'boq', labelKey: 'boq.title', descriptionKey: 'onboarding.mod_boq_desc', group: 'estimation' },
-  { key: 'costs', labelKey: 'costs.title', descriptionKey: 'onboarding.mod_costs_desc', group: 'estimation' },
-  { key: 'assemblies', labelKey: 'nav.assemblies', descriptionKey: 'onboarding.mod_assemblies_desc', group: 'estimation' },
-  { key: 'catalog', labelKey: 'catalog.title', descriptionKey: 'onboarding.mod_catalog_desc', group: 'estimation' },
-  { key: 'validation', labelKey: 'validation.title', descriptionKey: 'onboarding.mod_validation_desc', group: 'estimation' },
-  // Takeoff & BIM
-  { key: 'takeoff', labelKey: 'nav.takeoff_overview', descriptionKey: 'onboarding.mod_takeoff_desc', group: 'takeoff' },
-  { key: 'pdf-takeoff', labelKey: 'nav.pdf_measurements', descriptionKey: 'onboarding.mod_pdf_takeoff_desc', group: 'takeoff' },
-  { key: 'bim', labelKey: 'nav.bim_viewer', descriptionKey: 'onboarding.mod_bim_desc', group: 'takeoff' },
-  { key: 'data-explorer', labelKey: 'nav.cad_bim_explorer', descriptionKey: 'onboarding.mod_data_explorer_desc', group: 'takeoff' },
-  // AI
-  { key: 'ai-estimate', labelKey: 'nav.ai_estimate', descriptionKey: 'onboarding.mod_ai_estimate_desc', group: 'ai' },
-  { key: 'advisor', labelKey: 'nav.ai_advisor', descriptionKey: 'onboarding.mod_advisor_desc', group: 'ai' },
-  { key: 'project-intelligence', labelKey: 'nav.project_intelligence', descriptionKey: 'onboarding.mod_pci_desc', group: 'ai' },
-  // Planning
-  { key: 'schedule', labelKey: 'schedule.title', descriptionKey: 'onboarding.mod_schedule_desc', group: 'planning' },
-  { key: 'tasks', labelKey: 'tasks.title', descriptionKey: 'onboarding.mod_tasks_desc', group: 'planning' },
-  { key: '5d', labelKey: 'nav.5d_cost_model', descriptionKey: 'onboarding.mod_5d_desc', group: 'planning' },
-  // Finance
-  { key: 'finance', labelKey: 'finance.title', descriptionKey: 'onboarding.mod_finance_desc', group: 'finance' },
-  { key: 'procurement', labelKey: 'procurement.title', descriptionKey: 'onboarding.mod_procurement_desc', group: 'finance' },
-  { key: 'tendering', labelKey: 'tendering.title', descriptionKey: 'onboarding.mod_tendering_desc', group: 'finance' },
-  { key: 'changeorders', labelKey: 'nav.change_orders', descriptionKey: 'onboarding.mod_changeorders_desc', group: 'finance' },
-  // Communication
-  { key: 'meetings', labelKey: 'meetings.title', descriptionKey: 'onboarding.mod_meetings_desc', group: 'communication' },
-  { key: 'rfi', labelKey: 'rfi.title', descriptionKey: 'onboarding.mod_rfi_desc', group: 'communication' },
-  { key: 'submittals', labelKey: 'submittals.title', descriptionKey: 'onboarding.mod_submittals_desc', group: 'communication' },
-  { key: 'transmittals', labelKey: 'transmittals.title', descriptionKey: 'onboarding.mod_transmittals_desc', group: 'communication' },
-  { key: 'correspondence', labelKey: 'correspondence.title', descriptionKey: 'onboarding.mod_correspondence_desc', group: 'communication' },
-  // Documents
-  { key: 'documents', labelKey: 'nav.documents', descriptionKey: 'onboarding.mod_documents_desc', group: 'documents' },
-  { key: 'cde', labelKey: 'cde.title', descriptionKey: 'onboarding.mod_cde_desc', group: 'documents' },
-  { key: 'photos', labelKey: 'nav.photos', descriptionKey: 'onboarding.mod_photos_desc', group: 'documents' },
-  { key: 'markups', labelKey: 'nav.markups', descriptionKey: 'onboarding.mod_markups_desc', group: 'documents' },
-  // Quality & Safety
-  { key: 'inspections', labelKey: 'inspections.title', descriptionKey: 'onboarding.mod_inspections_desc', group: 'quality' },
-  { key: 'ncr', labelKey: 'ncr.title', descriptionKey: 'onboarding.mod_ncr_desc', group: 'quality' },
-  { key: 'safety', labelKey: 'safety.title', descriptionKey: 'onboarding.mod_safety_desc', group: 'quality' },
-  { key: 'punchlist', labelKey: 'nav.punchlist', descriptionKey: 'onboarding.mod_punchlist_desc', group: 'quality' },
-  { key: 'risks', labelKey: 'nav.risk_register', descriptionKey: 'onboarding.mod_risks_desc', group: 'quality' },
-  // Field
-  { key: 'field-reports', labelKey: 'nav.field_reports', descriptionKey: 'onboarding.mod_field_reports_desc', group: 'field' },
-  { key: 'requirements', labelKey: 'nav.requirements', descriptionKey: 'onboarding.mod_requirements_desc', group: 'field' },
-  { key: 'reports', labelKey: 'nav.reports', descriptionKey: 'onboarding.mod_reports_desc', group: 'field' },
-  { key: 'reporting', labelKey: 'nav.reporting', descriptionKey: 'onboarding.mod_reporting_desc', group: 'field' },
-  { key: 'analytics', labelKey: 'nav.analytics', descriptionKey: 'onboarding.mod_analytics_desc', group: 'field' },
-  { key: 'sustainability', labelKey: 'nav.sustainability', descriptionKey: 'onboarding.mod_sustainability_desc', group: 'field' },
-  { key: 'cost-benchmark', labelKey: 'nav.cost_benchmark', descriptionKey: 'onboarding.mod_cost_benchmark_desc', group: 'field' },
-  { key: 'collaboration', labelKey: 'nav.collaboration', descriptionKey: 'onboarding.mod_collaboration_desc', group: 'field' },
-  { key: 'templates', labelKey: 'nav.templates', descriptionKey: 'onboarding.mod_templates_desc', group: 'field' },
-];
-
-const CORE_MODULE_KEYS = new Set(ALL_MODULES.filter((m) => m.core).map((m) => m.key));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -897,7 +842,7 @@ function StepCompanyProfile({
             >
               {t('onboarding.all_modules', {
                 defaultValue: 'All {{count}} modules',
-                count: ALL_MODULES.length,
+                count: TOTAL_MODULE_COUNT,
               })}
             </span>
           </button>
@@ -1760,6 +1705,24 @@ function StepFinish({
         >
           {t('onboarding.start_working', { defaultValue: 'Start Working' })}
         </Button>
+      </div>
+
+      {/* Explore-all CTA — links to /modules so users can see the full
+          88-module marketplace post-onboarding. Persists onboarding-complete
+          before navigation so users don't get bounced back into the wizard. */}
+      <div className="mt-6">
+        <Link
+          to="/modules"
+          onClick={markOnboardingCompleted}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-oe-blue hover:underline transition-colors"
+        >
+          <Package size={14} />
+          {t('onboarding.explore_all_modules', {
+            defaultValue: 'Explore all {{count}} modules',
+            count: TOTAL_MODULE_COUNT,
+          })}
+          <ArrowRight size={12} />
+        </Link>
       </div>
     </div>
   );

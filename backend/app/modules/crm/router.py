@@ -639,9 +639,8 @@ async def crm_dashboard(
         and (owner_user_id is None or li.assigned_to == owner_user_id)
     ]
 
-    from datetime import timedelta as _td
-
     from datetime import datetime as _dt
+    from datetime import timedelta as _td
 
     horizon = (_dt.now().date() + _td(days=7)).isoformat()
     activities_tuple = await service.activity_repo.list_all(

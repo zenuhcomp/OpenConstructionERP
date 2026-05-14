@@ -5,7 +5,7 @@
  * backend/app/modules/schedule_advanced/router.py
  */
 
-import { apiGet, apiPost, apiDelete } from '@/shared/lib/api';
+import { apiGet, apiPost, apiPatch, apiDelete } from '@/shared/lib/api';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 
@@ -259,8 +259,97 @@ export function createPhasePlan(data: {
   name: string;
   planned_start?: string;
   planned_finish?: string;
+  notes?: string;
+  pulled_status?: PhaseStatus;
 }): Promise<PhasePlan> {
   return apiPost<PhasePlan>('/v1/schedule-advanced/phase-plans/', data);
+}
+
+export function updatePhasePlan(
+  phaseId: string,
+  data: {
+    name?: string;
+    planned_start?: string | null;
+    planned_finish?: string | null;
+    notes?: string | null;
+  },
+): Promise<PhasePlan> {
+  return apiPatch<PhasePlan>(
+    `/v1/schedule-advanced/phase-plans/${phaseId}`,
+    data,
+  );
+}
+
+export function deletePhasePlan(phaseId: string): Promise<void> {
+  return apiDelete(`/v1/schedule-advanced/phase-plans/${phaseId}`);
+}
+
+/**
+ * Standard construction-phase templates. Day-counts are conservative
+ * defaults — users edit each phase after seeding.
+ */
+export const PHASE_TEMPLATES: Record<
+  'residential' | 'commercial' | 'infrastructure',
+  { name: string; days: number }[]
+> = {
+  residential: [
+    { name: 'Site preparation', days: 14 },
+    { name: 'Foundation', days: 28 },
+    { name: 'Structure', days: 56 },
+    { name: 'Roofing', days: 14 },
+    { name: 'MEP rough-in', days: 35 },
+    { name: 'Drywall and finishes', days: 42 },
+    { name: 'Handover', days: 7 },
+  ],
+  commercial: [
+    { name: 'Demolition', days: 14 },
+    { name: 'Site preparation', days: 21 },
+    { name: 'Foundation', days: 42 },
+    { name: 'Structure', days: 90 },
+    { name: 'Building envelope', days: 35 },
+    { name: 'MEP rough-in', days: 56 },
+    { name: 'Interior fit-out', days: 70 },
+    { name: 'Commissioning', days: 21 },
+    { name: 'Handover', days: 7 },
+  ],
+  infrastructure: [
+    { name: 'Site survey and clearing', days: 21 },
+    { name: 'Earthworks', days: 56 },
+    { name: 'Subgrade and drainage', days: 42 },
+    { name: 'Base layers', days: 28 },
+    { name: 'Surfacing', days: 21 },
+    { name: 'Signage and markings', days: 14 },
+    { name: 'Final inspection', days: 7 },
+  ],
+};
+
+/**
+ * Seed the standard construction phases for a master schedule in one call.
+ * Used by the "Apply template" affordance on the Phase Plans tab.
+ */
+export async function applyPhaseTemplate(
+  masterScheduleId: string,
+  template: keyof typeof PHASE_TEMPLATES,
+  planStart?: string,
+): Promise<PhasePlan[]> {
+  const phases = PHASE_TEMPLATES[template];
+  const startBase = planStart ? new Date(planStart) : new Date();
+  const created: PhasePlan[] = [];
+  let cursor = new Date(startBase);
+  for (const p of phases) {
+    const phaseStart = new Date(cursor);
+    const phaseEnd = new Date(cursor);
+    phaseEnd.setDate(phaseEnd.getDate() + p.days);
+    const c = await createPhasePlan({
+      master_schedule_id: masterScheduleId,
+      name: p.name,
+      planned_start: phaseStart.toISOString().slice(0, 10),
+      planned_finish: phaseEnd.toISOString().slice(0, 10),
+    });
+    created.push(c);
+    cursor = phaseEnd;
+  }
+  return created;
 }
 
 export function pullPhase(phaseId: string): Promise<PhasePlan> {

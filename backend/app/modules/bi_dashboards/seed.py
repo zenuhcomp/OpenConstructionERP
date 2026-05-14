@@ -14,8 +14,7 @@
 from __future__ import annotations
 
 import logging
-import uuid
-from datetime import UTC, date as _date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select

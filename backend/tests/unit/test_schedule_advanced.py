@@ -816,3 +816,162 @@ def test_constraint_create_with_all_fields() -> None:
     )
     assert c.constraint_type == "permit"
     assert c.status == "open"
+
+
+# ── Phase plan CRUD + lifecycle (Phase Plans page coverage) ───────────────
+
+
+@pytest.mark.asyncio
+async def test_create_phase_plan_with_dates_persisted() -> None:
+    """End-to-end create — verifies dates + notes flow through."""
+    svc = _make_service()
+    m = await svc.create_master_schedule(
+        MasterScheduleCreate(project_id=PROJECT_ID, name="MS"), user_id="u",
+    )
+    p = await svc.create_phase_plan(
+        PhasePlanCreate(
+            master_schedule_id=m.id,
+            name="Foundation",
+            planned_start=date(2026, 6, 1),
+            planned_finish=date(2026, 6, 30),
+            notes="Spread foundations + crane pad",
+        )
+    )
+    assert p.name == "Foundation"
+    assert p.planned_start == date(2026, 6, 1)
+    assert p.planned_finish == date(2026, 6, 30)
+    assert p.notes == "Spread foundations + crane pad"
+    assert p.pulled_status == "in_planning"
+
+
+@pytest.mark.asyncio
+async def test_update_phase_plan_changes_dates_and_notes() -> None:
+    """The edit modal patches name + dates + notes; service must apply them."""
+    from app.modules.schedule_advanced.schemas import PhasePlanUpdate
+
+    svc = _make_service()
+    m = await svc.create_master_schedule(
+        MasterScheduleCreate(project_id=PROJECT_ID, name="MS"), user_id="u",
+    )
+    p = await svc.create_phase_plan(
+        PhasePlanCreate(master_schedule_id=m.id, name="Phase A"),
+    )
+    updated = await svc.update_phase_plan(
+        p.id,
+        PhasePlanUpdate(
+            name="Phase A (revised)",
+            planned_start=date(2026, 7, 1),
+            planned_finish=date(2026, 7, 31),
+            notes="Re-baselined after permit delay",
+        ),
+    )
+    assert updated.name == "Phase A (revised)"
+    assert updated.planned_start == date(2026, 7, 1)
+    assert updated.planned_finish == date(2026, 7, 31)
+    assert "permit delay" in updated.notes
+
+
+@pytest.mark.asyncio
+async def test_update_phase_plan_rejects_illegal_status_transition() -> None:
+    """Direct status changes via PATCH must obey the transition table."""
+    from fastapi import HTTPException
+
+    from app.modules.schedule_advanced.schemas import PhasePlanUpdate
+
+    svc = _make_service()
+    m = await svc.create_master_schedule(
+        MasterScheduleCreate(project_id=PROJECT_ID, name="MS"), user_id="u",
+    )
+    p = await svc.create_phase_plan(
+        PhasePlanCreate(master_schedule_id=m.id, name="P"),
+    )
+    # in_planning → completed is NOT a legal transition
+    with pytest.raises(HTTPException) as exc:
+        await svc.update_phase_plan(
+            p.id, PhasePlanUpdate(pulled_status="completed"),
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delete_phase_plan_removes_row() -> None:
+    """Delete must actually remove the row (UI confirm dialog calls this)."""
+    from fastapi import HTTPException
+
+    svc = _make_service()
+    m = await svc.create_master_schedule(
+        MasterScheduleCreate(project_id=PROJECT_ID, name="MS"), user_id="u",
+    )
+    p = await svc.create_phase_plan(
+        PhasePlanCreate(master_schedule_id=m.id, name="P"),
+    )
+    await svc.delete_phase_plan(p.id)
+    with pytest.raises(HTTPException) as exc:
+        await svc.get_phase_plan(p.id)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_phase_plan_404_when_missing() -> None:
+    """Deleting a phase that doesn't exist must 404, not silently succeed."""
+    from fastapi import HTTPException
+
+    svc = _make_service()
+    with pytest.raises(HTTPException) as exc:
+        await svc.delete_phase_plan(uuid.uuid4())
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_full_phase_lifecycle_planning_pulled_active_completed() -> None:
+    """Walk every legal transition in one shot — mirrors the UI lifecycle buttons."""
+    svc = _make_service()
+    m = await svc.create_master_schedule(
+        MasterScheduleCreate(project_id=PROJECT_ID, name="MS"), user_id="u",
+    )
+    p = await svc.create_phase_plan(
+        PhasePlanCreate(master_schedule_id=m.id, name="P"),
+    )
+    assert p.pulled_status == "in_planning"
+    with _patch_event_bus():
+        p = await svc.pull_phase(p.id, user_id="u")
+    assert p.pulled_status == "pulled"
+    p = await svc.start_phase(p.id)
+    assert p.pulled_status == "active"
+    p = await svc.complete_phase(p.id)
+    assert p.pulled_status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_phase_finish_before_start_currently_accepted_at_schema_level() -> None:
+    """Pins current backend permissiveness — UI guards finish<start in PhaseFormModal."""
+    svc = _make_service()
+    m = await svc.create_master_schedule(
+        MasterScheduleCreate(project_id=PROJECT_ID, name="MS"), user_id="u",
+    )
+    p = await svc.create_phase_plan(
+        PhasePlanCreate(
+            master_schedule_id=m.id,
+            name="P",
+            planned_start=date(2026, 8, 1),
+            planned_finish=date(2026, 7, 1),
+        )
+    )
+    assert p.planned_start > p.planned_finish
+
+
+@pytest.mark.asyncio
+async def test_phase_plans_listed_for_master() -> None:
+    """list_for_master returns every phase created against the master id."""
+    svc = _make_service()
+    m = await svc.create_master_schedule(
+        MasterScheduleCreate(project_id=PROJECT_ID, name="MS"), user_id="u",
+    )
+    await svc.create_phase_plan(
+        PhasePlanCreate(master_schedule_id=m.id, name="Late", planned_start=date(2026, 12, 1)),
+    )
+    await svc.create_phase_plan(
+        PhasePlanCreate(master_schedule_id=m.id, name="Early", planned_start=date(2026, 6, 1)),
+    )
+    items = await svc.phase_repo.list_for_master(m.id)
+    assert {p.name for p in items} == {"Late", "Early"}

@@ -20,7 +20,8 @@ describe('NotFoundPage', () => {
 
   it('should show "Page not found" heading', () => {
     renderWithRouter();
-    expect(screen.getByText('Page not found')).toBeInTheDocument();
+    // Visible UI strings carry trailing zero-width identity markers — match by prefix.
+    expect(screen.getByText(/^Page not found/)).toBeInTheDocument();
   });
 
   it('should show description text', () => {
@@ -30,12 +31,12 @@ describe('NotFoundPage', () => {
 
   it('should have Go back button', () => {
     renderWithRouter();
-    expect(screen.getByText('Go back')).toBeInTheDocument();
+    expect(screen.getByText(/^Go back/)).toBeInTheDocument();
   });
 
   it('should have Dashboard link', () => {
     renderWithRouter();
-    const dashboardLink = screen.getByText('Dashboard');
+    const dashboardLink = screen.getByText(/^Dashboard/);
     expect(dashboardLink).toBeInTheDocument();
     expect(dashboardLink.closest('a')).toHaveAttribute('href', '/');
   });

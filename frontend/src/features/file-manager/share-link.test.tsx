@@ -22,6 +22,17 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import React from 'react';
 
+// The global test setup mocks `useParams` to always return `{}`, which would
+// strand SharePage on the "no token" path before any fetch fires. Restore the
+// real react-router-dom surface inside this test file so the MemoryRouter +
+// Route harness can populate `:token` from the URL.
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>(
+    'react-router-dom',
+  );
+  return actual;
+});
+
 import { ShareLinkModal } from './components/ShareLinkModal';
 import { SharePage } from './SharePage';
 import type { FileRow, ShareLinkResponse } from './types';
@@ -76,30 +87,55 @@ let accessResponse: { status: number; body: unknown } = {
   },
 };
 
+// MSW v2 in Node + jsdom resolves relative fetch URLs against the jsdom origin
+// (http://localhost/), so handlers must match absolute URLs. Wildcard patterns
+// (`*/api/v1/...`) match regardless of the resolved origin while still keeping
+// :param tokens working — the simpler relative-path form silently no-ops.
+//
+// The `share-links/:token/` route is order-sensitive: registering it BEFORE the
+// owner list / create routes prevents msw from matching the literal segment
+// "share-links" as the `:id` placeholder, which would otherwise swallow the
+// public probe request and return the owner-list response.
 const server = setupServer(
-  http.get('/api/v1/documents/:id/share-links/', () =>
-    HttpResponse.json(existingLinks),
-  ),
-  http.post('/api/v1/documents/:id/share-links/', () =>
-    HttpResponse.json(createNextResponse, { status: 201 }),
-  ),
-  http.delete('/api/v1/documents/:id/share-links/:linkId/', () => {
-    existingLinks = [];
-    return new HttpResponse(null, { status: 204 });
-  }),
-  http.get('/api/v1/documents/share-links/:token/', () =>
+  http.get('*/api/v1/documents/share-links/:token/', () =>
     HttpResponse.json(publicInfoResponse.body as object, {
       status: publicInfoResponse.status,
     }),
   ),
-  http.post('/api/v1/documents/share-links/:token/access/', () =>
+  http.post('*/api/v1/documents/share-links/:token/access/', () =>
     HttpResponse.json(accessResponse.body as object, {
       status: accessResponse.status,
     }),
   ),
+  http.get('*/api/v1/documents/:id/share-links/', () =>
+    HttpResponse.json(existingLinks),
+  ),
+  http.post('*/api/v1/documents/:id/share-links/', () =>
+    HttpResponse.json(createNextResponse, { status: 201 }),
+  ),
+  http.delete('*/api/v1/documents/:id/share-links/:linkId/', () => {
+    existingLinks = [];
+    return new HttpResponse(null, { status: 204 });
+  }),
 );
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
+// MSW's interceptor replaces `globalThis.fetch`; the global test setup
+// can't drop the realm-mismatched AbortSignal after that swap, so we wrap
+// the post-MSW fetch here. Without this, our production `request()` helper
+// fails undici's `RequestInit.signal instanceof AbortSignal` check (the
+// jsdom-provided AbortController is from a different realm than Node's
+// native one).
+beforeAll(() => {
+  server.listen({ onUnhandledRequest: 'warn' });
+  const mswFetch = globalThis.fetch;
+  globalThis.fetch = ((input, init) => {
+    if (init && 'signal' in init) {
+      const { signal: _signal, ...rest } = init;
+      return mswFetch(input, rest);
+    }
+    return mswFetch(input, init);
+  }) as typeof fetch;
+});
 afterEach(() => {
   server.resetHandlers();
   existingLinks = [];

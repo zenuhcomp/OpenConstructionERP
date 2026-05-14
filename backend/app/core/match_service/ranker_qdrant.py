@@ -349,6 +349,100 @@ async def _maybe_translate(
     return envelope, result
 
 
+# ── Payload-derived fallbacks (snapshot-only installs) ───────────────────
+#
+# When the DDC v3 snapshot is the only source installed (no CWICR CSV /
+# parquet sideload), the SQL ``oe_costs_item`` table is empty for the
+# snapshot's region and ``lookup_full_rows`` returns nothing. The
+# Qdrant payload alone has to drive description / currency on the
+# candidate — otherwise the BGE cross-encoder collapses score to ≈ 0
+# because the passage text is just an opaque rate_code, and the user
+# sees blank descriptions plus a zero score even when the vector hit
+# was semantically perfect.
+#
+# These helpers synthesise the missing fields from the snapshot's
+# categorical metadata. ``unit_rate`` is INTENTIONALLY left at 0.0 when
+# the parquet is missing — the operator's load-bearing number must
+# never be fabricated.
+
+_COUNTRY_DEFAULT_CURRENCY: dict[str, str] = {
+    # North America
+    "US": "USD", "USA": "USD", "CA": "CAD", "MX": "MXN",
+    # Central & South America
+    "BR": "BRL", "AR": "ARS", "CL": "CLP", "CO": "COP", "PE": "PEN",
+    "UY": "UYU", "VE": "VES", "BO": "BOB", "PY": "PYG", "EC": "USD",
+    "GT": "GTQ", "DO": "DOP", "CR": "CRC", "PA": "PAB",
+    # Western & Northern Europe (Eurozone first, then non-EUR)
+    "DE": "EUR", "FR": "EUR", "IT": "EUR", "ES": "EUR", "PT": "EUR",
+    "NL": "EUR", "BE": "EUR", "AT": "EUR", "IE": "EUR", "FI": "EUR",
+    "GR": "EUR", "LU": "EUR", "MT": "EUR", "CY": "EUR", "SK": "EUR",
+    "SI": "EUR", "EE": "EUR", "LV": "EUR", "LT": "EUR",
+    "GB": "GBP", "UK": "GBP", "CH": "CHF", "NO": "NOK", "SE": "SEK",
+    "DK": "DKK", "IS": "ISK", "LI": "CHF",
+    # Eastern Europe / CIS
+    "PL": "PLN", "CZ": "CZK", "HU": "HUF", "RO": "RON", "BG": "BGN",
+    "HR": "EUR", "RS": "RSD", "UA": "UAH", "RU": "RUB", "BY": "BYN",
+    "MD": "MDL", "AL": "ALL", "MK": "MKD", "BA": "BAM",
+    # Middle East & North Africa
+    "AE": "AED", "SA": "SAR", "QA": "QAR", "KW": "KWD", "BH": "BHD",
+    "OM": "OMR", "IL": "ILS", "TR": "TRY", "EG": "EGP", "MA": "MAD",
+    "DZ": "DZD", "TN": "TND", "JO": "JOD", "LB": "LBP", "IR": "IRR",
+    "IQ": "IQD",
+    # Sub-Saharan Africa
+    "ZA": "ZAR", "NG": "NGN", "KE": "KES", "GH": "GHS", "ET": "ETB",
+    "TZ": "TZS", "UG": "UGX", "RW": "RWF", "CI": "XOF", "SN": "XOF",
+    "CM": "XAF", "AO": "AOA", "MZ": "MZN", "ZM": "ZMW", "ZW": "ZWL",
+    "BW": "BWP", "MU": "MUR", "NA": "NAD",
+    # Asia-Pacific
+    "CN": "CNY", "HK": "HKD", "TW": "TWD", "JP": "JPY", "KR": "KRW",
+    "SG": "SGD", "MY": "MYR", "TH": "THB", "ID": "IDR", "PH": "PHP",
+    "VN": "VND", "IN": "INR", "BD": "BDT", "PK": "PKR", "LK": "LKR",
+    "NP": "NPR", "MN": "MNT", "KZ": "KZT", "UZ": "UZS", "AZ": "AZN",
+    "GE": "GEL", "AM": "AMD",
+    # Oceania
+    "AU": "AUD", "NZ": "NZD", "FJ": "FJD", "PG": "PGK",
+}
+
+
+def _description_from_payload(payload: dict[str, Any]) -> str:
+    """Synthesise a candidate description from snapshot categorical fields.
+
+    Used as the fallback when neither the parquet row nor the Qdrant
+    payload's ``description`` carry usable text. The DDC v3 snapshot
+    indexes a handful of categorical columns
+    (``collection_name`` / ``material_class`` / ``ifc_class`` /
+    ``category_type`` / ``masterformat_division``) that, concatenated,
+    read as a human-grade "what this rate is" line — good enough to
+    surface in the candidate list AND for the BGE cross-encoder to
+    score against.
+
+    Empty / None inputs are skipped so a sparse payload doesn't produce
+    em-dash spam. ``category_type`` is title-cased so an ALL-CAPS
+    snapshot value (``"REPAIR AND CONSTRUCTION WORKS"``) reads as
+    sentence case in the UI. ``masterformat_division`` is prefixed with
+    its label so the human reader knows what the digits mean.
+
+    Returns an empty string when no categorical field is populated.
+    """
+    parts: list[str] = []
+    collection = (payload.get("collection_name") or "").strip()
+    if collection:
+        parts.append(collection)
+    material = (payload.get("material_class") or "").strip()
+    if material:
+        parts.append(material)
+    ifc_class = (payload.get("ifc_class") or "").strip()
+    if ifc_class:
+        parts.append(ifc_class)
+    category_type = (payload.get("category_type") or "").strip()
+    if category_type:
+        parts.append(category_type.title())
+    masterformat = (payload.get("masterformat_division") or "").strip()
+    if masterformat:
+        parts.append(f"MasterFormat {masterformat}")
+    return " — ".join(parts)
+
+
 # ── Hit → candidate ──────────────────────────────────────────────────────
 
 
@@ -362,12 +456,22 @@ def _hit_to_candidate(
     description / unit / unit_cost / classification fields. The Qdrant
     score (RRF fused) is treated as the raw vector_score that the
     boost stack adjusts on top.
+
+    Snapshot-only installs surface here with ``full_row=None`` — when
+    that happens we synthesise description from the snapshot's
+    categorical fields via :func:`_description_from_payload` and fill
+    currency from the country head via :data:`_COUNTRY_DEFAULT_CURRENCY`.
+    ``unit_rate`` STAYS 0.0 in that case — fabricating the operator's
+    load-bearing number would be worse than surfacing an empty rate.
     """
 
     payload = hit.payload or {}
     full = full_row or {}
 
-    # Classification: the parquet may carry several mappings.
+    # Classification: the parquet may carry several mappings. Also
+    # surface ``masterformat_division`` from the Qdrant payload — the
+    # v3 snapshot indexes that field directly and it's the only
+    # classification a snapshot-only install can provide.
     classification: dict[str, str] = {}
     for cls_key, parquet_key in (
         ("din276", "classification_din276"),
@@ -377,13 +481,23 @@ def _hit_to_candidate(
         v = full.get(parquet_key) or payload.get(parquet_key)
         if v:
             classification[cls_key] = str(v)
+    # Snapshot-only fallback for masterformat from the indexed payload.
+    if "masterformat" not in classification:
+        mf = payload.get("masterformat_division")
+        if mf:
+            classification["masterformat"] = str(mf)
 
     raw_score = float(hit.score)
     rate_code = hit.rate_code
 
     # Description / unit / cost prefer the parquet (richer) and fall
-    # back to whatever the Qdrant payload happened to carry.
+    # back to whatever the Qdrant payload happened to carry. When both
+    # are missing, synthesise from the snapshot's categorical fields so
+    # the BGE cross-encoder has SOMETHING to score against and the UI
+    # surfaces a human-readable line instead of just an opaque code.
     description = str(full.get("description") or payload.get("description") or "")
+    if not description:
+        description = _description_from_payload(payload)
     unit = str(full.get("rate_unit") or payload.get("rate_unit") or "")
     unit_rate = float(
         full.get("total_cost_per_position")
@@ -393,6 +507,14 @@ def _hit_to_candidate(
     )
     currency = str(full.get("currency") or payload.get("currency") or "")
     region_code = str(full.get("country") or payload.get("country") or hit.country)
+    # Snapshot-only fallback: derive currency from the country head when
+    # neither parquet nor payload provided it. Unknown country codes
+    # leave currency empty so the UI can flag the gap rather than
+    # surfacing a wrong default.
+    if not currency and region_code:
+        currency = _COUNTRY_DEFAULT_CURRENCY.get(
+            region_code.strip().upper(), ""
+        )
 
     return MatchCandidate(
         id=rate_code or None,
@@ -674,7 +796,11 @@ async def _metadata_only_candidates(
         )
         scored.append((score, breakdown, h))
 
-    scored.sort(key=lambda t: t[0], reverse=True)
+    # Deterministic tie-break on rate_code (see determinism.py): the
+    # metadata-only score quantises to coarse bands (0.0 / 0.225 / 0.45
+    # / 0.675 / 0.9 with the default weights) so equal-score ties are
+    # the norm, not the exception. Pin them by lex order.
+    scored.sort(key=lambda t: (-t[0], t[2].rate_code))
     out: list[QdrantHit] = []
     for score, breakdown, h in scored[:top_k]:
         # Annotate payload so downstream UI/log can show why this ranked.

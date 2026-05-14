@@ -46,7 +46,6 @@ from app.modules.service.schemas import (
     AssetChecklistCreate,
     AssetChecklistUpdate,
     ContractDashboardResponse,
-    DebriefReportCreate,
     NCRFromWorkOrderRequest,
     NCRFromWorkOrderResponse,
     ServiceAssetCreate,

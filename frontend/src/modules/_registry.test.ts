@@ -182,7 +182,9 @@ describe('getModuleDefaults', () => {
     expect(defaults['validation']).toBe(true);
     // Advanced/regional — disabled by default
     expect(defaults['risk-analysis']).toBe(false);
-    expect(defaults['gaeb-exchange']).toBe(false);
+    // gaeb-exchange flipped to on-by-default in v2.6.30 (GAEB DA XML 3.3
+    // is core for the DACH workflow — see manifest defaultEnabled=true).
+    expect(defaults['gaeb-exchange']).toBe(true);
     expect(defaults['uk-nrm-exchange']).toBe(false);
     expect(defaults['us-masterformat-exchange']).toBe(false);
     expect(defaults['fr-dpgf-exchange']).toBe(false);

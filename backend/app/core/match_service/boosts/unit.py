@@ -192,9 +192,18 @@ def _normalise_unit(unit: str) -> str:
         1. Strip + lowercase
         2. Fold ``²`` / ``³`` and ``^`` / ``**`` to ASCII (``m²`` → ``m2``)
         3. Locale alias table (``立方米`` → ``m3``, ``шт`` → ``pcs``, …)
-        4. Pass through verbatim — comparisons still work even on unknown
-           codes (two envelopes / candidates with the same exotic spelling
-           still match).
+        4. Pass through verbatim — comparisons still work even on
+           unknown codes.
+
+    Note: CWICR-snapshot units like ``"100 CY"`` / ``"1000 SF"`` are
+    intentionally NOT folded into ``m3`` / ``m2`` here. A 2026-05-14
+    quality-loop bench Round 1 attempted to add US-imperial aliases +
+    leading-multiplier strip; the change destabilised the top-10
+    ordering BGE sees and regressed recall@1 from 0.45 → ~0.05 on the
+    20-fixture bench. Until we understand the interaction we keep the
+    historic conservative behaviour: unknown CWICR-batch units pass
+    through verbatim, so the dimensional comparison treats them as
+    self-equal (no uniform area-boost across unrelated MFs).
     """
     if not unit:
         return ""

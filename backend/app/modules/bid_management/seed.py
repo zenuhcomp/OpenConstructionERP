@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.bid_management.models import (
     BidAward,
+    Bidder,
     BidInvitation,
     BidPackage,
     BidPackageLineItem,
@@ -31,7 +32,6 @@ from app.modules.bid_management.models import (
     BidRejection,
     BidSubmission,
     BidSubmissionLine,
-    Bidder,
 )
 
 logger = logging.getLogger(__name__)

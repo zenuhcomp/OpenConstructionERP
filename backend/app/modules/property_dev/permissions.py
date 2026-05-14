@@ -2,7 +2,6 @@
 
 from app.core.permissions import Role, permission_registry
 
-
 PROPERTY_DEV_PERMISSIONS: dict[str, Role] = {
     "property_dev.read": Role.VIEWER,
     "property_dev.create": Role.EDITOR,

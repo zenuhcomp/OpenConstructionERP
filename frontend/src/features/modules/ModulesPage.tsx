@@ -146,12 +146,46 @@ function formatSize(sizeMb: number): string {
 
 /* ── Module category display config ────────────────────────────────────── */
 
-const MODULE_CATEGORY_ORDER = ['estimation', 'planning', 'procurement', 'tools', 'regional'] as const;
+const MODULE_CATEGORY_ORDER = [
+  'core',
+  'estimation',
+  'planning',
+  'procurement',
+  'finance',
+  'commercial',
+  'contracts',
+  'bim',
+  'ai',
+  'analytics',
+  'quality',
+  'safety',
+  'field',
+  'communication',
+  'documentation',
+  'integration',
+  'converter',
+  'tools',
+  'regional',
+] as const;
 
 const MODULE_CATEGORY_META: Record<string, { labelKey: string; defaultLabel: string }> = {
+  core: { labelKey: 'modules.cat_core', defaultLabel: 'Core' },
   estimation: { labelKey: 'nav.group_estimation', defaultLabel: 'Estimation' },
   planning: { labelKey: 'nav.group_planning', defaultLabel: 'Planning' },
   procurement: { labelKey: 'nav.group_procurement', defaultLabel: 'Procurement' },
+  finance: { labelKey: 'modules.cat_finance', defaultLabel: 'Finance' },
+  commercial: { labelKey: 'modules.cat_commercial', defaultLabel: 'Commercial' },
+  contracts: { labelKey: 'modules.cat_contracts', defaultLabel: 'Contracts' },
+  bim: { labelKey: 'modules.cat_bim', defaultLabel: 'BIM' },
+  ai: { labelKey: 'modules.cat_ai', defaultLabel: 'AI' },
+  analytics: { labelKey: 'modules.cat_analytics', defaultLabel: 'Analytics' },
+  quality: { labelKey: 'modules.cat_quality', defaultLabel: 'Quality' },
+  safety: { labelKey: 'modules.cat_safety', defaultLabel: 'Safety' },
+  field: { labelKey: 'modules.cat_field', defaultLabel: 'Field Operations' },
+  communication: { labelKey: 'modules.cat_communication', defaultLabel: 'Communication' },
+  documentation: { labelKey: 'modules.cat_documentation', defaultLabel: 'Documentation' },
+  integration: { labelKey: 'modules.cat_integration', defaultLabel: 'Integration' },
+  converter: { labelKey: 'modules.cat_converter', defaultLabel: 'CAD / BIM Converters' },
   tools: { labelKey: 'nav.group_tools', defaultLabel: 'Tools' },
   regional: { labelKey: 'modules.cat_regional', defaultLabel: 'Regional Standards' },
 };
@@ -188,11 +222,11 @@ export function ModulesPage() {
       <div className="mb-6 animate-card-in flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-content-primary">
-            {t('modules.page_title', { defaultValue: 'Modules & Marketplace‌⁠‍' })}
+            {t('modules.page_title', { defaultValue: 'Modules & Marketplace' })}
           </h1>
           <p className="mt-1 text-sm text-content-secondary">
             {t('modules.page_subtitle', {
-              defaultValue: 'Manage your company profile, data packages, and system modules.‌⁠‍',
+              defaultValue: 'Manage your company profile, data packages, and system modules.',
             })}
           </p>
         </div>
@@ -200,16 +234,16 @@ export function ModulesPage() {
           to="/modules/developer-guide"
           className="inline-flex items-center gap-2 h-9 px-3 rounded-lg border border-oe-blue/30 bg-oe-blue/5 text-xs font-medium text-oe-blue hover:bg-oe-blue/10 hover:border-oe-blue/50 transition-colors shrink-0"
           title={t('modules.dev_guide_hint', {
-            defaultValue: 'Learn how to build your own module‌⁠‍',
+            defaultValue: 'Learn how to build your own module',
           })}
         >
           <Info size={14} />
-          {t('modules.dev_guide', { defaultValue: 'Build a module — developer guide‌⁠‍' })}
+          {t('modules.dev_guide', { defaultValue: 'Build a module — developer guide' })}
         </Link>
       </div>
 
       {/* Tab bar */}
-      <div className="mb-6 flex gap-1 rounded-lg bg-surface-secondary p-1 animate-card-in" role="tablist" aria-label={t('modules.tabs', { defaultValue: 'Module sections‌⁠‍' })} style={{ animationDelay: '30ms' }}>
+      <div className="mb-6 flex gap-1 rounded-lg bg-surface-secondary p-1 animate-card-in" role="tablist" aria-label={t('modules.tabs', { defaultValue: 'Module sections' })} style={{ animationDelay: '30ms' }}>
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.key;
@@ -267,7 +301,12 @@ function CompanyProfilesTab() {
     void syncFromServer();
   }, [syncFromServer]);
 
-  const { data: presets, isLoading: presetsLoading } = useQuery({
+  const {
+    data: presets,
+    isLoading: presetsLoading,
+    isError: presetsError,
+    refetch: refetchPresets,
+  } = useQuery({
     queryKey: ['onboarding-presets'],
     queryFn: () => apiGet<CompanyPresetAPI[]>('/v1/users/onboarding-presets/'),
   });
@@ -374,6 +413,22 @@ function CompanyProfilesTab() {
               </div>
             </Card>
           ))}
+        </div>
+      ) : presetsError ? (
+        <div className="py-12 text-center">
+          <AlertTriangle size={36} className="mx-auto mb-3 text-semantic-warning" strokeWidth={1.5} />
+          <p className="text-sm font-medium text-content-secondary">
+            {t('modules.profiles_load_failed', { defaultValue: 'Failed to load profiles' })}
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<RefreshCw size={14} />}
+            onClick={() => void refetchPresets()}
+            className="mt-3"
+          >
+            {t('common.retry', { defaultValue: 'Retry' })}
+          </Button>
         </div>
       ) : !presets || presets.length === 0 ? (
         <div className="py-12 text-center">
@@ -616,9 +671,11 @@ function DataPackagesTab() {
   const [marketplaceLimit, setMarketplaceLimit] = useState(12);
   const [installingId, setInstallingId] = useState<string | null>(null);
 
-  const { data: modules, isLoading } = useQuery({
+  const { data: modules, isLoading, isError: marketplaceError, refetch: refetchMarketplace } = useQuery({
     queryKey: ['marketplace'],
     queryFn: () => apiGet<MarketplaceModule[]>('/marketplace'),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
   });
 
   const { data: demoStatus } = useQuery({
@@ -707,6 +764,44 @@ function DataPackagesTab() {
           break;
         }
         setInstallingId(mod.id);
+
+        // Probe embedder load state. If the model isn't resident yet,
+        // surface a "Downloading model from HuggingFace..." hint so the
+        // user understands why the install spinner is sitting on a
+        // multi-hundred-MB cold start. Polled in parallel with the
+        // install request; gives up after 60 s or once the install
+        // request completes.
+        let downloadPollAlive = true;
+        let downloadHintShown = false;
+        void (async () => {
+          const pollStart = Date.now();
+          while (downloadPollAlive && Date.now() - pollStart < 60_000) {
+            try {
+              const ds = await apiGet<{ model: string; status: string; dimension: number }>(
+                '/v1/costs/vector/download-status/',
+              );
+              if (ds.status === 'ready') break;
+              if (!downloadHintShown) {
+                downloadHintShown = true;
+                addToast({
+                  type: 'info',
+                  title: t('marketplace.embedder_downloading', {
+                    defaultValue: 'Downloading model from HuggingFace…',
+                  }),
+                  message: t('marketplace.embedder_downloading_hint', {
+                    defaultValue:
+                      'First install pulls the embedding model ({{model}}). This can take a minute on slow connections.',
+                    model: ds.model,
+                  }),
+                });
+              }
+            } catch {
+              // Endpoint not reachable yet — skip this tick, keep polling.
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
+        })();
+
         try {
           const status = await apiGet<{ backend: string; connected: boolean; can_restore_snapshots: boolean; can_generate_locally: boolean }>('/v1/costs/vector/status/');
           if (status.can_restore_snapshots) {
@@ -729,6 +824,7 @@ function DataPackagesTab() {
         } catch (err) {
           addToast({ type: 'error', title: t('marketplace.import_failed', { defaultValue: 'Import failed' }), message: err instanceof Error ? err.message : t('common.unknown_error', { defaultValue: 'Unknown error' }) });
         } finally {
+          downloadPollAlive = false;
           setInstallingId(null);
         }
         break;
@@ -970,6 +1066,27 @@ function DataPackagesTab() {
             </Card>
           ))}
         </div>
+      ) : marketplaceError ? (
+        <div className="py-16 text-center">
+          <AlertTriangle size={40} className="mx-auto mb-3 text-semantic-warning" strokeWidth={1.5} />
+          <p className="text-sm font-medium text-content-secondary">
+            {t('marketplace.load_failed', { defaultValue: 'Failed to load marketplace' })}
+          </p>
+          <p className="mt-1 text-xs text-content-tertiary">
+            {t('marketplace.load_failed_hint', {
+              defaultValue: 'Check your connection and try again.',
+            })}
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<RefreshCw size={14} />}
+            onClick={() => void refetchMarketplace()}
+            className="mt-4"
+          >
+            {t('common.retry', { defaultValue: 'Retry' })}
+          </Button>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="py-16 text-center">
           <Package size={40} className="mx-auto mb-3 text-content-tertiary" />
@@ -1080,9 +1197,11 @@ function SystemModulesTab() {
   const addToast = useToastStore((s) => s.addToast);
   const [togglingModule, setTogglingModule] = useState<string | null>(null);
 
-  const { data: systemModules, refetch } = useQuery({
+  const { data: systemModules, refetch, isError: systemError } = useQuery({
     queryKey: ['system-modules'],
     queryFn: () => apiGet<SystemModule[]>('/v1/modules/'),
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
   });
 
   const enabledCount = systemModules?.filter((m) => m.enabled).length ?? 0;
@@ -1119,6 +1238,26 @@ function SystemModulesTab() {
     } finally {
       setTogglingModule(null);
     }
+  }
+
+  if (systemError) {
+    return (
+      <div className="py-16 text-center animate-card-in">
+        <AlertTriangle size={40} className="mx-auto mb-3 text-semantic-warning" strokeWidth={1.5} />
+        <p className="text-sm font-medium text-content-secondary">
+          {t('modules.system_load_failed', { defaultValue: 'Failed to load system modules' })}
+        </p>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<RefreshCw size={14} />}
+          onClick={() => void refetch()}
+          className="mt-4"
+        >
+          {t('common.retry', { defaultValue: 'Retry' })}
+        </Button>
+      </div>
+    );
   }
 
   if (!systemModules || systemModules.length === 0) {

@@ -1,6 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  useQuery,
+  useQueries,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
   Users,
@@ -16,6 +21,14 @@ import {
   Award,
   Plus,
   Loader2,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  Ban,
+  UserPlus,
+  RefreshCw,
+  Flame,
+  AlertOctagon,
 } from 'lucide-react';
 import {
   Button,
@@ -27,11 +40,14 @@ import {
   WideModal,
   WideModalSection,
   WideModalField,
+  ConfirmDialog,
 } from '@/shared/ui';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { useToastStore } from '@/stores/useToastStore';
 import { getErrorMessage } from '@/shared/lib/api';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import {
   listResources,
   getResourceDashboard,
@@ -40,17 +56,25 @@ import {
   confirmAssignment,
   cancelAssignment,
   proposeAssignment,
+  updateAssignment,
+  deleteAssignment,
   listSkills,
   listWindows,
   listRequests,
   createResource,
+  createRequest,
+  updateRequest,
+  deleteRequest,
+  fulfillRequest,
   type Resource,
   type ResourceType,
   type ResourceRequest,
   type RequestStatus,
+  type RequestPriority,
   type Assignment,
   type AssignmentStatus,
   type BoardConflict,
+  type Skill,
 } from './api';
 import { projectsApi } from '@/features/projects/api';
 
@@ -105,6 +129,24 @@ export function ResourcesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [proposeOpen, setProposeOpen] = useState(false);
+  // Requests tab — lifted up so the page-header "New Request" button can open
+  // the modal owned by the tab. Persisted across tab switches.
+  const [newRequestOpen, setNewRequestOpen] = useState(false);
+  const activeProjectId = useProjectContextStore((s) => s.activeProjectId);
+  const activeProjectName = useProjectContextStore((s) => s.activeProjectName);
+  const setActiveProject = useProjectContextStore((s) => s.setActiveProject);
+  const [requestsProjectId, setRequestsProjectId] = useState<string>(
+    activeProjectId ?? '',
+  );
+  // Keep the requests-tab project in lockstep with the global project
+  // context when the user switches projects elsewhere (header, /projects,
+  // etc.).
+  useEffect(() => {
+    if (activeProjectId && activeProjectId !== requestsProjectId) {
+      setRequestsProjectId(activeProjectId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId]);
 
   const resourcesQ = useQuery({
     queryKey: ['resources', 'list'],
@@ -172,6 +214,23 @@ export function ResourcesPage() {
               onClick={() => setCreateOpen(true)}
             >
               {t('resources.new_resource', { defaultValue: 'New Resource' })}
+            </Button>
+          )}
+          {tab === 'requests' && (
+            <Button
+              variant="primary"
+              icon={<Plus size={14} />}
+              onClick={() => setNewRequestOpen(true)}
+              disabled={!requestsProjectId}
+              title={
+                requestsProjectId
+                  ? undefined
+                  : t('resources.requests_pick_project_first', {
+                      defaultValue: 'Select a project below first',
+                    })
+              }
+            >
+              {t('resources.new_request', { defaultValue: 'New Request' })}
             </Button>
           )}
         </div>
@@ -279,7 +338,19 @@ export function ResourcesPage() {
         </>
       )}
 
-      {tab === 'requests' && <RequestsTab onSelectResource={(id) => setSelectedId(id)} />}
+      {tab === 'requests' && (
+        <RequestsTab
+          projectId={requestsProjectId}
+          onProjectChange={(id, name) => {
+            setRequestsProjectId(id);
+            if (id && name) setActiveProject(id, name);
+          }}
+          activeProjectName={activeProjectName}
+          allResources={allResources}
+          newRequestOpen={newRequestOpen}
+          onNewRequestOpenChange={setNewRequestOpen}
+        />
+      )}
 
       {tab === 'assignments' && (
         <AssignmentsTab
@@ -408,18 +479,92 @@ function ResourceTable({
 // an available resource (supply side) → assignment. They are scoped per
 // project, so this tab needs a project picker to render real data.
 //
-// Earlier the tab just showed a "select a project elsewhere" message,
-// which made the column feel broken. We now load the user's projects
-// directly and let the dispatcher pick one without leaving this page.
+// The tab supports the full lifecycle:
+//   - Project picker (synced with the global ProjectContext store).
+//   - Filters: status, priority, search.
+//   - Counters per-status (open / fulfilled / cancelled).
+//   - Sortable table with priority + Window + skills + status badges.
+//   - Per-row actions: Fulfill, Edit, Cancel, Delete (with confirm).
+//   - Create / Edit / Fulfill modals using React Query mutations.
+
+const REQUEST_STATUS_VARIANT: Record<
+  RequestStatus,
+  'neutral' | 'blue' | 'success' | 'warning' | 'error'
+> = {
+  open: 'warning',
+  fulfilled: 'success',
+  cancelled: 'neutral',
+};
+
+const PRIORITY_VARIANT: Record<
+  RequestPriority,
+  'neutral' | 'blue' | 'success' | 'warning' | 'error'
+> = {
+  low: 'neutral',
+  med: 'blue',
+  high: 'warning',
+  critical: 'error',
+};
+
+const PRIORITY_ORDER: Record<RequestPriority, number> = {
+  critical: 0,
+  high: 1,
+  med: 2,
+  low: 3,
+};
+
+type SortKey = 'priority' | 'start_at' | 'created_at' | 'quantity';
+
+function isoLocalNow(offsetDays = 0): string {
+  // datetime-local needs a value WITHOUT trailing Z. Build it from local clock.
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+function localDatetimeToIso(local: string): string {
+  // datetime-local emits "2026-05-14T10:30" in the user's local tz.
+  return new Date(local).toISOString();
+}
+
+function isoToLocalDatetime(iso: string): string {
+  const d = new Date(iso);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+interface RequestsTabProps {
+  projectId: string;
+  onProjectChange: (id: string, name: string) => void;
+  activeProjectName: string;
+  allResources: Resource[];
+  newRequestOpen: boolean;
+  onNewRequestOpenChange: (open: boolean) => void;
+}
 
 function RequestsTab({
-  onSelectResource: _,
-}: {
-  onSelectResource: (id: string) => void;
-}) {
+  projectId,
+  onProjectChange,
+  activeProjectName,
+  allResources,
+  newRequestOpen,
+  onNewRequestOpenChange,
+}: RequestsTabProps) {
   const { t } = useTranslation();
-  const [projectId, setProjectId] = useState<string>('');
+  const qc = useQueryClient();
+  const addToast = useToastStore((s) => s.addToast);
+
   const [statusFilter, setStatusFilter] = useState<RequestStatus | ''>('open');
+  const [priorityFilter, setPriorityFilter] = useState<RequestPriority | ''>('');
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('priority');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const [editTarget, setEditTarget] = useState<ResourceRequest | null>(null);
+  const [fulfillTarget, setFulfillTarget] = useState<ResourceRequest | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<ResourceRequest | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<ResourceRequest | null>(null);
 
   const projectsQ = useQuery({
     queryKey: ['resources', 'requests-projects'],
@@ -427,19 +572,110 @@ function RequestsTab({
     staleTime: 60_000,
   });
 
+  // Fetch all-status requests so we can show accurate counters even when
+  // a status filter is set. The dataset is normally small per project
+  // (a few hundred rows at most) so client-side filtering is fine.
   const requestsQ = useQuery({
-    queryKey: ['resources', 'requests', projectId, statusFilter],
+    queryKey: ['resources', 'requests', projectId],
     queryFn: () =>
       listRequests({
         project_id: projectId,
-        status: statusFilter || undefined,
-        limit: 200,
+        limit: 500,
       }),
     enabled: !!projectId,
   });
 
+  // Skill labels for the chips in the table — fetched once per session.
+  const skillsQ = useQuery({
+    queryKey: ['resources', 'skills', 'all'],
+    queryFn: () => listSkills({ limit: 500 }).catch(() => [] as Skill[]),
+    staleTime: 300_000,
+  });
+  const skillIdToName = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const s of skillsQ.data ?? []) m[s.id] = s.name;
+    return m;
+  }, [skillsQ.data]);
+
+  const all = requestsQ.data ?? [];
+  const counts = useMemo(() => {
+    const c = { open: 0, fulfilled: 0, cancelled: 0, total: all.length };
+    for (const r of all) c[r.status]++;
+    return c;
+  }, [all]);
+
+  const filtered = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    const rows = all.filter((r) => {
+      if (statusFilter && r.status !== statusFilter) return false;
+      if (priorityFilter && r.priority !== priorityFilter) return false;
+      if (!s) return true;
+      return (
+        r.title.toLowerCase().includes(s) ||
+        r.description.toLowerCase().includes(s)
+      );
+    });
+    const dir = sortDir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === 'priority') {
+        cmp = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
+      } else if (sortKey === 'start_at') {
+        cmp = new Date(a.start_at).getTime() - new Date(b.start_at).getTime();
+      } else if (sortKey === 'created_at') {
+        cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      } else if (sortKey === 'quantity') {
+        cmp = a.quantity - b.quantity;
+      }
+      return cmp * dir;
+    });
+    return rows;
+  }, [all, statusFilter, priorityFilter, search, sortKey, sortDir]);
+
+  const invalidateRequests = () => {
+    qc.invalidateQueries({ queryKey: ['resources', 'requests', projectId] });
+  };
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Parameters<typeof updateRequest>[1] }) =>
+      updateRequest(id, data),
+    onSuccess: () => {
+      invalidateRequests();
+      addToast({
+        type: 'success',
+        title: t('resources.request_updated_ok', { defaultValue: 'Request updated' }),
+      });
+    },
+    onError: (err) => addToast({ type: 'error', title: getErrorMessage(err) }),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteRequest(id),
+    onSuccess: () => {
+      invalidateRequests();
+      addToast({
+        type: 'success',
+        title: t('resources.request_deleted_ok', { defaultValue: 'Request deleted' }),
+      });
+      setConfirmDelete(null);
+    },
+    onError: (err) => addToast({ type: 'error', title: getErrorMessage(err) }),
+  });
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'priority' ? 'asc' : 'desc');
+    }
+  };
+
+  const projects = projectsQ.data ?? [];
+
   return (
     <div className="space-y-4">
+      {/* Toolbar — project picker, filters, search, counters */}
       <Card padding="md">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-[240px]">
@@ -450,38 +686,155 @@ function RequestsTab({
             </label>
             <select
               value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
+              onChange={(e) => {
+                const id = e.target.value;
+                const name = projects.find((p) => p.id === id)?.name || '';
+                onProjectChange(id, name);
+              }}
               className={inputCls}
               disabled={projectsQ.isLoading}
+              data-testid="requests-project-select"
             >
               <option value="">
                 — {t('resources.requests_project_picker_placeholder', {
                   defaultValue: 'Select a project to see its requests…',
                 })} —
               </option>
-              {(projectsQ.data ?? []).map((p) => (
+              {projects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
           </div>
-          <div className="min-w-[160px]">
+          <div className="min-w-[140px]">
             <label className="block text-xs font-medium text-content-secondary mb-1">
-              {t('resources.requests_status_label', {
-                defaultValue: 'Status',
-              })}
+              {t('resources.requests_status_label', { defaultValue: 'Status' })}
             </label>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as RequestStatus | '')}
               className={inputCls}
+              data-testid="requests-status-filter"
             >
               <option value="">{t('resources.status_all', { defaultValue: 'All' })}</option>
-              <option value="open">{t('resources.req_status_open', { defaultValue: 'Open' })}</option>
-              <option value="fulfilled">{t('resources.req_status_fulfilled', { defaultValue: 'Fulfilled' })}</option>
-              <option value="cancelled">{t('resources.req_status_cancelled', { defaultValue: 'Cancelled' })}</option>
+              <option value="open">
+                {t('resources.req_status_open', { defaultValue: 'Open' })} ({counts.open})
+              </option>
+              <option value="fulfilled">
+                {t('resources.req_status_fulfilled', { defaultValue: 'Fulfilled' })} ({counts.fulfilled})
+              </option>
+              <option value="cancelled">
+                {t('resources.req_status_cancelled', { defaultValue: 'Cancelled' })} ({counts.cancelled})
+              </option>
             </select>
           </div>
+          <div className="min-w-[140px]">
+            <label className="block text-xs font-medium text-content-secondary mb-1">
+              {t('resources.requests_priority_label', { defaultValue: 'Priority' })}
+            </label>
+            <select
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value as RequestPriority | '')}
+              className={inputCls}
+              data-testid="requests-priority-filter"
+            >
+              <option value="">{t('resources.priority_all', { defaultValue: 'All priorities' })}</option>
+              <option value="critical">{t('resources.priority_critical', { defaultValue: 'Critical' })}</option>
+              <option value="high">{t('resources.priority_high', { defaultValue: 'High' })}</option>
+              <option value="med">{t('resources.priority_med', { defaultValue: 'Medium' })}</option>
+              <option value="low">{t('resources.priority_low', { defaultValue: 'Low' })}</option>
+            </select>
+          </div>
+          <div className="min-w-[200px] flex-1">
+            <label className="block text-xs font-medium text-content-secondary mb-1">
+              {t('common.search', { defaultValue: 'Search' })}
+            </label>
+            <div className="relative">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-content-tertiary"
+              />
+              <input
+                type="text"
+                placeholder={t('resources.requests_search_placeholder', {
+                  defaultValue: 'Search title or description…',
+                })}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className={clsx(inputCls, 'pl-8')}
+                data-testid="requests-search"
+              />
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RefreshCw size={12} />}
+            onClick={() => invalidateRequests()}
+            disabled={!projectId || requestsQ.isFetching}
+            loading={requestsQ.isFetching}
+            aria-label={t('common.refresh', { defaultValue: 'Refresh' })}
+          >
+            {t('common.refresh', { defaultValue: 'Refresh' })}
+          </Button>
         </div>
+
+        {/* Counter pills */}
+        {projectId && all.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-content-secondary">
+              {t('resources.requests_summary', { defaultValue: 'In this project' })}:
+            </span>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('')}
+              className={clsx(
+                'px-2 py-0.5 rounded-full border transition-colors',
+                statusFilter === ''
+                  ? 'border-oe-blue bg-oe-blue/10 text-oe-blue'
+                  : 'border-border-light text-content-secondary hover:bg-surface-secondary',
+              )}
+            >
+              {t('resources.status_all', { defaultValue: 'All' })} · {counts.total}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('open')}
+              className={clsx(
+                'px-2 py-0.5 rounded-full border transition-colors',
+                statusFilter === 'open'
+                  ? 'border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                  : 'border-border-light text-content-secondary hover:bg-surface-secondary',
+              )}
+            >
+              {t('resources.req_status_open', { defaultValue: 'Open' })} · {counts.open}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('fulfilled')}
+              className={clsx(
+                'px-2 py-0.5 rounded-full border transition-colors',
+                statusFilter === 'fulfilled'
+                  ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                  : 'border-border-light text-content-secondary hover:bg-surface-secondary',
+              )}
+            >
+              {t('resources.req_status_fulfilled', { defaultValue: 'Fulfilled' })} · {counts.fulfilled}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('cancelled')}
+              className={clsx(
+                'px-2 py-0.5 rounded-full border transition-colors',
+                statusFilter === 'cancelled'
+                  ? 'border-border bg-surface-tertiary text-content-primary'
+                  : 'border-border-light text-content-secondary hover:bg-surface-secondary',
+              )}
+            >
+              {t('resources.req_status_cancelled', { defaultValue: 'Cancelled' })} · {counts.cancelled}
+            </button>
+          </div>
+        )}
+
         <p className="mt-3 text-xs text-content-secondary leading-relaxed">
           {t('resources.requests_explainer', {
             defaultValue:
@@ -490,6 +843,7 @@ function RequestsTab({
         </p>
       </Card>
 
+      {/* Body */}
       {!projectId ? (
         <Card padding="md">
           <EmptyState
@@ -497,61 +851,243 @@ function RequestsTab({
             title={t('resources.requests_pick_project_title', {
               defaultValue: 'Pick a project above to load its requests',
             })}
-            description={t('resources.requests_pick_project_desc', {
-              defaultValue:
-                'Requests are project-scoped — choose a project to see the open queue and start fulfilling.',
-            })}
+            description={
+              activeProjectName
+                ? t('resources.requests_pick_project_active', {
+                    defaultValue:
+                      'You currently have "{{name}}" active elsewhere — pick it from the dropdown to start.',
+                    name: activeProjectName,
+                  })
+                : t('resources.requests_pick_project_desc', {
+                    defaultValue:
+                      'Requests are project-scoped — choose a project to see the open queue and start fulfilling.',
+                  })
+            }
           />
         </Card>
       ) : requestsQ.isLoading ? (
         <Card padding="md">
-          <SkeletonTable rows={6} columns={5} />
+          <SkeletonTable rows={6} columns={6} />
         </Card>
-      ) : (requestsQ.data ?? []).length === 0 ? (
+      ) : filtered.length === 0 ? (
         <Card padding="md">
-          <EmptyState
-            icon={<ClipboardList size={22} />}
-            title={t('resources.requests_none_title', {
-              defaultValue: 'No requests match the current filter',
-            })}
-            description={t('resources.requests_none_desc', {
-              defaultValue:
-                'Try switching the status filter to "All" to see fulfilled or cancelled requests.',
-            })}
-          />
+          {all.length === 0 ? (
+            <EmptyState
+              icon={<ClipboardList size={22} />}
+              title={t('resources.requests_none_title_for_project', {
+                defaultValue: 'No requests on this project yet',
+              })}
+              description={t('resources.requests_none_desc_for_project', {
+                defaultValue:
+                  'Open the first request to ask dispatchers for the people, crew or equipment you need.',
+              })}
+              action={{
+                label: t('resources.new_request', { defaultValue: 'New Request' }),
+                onClick: () => onNewRequestOpenChange(true),
+              }}
+            />
+          ) : (
+            <EmptyState
+              icon={<ClipboardList size={22} />}
+              title={t('resources.requests_none_title', {
+                defaultValue: 'No requests match the current filter',
+              })}
+              description={t('resources.requests_filter_hint', {
+                defaultValue:
+                  'Clear filters or try a different status / priority combination.',
+              })}
+              action={{
+                label: t('resources.requests_clear_filters', {
+                  defaultValue: 'Clear filters',
+                }),
+                onClick: () => {
+                  setStatusFilter('');
+                  setPriorityFilter('');
+                  setSearch('');
+                },
+              }}
+            />
+          )}
         </Card>
       ) : (
         <Card padding="none">
-          <RequestsTable rows={requestsQ.data ?? []} />
+          <RequestsTable
+            rows={filtered}
+            skillIdToName={skillIdToName}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            onEdit={(r) => setEditTarget(r)}
+            onFulfill={(r) => setFulfillTarget(r)}
+            onCancel={(r) => setConfirmCancel(r)}
+            onDelete={(r) => setConfirmDelete(r)}
+            busyIds={
+              new Set([
+                ...(updateMut.variables ? [updateMut.variables.id] : []),
+                ...(deleteMut.variables ? [deleteMut.variables] : []),
+              ])
+            }
+          />
         </Card>
       )}
+
+      {newRequestOpen && projectId && (
+        <NewRequestModal
+          projectId={projectId}
+          skills={skillsQ.data ?? []}
+          onClose={() => onNewRequestOpenChange(false)}
+          onCreated={() => {
+            invalidateRequests();
+            onNewRequestOpenChange(false);
+          }}
+        />
+      )}
+
+      {editTarget && (
+        <EditRequestModal
+          request={editTarget}
+          skills={skillsQ.data ?? []}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => {
+            invalidateRequests();
+            setEditTarget(null);
+          }}
+        />
+      )}
+
+      {fulfillTarget && (
+        <FulfillRequestModal
+          request={fulfillTarget}
+          resources={allResources}
+          onClose={() => setFulfillTarget(null)}
+          onFulfilled={() => {
+            invalidateRequests();
+            qc.invalidateQueries({ queryKey: ['resources', 'assignments'] });
+            setFulfillTarget(null);
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title={t('resources.delete_request_title', { defaultValue: 'Delete this request?' })}
+        message={t('resources.delete_request_msg', {
+          defaultValue:
+            'This permanently removes the request. Fulfilment history is kept on the assignment but the request itself disappears.',
+        })}
+        confirmLabel={t('common.delete', { defaultValue: 'Delete' })}
+        cancelLabel={t('common.cancel', { defaultValue: 'Cancel' })}
+        variant="danger"
+        loading={deleteMut.isPending}
+        onConfirm={() => {
+          if (confirmDelete) deleteMut.mutate(confirmDelete.id);
+        }}
+        onCancel={() => setConfirmDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmCancel}
+        title={t('resources.cancel_request_title', { defaultValue: 'Cancel this request?' })}
+        message={t('resources.cancel_request_msg', {
+          defaultValue:
+            'The request will be marked as cancelled and removed from the open queue. You can still reopen it from the cancelled filter.',
+        })}
+        confirmLabel={t('resources.cancel_request_confirm', {
+          defaultValue: 'Cancel request',
+        })}
+        cancelLabel={t('common.keep', { defaultValue: 'Keep' })}
+        variant="warning"
+        loading={updateMut.isPending}
+        onConfirm={() => {
+          if (confirmCancel) {
+            updateMut.mutate(
+              { id: confirmCancel.id, data: { status: 'cancelled' } },
+              { onSuccess: () => setConfirmCancel(null) },
+            );
+          }
+        }}
+        onCancel={() => setConfirmCancel(null)}
+      />
     </div>
   );
 }
 
-function RequestsTable({ rows }: { rows: ResourceRequest[] }) {
+interface RequestsTableProps {
+  rows: ResourceRequest[];
+  skillIdToName: Record<string, string>;
+  sortKey: SortKey;
+  sortDir: 'asc' | 'desc';
+  onSort: (key: SortKey) => void;
+  onEdit: (r: ResourceRequest) => void;
+  onFulfill: (r: ResourceRequest) => void;
+  onCancel: (r: ResourceRequest) => void;
+  onDelete: (r: ResourceRequest) => void;
+  busyIds: Set<string>;
+}
+
+function RequestsTable({
+  rows,
+  skillIdToName,
+  sortKey,
+  sortDir,
+  onSort,
+  onEdit,
+  onFulfill,
+  onCancel,
+  onDelete,
+  busyIds,
+}: RequestsTableProps) {
   const { t } = useTranslation();
-  const REQUEST_STATUS_VARIANT: Record<
-    RequestStatus,
-    'neutral' | 'blue' | 'success' | 'warning' | 'error'
-  > = {
-    open: 'warning',
-    fulfilled: 'success',
-    cancelled: 'neutral',
-  };
+  const SortArrow = ({ active }: { active: boolean }) => (
+    <span
+      className={clsx(
+        'inline-block ml-1 transition-transform',
+        active ? 'opacity-100' : 'opacity-30',
+        sortDir === 'desc' && active ? 'rotate-180' : '',
+      )}
+      aria-hidden="true"
+    >
+      ▲
+    </span>
+  );
+
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto" data-testid="requests-table">
       <table className="min-w-full text-sm">
         <thead className="bg-surface-secondary/50 border-b border-border-light">
           <tr className="text-xs uppercase text-content-secondary">
             <th className="text-left px-4 py-2 font-medium">
+              <button
+                type="button"
+                onClick={() => onSort('priority')}
+                className="inline-flex items-center hover:text-content-primary"
+              >
+                {t('resources.req_col_priority', { defaultValue: 'Priority' })}
+                <SortArrow active={sortKey === 'priority'} />
+              </button>
+            </th>
+            <th className="text-left px-4 py-2 font-medium">
               {t('resources.req_col_title', { defaultValue: 'Title' })}
             </th>
             <th className="text-left px-4 py-2 font-medium">
-              {t('resources.req_col_window', { defaultValue: 'Window' })}
+              <button
+                type="button"
+                onClick={() => onSort('start_at')}
+                className="inline-flex items-center hover:text-content-primary"
+              >
+                {t('resources.req_col_window', { defaultValue: 'Window' })}
+                <SortArrow active={sortKey === 'start_at'} />
+              </button>
             </th>
             <th className="text-left px-4 py-2 font-medium">
-              {t('resources.req_col_qty', { defaultValue: 'Qty' })}
+              <button
+                type="button"
+                onClick={() => onSort('quantity')}
+                className="inline-flex items-center hover:text-content-primary"
+              >
+                {t('resources.req_col_qty', { defaultValue: 'Qty' })}
+                <SortArrow active={sortKey === 'quantity'} />
+              </button>
             </th>
             <th className="text-left px-4 py-2 font-medium">
               {t('resources.req_col_skills', { defaultValue: 'Skills' })}
@@ -559,47 +1095,715 @@ function RequestsTable({ rows }: { rows: ResourceRequest[] }) {
             <th className="text-left px-4 py-2 font-medium">
               {t('common.status', { defaultValue: 'Status' })}
             </th>
+            <th className="text-right px-4 py-2 font-medium">
+              {t('resources.actions', { defaultValue: 'Actions' })}
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border-light">
           {rows.map((r) => (
-            <tr key={r.id} className="hover:bg-surface-secondary/30">
-              <td className="px-4 py-2.5">
-                <div className="font-medium text-content-primary truncate max-w-xs">
-                  {r.title}
-                </div>
-                {r.description && (
-                  <div className="text-xs text-content-tertiary truncate max-w-xs">
-                    {r.description}
-                  </div>
-                )}
-              </td>
-              <td className="px-4 py-2.5 text-xs text-content-secondary tabular-nums whitespace-nowrap">
-                <DateDisplay value={r.start_at} />
-                {' → '}
-                <DateDisplay value={r.end_at} />
-              </td>
-              <td className="px-4 py-2.5 tabular-nums">{r.quantity}</td>
-              <td className="px-4 py-2.5">
-                <div className="flex flex-wrap gap-1 max-w-xs">
-                  {r.required_skills.slice(0, 4).map((s) => (
-                    <Badge key={s} variant="neutral">{s}</Badge>
-                  ))}
-                  {r.required_skills.length > 4 && (
-                    <span className="text-xs text-content-tertiary">
-                      +{r.required_skills.length - 4}
-                    </span>
-                  )}
-                </div>
-              </td>
-              <td className="px-4 py-2.5">
-                <Badge variant={REQUEST_STATUS_VARIANT[r.status]}>{r.status}</Badge>
-              </td>
-            </tr>
+            <RequestRow
+              key={r.id}
+              r={r}
+              skillIdToName={skillIdToName}
+              onEdit={() => onEdit(r)}
+              onFulfill={() => onFulfill(r)}
+              onCancel={() => onCancel(r)}
+              onDelete={() => onDelete(r)}
+              busy={busyIds.has(r.id)}
+            />
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+interface RequestRowProps {
+  r: ResourceRequest;
+  skillIdToName: Record<string, string>;
+  onEdit: () => void;
+  onFulfill: () => void;
+  onCancel: () => void;
+  onDelete: () => void;
+  busy: boolean;
+}
+
+function RequestRow({
+  r,
+  skillIdToName,
+  onEdit,
+  onFulfill,
+  onCancel,
+  onDelete,
+  busy,
+}: RequestRowProps) {
+  const { t } = useTranslation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  const PriorityIcon =
+    r.priority === 'critical' ? Flame : r.priority === 'high' ? AlertOctagon : null;
+
+  const isOpen = r.status === 'open';
+
+  return (
+    <tr className="hover:bg-surface-secondary/30">
+      <td className="px-4 py-2.5">
+        <Badge variant={PRIORITY_VARIANT[r.priority]} size="sm">
+          {PriorityIcon && <PriorityIcon size={10} className="inline mr-1" />}
+          {r.priority}
+        </Badge>
+      </td>
+      <td className="px-4 py-2.5">
+        <div className="font-medium text-content-primary truncate max-w-xs" title={r.title}>
+          {r.title}
+        </div>
+        {r.description && (
+          <div className="text-xs text-content-tertiary truncate max-w-xs" title={r.description}>
+            {r.description}
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-2.5 text-xs text-content-secondary tabular-nums whitespace-nowrap">
+        <DateDisplay value={r.start_at} />
+        {' → '}
+        <DateDisplay value={r.end_at} />
+      </td>
+      <td className="px-4 py-2.5 tabular-nums">{r.quantity}</td>
+      <td className="px-4 py-2.5">
+        <div className="flex flex-wrap gap-1 max-w-xs">
+          {r.required_skills.slice(0, 4).map((s) => (
+            <Badge key={s} variant="neutral" size="sm">
+              {skillIdToName[s] || s.slice(0, 8)}
+            </Badge>
+          ))}
+          {r.required_skills.length > 4 && (
+            <span className="text-xs text-content-tertiary">
+              +{r.required_skills.length - 4}
+            </span>
+          )}
+          {r.required_skills.length === 0 && (
+            <span className="text-xs text-content-tertiary">—</span>
+          )}
+        </div>
+      </td>
+      <td className="px-4 py-2.5">
+        <Badge variant={REQUEST_STATUS_VARIANT[r.status]} dot size="sm">
+          {r.status}
+        </Badge>
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <div className="inline-flex items-center gap-1">
+          {isOpen && (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<UserPlus size={12} />}
+              onClick={onFulfill}
+              disabled={busy}
+              data-testid={`request-fulfill-${r.id}`}
+            >
+              {t('resources.fulfill', { defaultValue: 'Fulfill' })}
+            </Button>
+          )}
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              className="p-1.5 rounded hover:bg-surface-secondary text-content-secondary"
+              aria-label={t('resources.row_actions', { defaultValue: 'Row actions' })}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              data-testid={`request-menu-${r.id}`}
+              disabled={busy}
+            >
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={14} />}
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-border-light bg-surface-elevated shadow-xl py-1 text-sm"
+                data-testid={`request-menu-open-${r.id}`}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full px-3 py-1.5 text-left hover:bg-surface-secondary flex items-center gap-2"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onEdit();
+                  }}
+                >
+                  <Pencil size={12} />
+                  {t('common.edit', { defaultValue: 'Edit' })}
+                </button>
+                {isOpen && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="w-full px-3 py-1.5 text-left hover:bg-surface-secondary flex items-center gap-2"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onFulfill();
+                    }}
+                  >
+                    <UserPlus size={12} />
+                    {t('resources.fulfill', { defaultValue: 'Fulfill' })}
+                  </button>
+                )}
+                {isOpen && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="w-full px-3 py-1.5 text-left hover:bg-surface-secondary flex items-center gap-2 text-content-secondary"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onCancel();
+                    }}
+                  >
+                    <Ban size={12} />
+                    {t('resources.cancel_request', { defaultValue: 'Cancel request' })}
+                  </button>
+                )}
+                <div className="my-1 border-t border-border-light" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full px-3 py-1.5 text-left hover:bg-semantic-error/10 text-semantic-error flex items-center gap-2"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDelete();
+                  }}
+                >
+                  <Trash2 size={12} />
+                  {t('common.delete', { defaultValue: 'Delete' })}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+/* ─── Request modals ─── */
+
+interface NewRequestModalProps {
+  projectId: string;
+  skills: Skill[];
+  onClose: () => void;
+  onCreated: () => void;
+}
+
+function NewRequestModal({ projectId, skills, onClose, onCreated }: NewRequestModalProps) {
+  const { t } = useTranslation();
+  const addToast = useToastStore((s) => s.addToast);
+  const [busy, setBusy] = useState(false);
+
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    start_at: isoLocalNow(1),
+    end_at: isoLocalNow(3),
+    quantity: 1,
+    priority: 'med' as RequestPriority,
+    required_skills: [] as string[],
+  });
+
+  async function submit() {
+    if (!form.title.trim()) {
+      addToast({
+        type: 'error',
+        title: t('resources.title_required', { defaultValue: 'Title is required' }),
+      });
+      return;
+    }
+    if (new Date(form.end_at) <= new Date(form.start_at)) {
+      addToast({
+        type: 'error',
+        title: t('resources.window_invalid', {
+          defaultValue: 'End must be after start',
+        }),
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      await createRequest({
+        project_id: projectId,
+        title: form.title.trim(),
+        description: form.description.trim(),
+        start_at: localDatetimeToIso(form.start_at),
+        end_at: localDatetimeToIso(form.end_at),
+        quantity: form.quantity,
+        priority: form.priority,
+        required_skills: form.required_skills,
+      });
+      addToast({
+        type: 'success',
+        title: t('resources.request_created_ok', { defaultValue: 'Request created' }),
+      });
+      onCreated();
+    } catch (err) {
+      addToast({ type: 'error', title: getErrorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <WideModal
+      open
+      onClose={onClose}
+      busy={busy}
+      size="lg"
+      title={t('resources.new_request', { defaultValue: 'New Request' })}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={submit}
+            loading={busy}
+            icon={busy ? <Loader2 size={14} /> : <Plus size={14} />}
+            data-testid="new-request-submit"
+          >
+            {t('resources.create_request', { defaultValue: 'Create request' })}
+          </Button>
+        </>
+      }
+    >
+      <RequestFormFields form={form} setForm={setForm} skills={skills} />
+    </WideModal>
+  );
+}
+
+interface EditRequestModalProps {
+  request: ResourceRequest;
+  skills: Skill[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function EditRequestModal({ request, skills, onClose, onSaved }: EditRequestModalProps) {
+  const { t } = useTranslation();
+  const addToast = useToastStore((s) => s.addToast);
+  const [busy, setBusy] = useState(false);
+
+  const [form, setForm] = useState({
+    title: request.title,
+    description: request.description,
+    start_at: isoToLocalDatetime(request.start_at),
+    end_at: isoToLocalDatetime(request.end_at),
+    quantity: request.quantity,
+    priority: request.priority,
+    required_skills: request.required_skills,
+  });
+
+  async function submit() {
+    if (!form.title.trim()) {
+      addToast({
+        type: 'error',
+        title: t('resources.title_required', { defaultValue: 'Title is required' }),
+      });
+      return;
+    }
+    if (new Date(form.end_at) <= new Date(form.start_at)) {
+      addToast({
+        type: 'error',
+        title: t('resources.window_invalid', {
+          defaultValue: 'End must be after start',
+        }),
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateRequest(request.id, {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        start_at: localDatetimeToIso(form.start_at),
+        end_at: localDatetimeToIso(form.end_at),
+        quantity: form.quantity,
+        priority: form.priority,
+        required_skills: form.required_skills,
+      });
+      addToast({
+        type: 'success',
+        title: t('resources.request_updated_ok', { defaultValue: 'Request updated' }),
+      });
+      onSaved();
+    } catch (err) {
+      addToast({ type: 'error', title: getErrorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <WideModal
+      open
+      onClose={onClose}
+      busy={busy}
+      size="lg"
+      title={t('resources.edit_request', { defaultValue: 'Edit Request' })}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={submit}
+            loading={busy}
+            icon={busy ? <Loader2 size={14} /> : <CheckCircle2 size={14} />}
+          >
+            {t('common.save', { defaultValue: 'Save' })}
+          </Button>
+        </>
+      }
+    >
+      <RequestFormFields form={form} setForm={setForm} skills={skills} />
+    </WideModal>
+  );
+}
+
+interface RequestFormState {
+  title: string;
+  description: string;
+  start_at: string;
+  end_at: string;
+  quantity: number;
+  priority: RequestPriority;
+  required_skills: string[];
+}
+
+interface RequestFormFieldsProps {
+  form: RequestFormState;
+  setForm: React.Dispatch<React.SetStateAction<RequestFormState>>;
+  skills: Skill[];
+}
+
+function RequestFormFields({ form, setForm, skills }: RequestFormFieldsProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('resources.req_col_title', { defaultValue: 'Title' })}
+          required
+          span={2}
+        >
+          <input
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            className={inputCls}
+            placeholder={t('resources.title_placeholder', {
+              defaultValue: 'e.g. 2 carpenters with formwork experience',
+            })}
+            data-testid="request-form-title"
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('common.description', { defaultValue: 'Description' })}
+          span={2}
+        >
+          <textarea
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            className={clsx(inputCls, 'h-20 py-2 resize-y')}
+            placeholder={t('resources.description_placeholder', {
+              defaultValue: 'Optional notes for the dispatcher…',
+            })}
+          />
+        </WideModalField>
+        <WideModalField label={t('resources.start', { defaultValue: 'Start' })} required>
+          <input
+            type="datetime-local"
+            value={form.start_at}
+            onChange={(e) => setForm({ ...form, start_at: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('resources.end', { defaultValue: 'End' })} required>
+          <input
+            type="datetime-local"
+            value={form.end_at}
+            onChange={(e) => setForm({ ...form, end_at: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('resources.req_col_qty', { defaultValue: 'Quantity' })}>
+          <input
+            type="number"
+            min={1}
+            max={999}
+            value={form.quantity}
+            onChange={(e) =>
+              setForm({ ...form, quantity: Math.max(1, Number(e.target.value) || 1) })
+            }
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('resources.requests_priority_label', { defaultValue: 'Priority' })}
+        >
+          <select
+            value={form.priority}
+            onChange={(e) => setForm({ ...form, priority: e.target.value as RequestPriority })}
+            className={inputCls}
+          >
+            <option value="low">{t('resources.priority_low', { defaultValue: 'Low' })}</option>
+            <option value="med">{t('resources.priority_med', { defaultValue: 'Medium' })}</option>
+            <option value="high">{t('resources.priority_high', { defaultValue: 'High' })}</option>
+            <option value="critical">
+              {t('resources.priority_critical', { defaultValue: 'Critical' })}
+            </option>
+          </select>
+        </WideModalField>
+      </WideModalSection>
+
+      {skills.length > 0 && (
+        <WideModalSection
+          title={t('resources.required_skills', { defaultValue: 'Required skills' })}
+          columns={1}
+        >
+          <WideModalField
+            label={t('resources.required_skills_pick', {
+              defaultValue: 'Pick relevant skills',
+            })}
+          >
+            <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+              {skills.slice(0, 60).map((s) => {
+                const checked = form.required_skills.includes(s.id);
+                return (
+                  <button
+                    type="button"
+                    key={s.id}
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        required_skills: checked
+                          ? form.required_skills.filter((x) => x !== s.id)
+                          : [...form.required_skills, s.id],
+                      })
+                    }
+                    className={clsx(
+                      'rounded-full px-2 py-0.5 text-xs border transition-colors',
+                      checked
+                        ? 'border-oe-blue bg-oe-blue/10 text-oe-blue'
+                        : 'border-border-light text-content-secondary hover:bg-surface-secondary',
+                    )}
+                  >
+                    <Wrench size={10} className="inline mr-1" />
+                    {s.name}
+                  </button>
+                );
+              })}
+            </div>
+          </WideModalField>
+        </WideModalSection>
+      )}
+    </>
+  );
+}
+
+interface FulfillRequestModalProps {
+  request: ResourceRequest;
+  resources: Resource[];
+  onClose: () => void;
+  onFulfilled: () => void;
+}
+
+function FulfillRequestModal({
+  request,
+  resources,
+  onClose,
+  onFulfilled,
+}: FulfillRequestModalProps) {
+  const { t } = useTranslation();
+  const addToast = useToastStore((s) => s.addToast);
+  const [busy, setBusy] = useState(false);
+
+  // Suggest the first active resource as a default; user can change it.
+  const defaultResource = useMemo(
+    () => resources.find((r) => r.status === 'active') ?? resources[0],
+    [resources],
+  );
+
+  const [form, setForm] = useState({
+    resource_id: defaultResource?.id ?? '',
+    cost_rate: defaultResource ? String(defaultResource.default_cost_rate ?? '0') : '0',
+    currency: defaultResource?.currency || 'EUR',
+    allocation_percent: 100,
+    notes: '',
+  });
+
+  // When the resource changes, copy its default rate + currency so the
+  // dispatcher does not retype them.
+  useEffect(() => {
+    const r = resources.find((x) => x.id === form.resource_id);
+    if (r) {
+      setForm((f) => ({
+        ...f,
+        cost_rate: String(r.default_cost_rate ?? '0'),
+        currency: r.currency || f.currency,
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.resource_id]);
+
+  async function submit() {
+    if (!form.resource_id) {
+      addToast({
+        type: 'error',
+        title: t('resources.pick_resource', { defaultValue: 'Pick a resource.' }),
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      await fulfillRequest(request.id, {
+        resource_id: form.resource_id,
+        cost_rate: form.cost_rate,
+        currency: form.currency,
+        allocation_percent: form.allocation_percent,
+        notes: form.notes,
+      });
+      addToast({
+        type: 'success',
+        title: t('resources.fulfilled_ok', { defaultValue: 'Request fulfilled' }),
+      });
+      onFulfilled();
+    } catch (err) {
+      addToast({ type: 'error', title: getErrorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <WideModal
+      open
+      onClose={onClose}
+      busy={busy}
+      size="lg"
+      title={t('resources.fulfill_request', { defaultValue: 'Fulfill Request' })}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={submit}
+            loading={busy}
+            icon={busy ? <Loader2 size={14} /> : <CheckCircle2 size={14} />}
+            data-testid="fulfill-request-submit"
+          >
+            {t('resources.fulfill', { defaultValue: 'Fulfill' })}
+          </Button>
+        </>
+      }
+    >
+      <WideModalSection columns={1}>
+        <WideModalField label={t('resources.req_col_title', { defaultValue: 'Title' })}>
+          <div className="text-sm text-content-primary">{request.title}</div>
+          <p className="text-xs text-content-secondary mt-1">
+            <DateDisplay value={request.start_at} /> →{' '}
+            <DateDisplay value={request.end_at} /> ·{' '}
+            {request.quantity} ×{' '}
+            <Badge variant={PRIORITY_VARIANT[request.priority]} size="sm">
+              {request.priority}
+            </Badge>
+          </p>
+        </WideModalField>
+      </WideModalSection>
+
+      <WideModalSection columns={2}>
+        <WideModalField
+          label={t('resources.resource', { defaultValue: 'Resource' })}
+          required
+          span={2}
+        >
+          <select
+            value={form.resource_id}
+            onChange={(e) => setForm({ ...form, resource_id: e.target.value })}
+            className={inputCls}
+            data-testid="fulfill-resource-select"
+          >
+            <option value="">
+              — {t('common.select', { defaultValue: 'Select' })} —
+            </option>
+            {resources.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.code} — {r.name} ({r.resource_type})
+              </option>
+            ))}
+          </select>
+        </WideModalField>
+        <WideModalField
+          label={t('resources.allocation', { defaultValue: 'Allocation %' })}
+        >
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={form.allocation_percent}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                allocation_percent: Math.min(100, Math.max(0, Number(e.target.value) || 0)),
+              })
+            }
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('resources.col_rate', { defaultValue: 'Rate' })}>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={form.cost_rate}
+            onChange={(e) => setForm({ ...form, cost_rate: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('common.currency', { defaultValue: 'Currency' })}>
+          <input
+            value={form.currency}
+            onChange={(e) => setForm({ ...form, currency: e.target.value })}
+            maxLength={3}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('common.notes', { defaultValue: 'Notes' })} span={2}>
+          <textarea
+            value={form.notes}
+            onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            className={clsx(inputCls, 'h-16 py-2 resize-y')}
+            placeholder={t('resources.fulfil_notes_placeholder', {
+              defaultValue: 'Optional handoff notes for the assignee…',
+            })}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 
@@ -615,126 +1819,700 @@ function AssignmentsTab({
   onSelectResource: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
+  const addToast = useToastStore((s) => s.addToast);
+  const userRole = useAuthStore((s) => s.userRole);
+  // Editor / manager / admin can mutate. Lower roles see a read-only view
+  // with the action buttons hidden (the backend RBAC will reject anyway,
+  // but we hide the affordance to keep the UI honest).
+  const canEdit =
+    userRole === 'admin' || userRole === 'manager' || userRole === 'editor';
+
   const idToName = useMemo(() => {
     const m: Record<string, string> = {};
     for (const r of resources) m[r.id] = r.name;
     return m;
   }, [resources]);
 
-  // Fetch assignments per resource (limited to first 50 resources to keep
-  // request count bounded). This is a dispatcher-style overview.
+  // Fan-out assignments across resources (limited to first 50 to keep the
+  // request count bounded). Each per-resource query is keyed by resource
+  // id so React Query can invalidate them individually on mutation.
   const samples = resources.slice(0, 50);
+  const assignmentQs = useQueries({
+    queries: samples.map((r) => ({
+      queryKey: ['resources', 'assignments', r.id] as const,
+      queryFn: () => listAssignmentsForResource(r.id, { limit: 50 }),
+      staleTime: 30_000,
+    })),
+  });
+
+  const isLoading = assignmentQs.some((q) => q.isLoading);
+
+  // Flatten + sort by start date ascending so "next up" is at the top.
+  type FlatAssignment = Assignment & { resource_name: string };
+  const flat: FlatAssignment[] = useMemo(() => {
+    const out: FlatAssignment[] = [];
+    assignmentQs.forEach((q, idx) => {
+      const r = samples[idx];
+      if (!r || !q.data) return;
+      for (const a of q.data) {
+        out.push({ ...a, resource_name: r.name });
+      }
+    });
+    out.sort((a, b) => (a.start_at < b.start_at ? -1 : a.start_at > b.start_at ? 1 : 0));
+    return out;
+  }, [assignmentQs, samples]);
+
+  const [statusFilter, setStatusFilter] = useState<AssignmentStatus | ''>('');
+  const filtered = useMemo(
+    () => (statusFilter ? flat.filter((a) => a.status === statusFilter) : flat),
+    [flat, statusFilter],
+  );
+
+  /* selection + bulk delete */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () =>
+    setSelected((prev) =>
+      prev.size === filtered.length ? new Set() : new Set(filtered.map((a) => a.id)),
+    );
+  // Prune selection if the row disappears (e.g. after delete).
+  useEffect(() => {
+    const visible = new Set(filtered.map((a) => a.id));
+    setSelected((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (visible.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [filtered]);
+
+  /* modals + dialogs */
+  const [editing, setEditing] = useState<Assignment | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Assignment | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['resources', 'assignments'] });
+    qc.invalidateQueries({ queryKey: ['resources', 'dashboard'] });
+    qc.invalidateQueries({ queryKey: ['resources', 'conflicts'] });
+  };
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteAssignment(id),
+    onSuccess: () => {
+      invalidate();
+      addToast({
+        type: 'success',
+        title: t('resources.assign_deleted_ok', {
+          defaultValue: 'Assignment deleted',
+        }),
+      });
+      setDeleteTarget(null);
+    },
+    onError: (err) => addToast({ type: 'error', title: getErrorMessage(err) }),
+  });
+
+  const bulkDeleteMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => deleteAssignment(id)));
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      return { total: ids.length, failed };
+    },
+    onSuccess: ({ total, failed }) => {
+      invalidate();
+      setSelected(new Set());
+      setBulkDeleteOpen(false);
+      if (failed === 0) {
+        addToast({
+          type: 'success',
+          title: t('resources.bulk_delete_ok', {
+            defaultValue: '{{count}} assignments deleted',
+            count: total,
+          }),
+        });
+      } else {
+        addToast({
+          type: 'warning',
+          title: t('resources.bulk_delete_partial', {
+            defaultValue: '{{ok}} of {{total}} deleted, {{failed}} failed',
+            ok: total - failed,
+            total,
+            failed,
+          }),
+        });
+      }
+    },
+    onError: (err) => addToast({ type: 'error', title: getErrorMessage(err) }),
+  });
+
+  /* keyboard shortcuts — only when no modal/dialog is open */
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (editing || deleteTarget || bulkDeleteOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (!focusedId || !canEdit) return;
+      const row = filtered.find((a) => a.id === focusedId);
+      if (!row) return;
+      if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        setEditing(row);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        setDeleteTarget(row);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editing, deleteTarget, bulkDeleteOpen, focusedId, filtered, canEdit]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-      <div className="lg:col-span-2 space-y-3">
-        <Card>
-          <div className="p-4 border-b border-border-light">
-            <h3 className="text-sm font-semibold">
-              {t('resources.this_week', { defaultValue: 'This week & upcoming' })}
-            </h3>
-          </div>
-          <div className="divide-y divide-border-light">
-            {samples.length === 0 ? (
-              <div className="p-8 text-center text-sm text-content-tertiary">
-                {t('resources.no_data', { defaultValue: 'No resources to schedule.' })}
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 space-y-3">
+          <Card padding="none">
+            <div className="flex flex-wrap items-center gap-2 p-3 border-b border-border-light">
+              <h3 className="text-sm font-semibold">
+                {t('resources.this_week', { defaultValue: 'This week & upcoming' })}
+              </h3>
+              <span className="text-xs text-content-tertiary tabular-nums">
+                {filtered.length}
+              </span>
+              <div className="ms-auto flex items-center gap-2">
+                <select
+                  value={statusFilter}
+                  onChange={(e) =>
+                    setStatusFilter(e.target.value as AssignmentStatus | '')
+                  }
+                  className={clsx(inputCls, 'max-w-[160px]')}
+                  aria-label={t('resources.filter_status', {
+                    defaultValue: 'Filter by status',
+                  })}
+                >
+                  <option value="">
+                    {t('resources.status_all', { defaultValue: 'All statuses' })}
+                  </option>
+                  <option value="proposed">
+                    {t('resources.status_proposed', { defaultValue: 'Proposed' })}
+                  </option>
+                  <option value="confirmed">
+                    {t('resources.status_confirmed', { defaultValue: 'Confirmed' })}
+                  </option>
+                  <option value="in_progress">
+                    {t('resources.status_in_progress', { defaultValue: 'In progress' })}
+                  </option>
+                  <option value="completed">
+                    {t('resources.status_completed', { defaultValue: 'Completed' })}
+                  </option>
+                  <option value="cancelled">
+                    {t('resources.status_cancelled', { defaultValue: 'Cancelled' })}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            {/* Bulk action bar — shown when at least one row is selected */}
+            {canEdit && selected.size > 0 && (
+              <div
+                className="flex items-center gap-2 border-b border-border-light bg-oe-blue-subtle/40 px-3 py-2 text-xs"
+                data-testid="assign-bulk-bar"
+              >
+                <span className="font-medium">
+                  {t('resources.selected_count', {
+                    defaultValue: '{{count}} selected',
+                    count: selected.size,
+                  })}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelected(new Set())}
+                  className="text-content-tertiary hover:text-content-primary"
+                >
+                  {t('common.clear', { defaultValue: 'Clear' })}
+                </button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ms-auto !text-rose-600 hover:!bg-rose-50"
+                  icon={<Trash2 size={12} />}
+                  onClick={() => setBulkDeleteOpen(true)}
+                  data-testid="assign-bulk-delete"
+                  disabled={bulkDeleteMut.isPending}
+                >
+                  {t('resources.bulk_delete', { defaultValue: 'Delete selected' })}
+                </Button>
+              </div>
+            )}
+
+            {isLoading ? (
+              <div className="p-4">
+                <SkeletonTable rows={6} columns={6} />
+              </div>
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                icon={<CalendarRange size={22} />}
+                title={t('resources.assign_empty_title', {
+                  defaultValue: 'No assignments yet',
+                })}
+                description={t('resources.assign_empty_desc', {
+                  defaultValue:
+                    'Propose an assignment to put a resource on a project for a specific date range.',
+                })}
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-surface-secondary text-content-tertiary text-xs uppercase tracking-wide">
+                    <tr>
+                      {canEdit && (
+                        <th className="px-3 py-2 text-left w-8">
+                          <input
+                            type="checkbox"
+                            aria-label={t('common.select_all', {
+                              defaultValue: 'Select all',
+                            })}
+                            checked={
+                              filtered.length > 0 && selected.size === filtered.length
+                            }
+                            ref={(el) => {
+                              if (el)
+                                el.indeterminate =
+                                  selected.size > 0 && selected.size < filtered.length;
+                            }}
+                            onChange={toggleAll}
+                            data-testid="assign-row-select-all"
+                          />
+                        </th>
+                      )}
+                      <th className="px-3 py-2 text-left">
+                        {t('resources.col_resource', { defaultValue: 'Resource' })}
+                      </th>
+                      <th className="px-3 py-2 text-left">
+                        {t('resources.start', { defaultValue: 'Start' })}
+                      </th>
+                      <th className="px-3 py-2 text-left">
+                        {t('resources.end', { defaultValue: 'End' })}
+                      </th>
+                      <th className="px-3 py-2 text-right">
+                        {t('resources.alloc', { defaultValue: 'Alloc' })}
+                      </th>
+                      <th className="px-3 py-2 text-left">
+                        {t('resources.col_status', { defaultValue: 'Status' })}
+                      </th>
+                      <th className="px-3 py-2 text-right">
+                        {t('resources.actions', { defaultValue: 'Actions' })}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((a) => {
+                      const isSelected = selected.has(a.id);
+                      const isPast = new Date(a.end_at).getTime() < Date.now();
+                      return (
+                        <tr
+                          key={a.id}
+                          tabIndex={0}
+                          onFocus={() => setFocusedId(a.id)}
+                          onClick={(e) => {
+                            const target = e.target as HTMLElement;
+                            if (
+                              target.closest('input,button,[data-testid^="assign-"]')
+                            )
+                              return;
+                            onSelectResource(a.resource_id);
+                          }}
+                          className={clsx(
+                            'border-t border-border-light hover:bg-surface-secondary focus:bg-surface-secondary outline-none',
+                            isSelected && 'bg-oe-blue-subtle/20',
+                          )}
+                          data-testid={`assign-row-${a.id}`}
+                        >
+                          {canEdit && (
+                            <td className="px-3 py-1.5">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleOne(a.id)}
+                                aria-label={t('common.select_row', {
+                                  defaultValue: 'Select row',
+                                })}
+                                data-testid={`assign-row-select-${a.id}`}
+                              />
+                            </td>
+                          )}
+                          <td className="px-3 py-1.5">
+                            <button
+                              type="button"
+                              className="text-left font-medium text-content-primary hover:text-oe-blue"
+                              onClick={() => onSelectResource(a.resource_id)}
+                            >
+                              {a.resource_name}
+                            </button>
+                          </td>
+                          <td className="px-3 py-1.5 text-xs tabular-nums">
+                            <DateDisplay value={a.start_at} />
+                          </td>
+                          <td className="px-3 py-1.5 text-xs tabular-nums">
+                            <DateDisplay value={a.end_at} />
+                            {isPast && (
+                              <span className="ms-1 text-[10px] uppercase text-content-tertiary">
+                                ({t('resources.past', { defaultValue: 'past' })})
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 text-xs tabular-nums text-right">
+                            {a.allocation_percent}%
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <Badge variant={ASSIGN_VARIANT[a.status]} dot size="sm">
+                              {a.status}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            {canEdit ? (
+                              <div className="inline-flex gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditing(a)}
+                                  className="rounded p-1 text-content-secondary hover:text-oe-blue hover:bg-oe-blue-subtle"
+                                  aria-label={t('common.edit', { defaultValue: 'Edit' })}
+                                  title={t('common.edit', { defaultValue: 'Edit' })}
+                                  data-testid={`assign-edit-${a.id}`}
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteTarget(a)}
+                                  className="rounded p-1 text-content-secondary hover:text-rose-600 hover:bg-rose-50"
+                                  aria-label={t('common.delete', {
+                                    defaultValue: 'Delete',
+                                  })}
+                                  title={t('common.delete', { defaultValue: 'Delete' })}
+                                  data-testid={`assign-delete-${a.id}`}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            ) : (
+                              <span
+                                className="text-xs text-content-tertiary"
+                                title={t('resources.readonly_hint', {
+                                  defaultValue:
+                                    'Read-only — ask a manager to edit assignments',
+                                })}
+                              >
+                                —
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        <div>
+          <Card>
+            <div className="p-4 border-b border-border-light flex items-center gap-2">
+              <AlertTriangle size={14} className="text-semantic-warning" />
+              <h3 className="text-sm font-semibold">
+                {t('resources.conflicts', { defaultValue: 'Conflicts' })}
+              </h3>
+              <span className="ms-auto text-xs text-content-tertiary tabular-nums">
+                {conflicts.length}
+              </span>
+            </div>
+            {conflicts.length === 0 ? (
+              <div className="p-6 text-center text-sm text-content-tertiary">
+                {t('resources.conflicts_none', {
+                  defaultValue: 'No conflicts this week.',
+                })}
               </div>
             ) : (
-              samples.map((r) => (
-                <ResourceAssignmentRow
-                  key={r.id}
-                  resource={r}
-                  onSelect={() => onSelectResource(r.id)}
-                />
-              ))
+              <ul className="divide-y divide-border-light">
+                {conflicts.map((c) => (
+                  <li
+                    key={c.resource_id}
+                    className="p-4 hover:bg-surface-secondary cursor-pointer"
+                    onClick={() => onSelectResource(c.resource_id)}
+                  >
+                    <p className="text-sm font-medium text-content-primary">
+                      {idToName[c.resource_id] || c.resource_name}
+                    </p>
+                    <p className="mt-0.5 text-xs text-content-secondary">
+                      {c.conflicts.length}{' '}
+                      {t('resources.overlap_count', { defaultValue: 'overlap(s)' })}
+                    </p>
+                  </li>
+                ))}
+              </ul>
             )}
-          </div>
-        </Card>
+          </Card>
+        </div>
       </div>
 
-      <div>
-        <Card>
-          <div className="p-4 border-b border-border-light flex items-center gap-2">
-            <AlertTriangle size={14} className="text-semantic-warning" />
-            <h3 className="text-sm font-semibold">
-              {t('resources.conflicts', { defaultValue: 'Conflicts' })}
-            </h3>
-            <span className="ms-auto text-xs text-content-tertiary tabular-nums">
-              {conflicts.length}
-            </span>
-          </div>
-          {conflicts.length === 0 ? (
-            <div className="p-6 text-center text-sm text-content-tertiary">
-              {t('resources.conflicts_none', { defaultValue: 'No conflicts this week.' })}
-            </div>
-          ) : (
-            <ul className="divide-y divide-border-light">
-              {conflicts.map((c) => (
-                <li
-                  key={c.resource_id}
-                  className="p-4 hover:bg-surface-secondary cursor-pointer"
-                  onClick={() => onSelectResource(c.resource_id)}
-                >
-                  <p className="text-sm font-medium text-content-primary">
-                    {idToName[c.resource_id] || c.resource_name}
-                  </p>
-                  <p className="mt-0.5 text-xs text-content-secondary">
-                    {c.conflicts.length}{' '}
-                    {t('resources.overlap_count', { defaultValue: 'overlap(s)' })}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </div>
-    </div>
+      {/* Edit assignment modal */}
+      {editing && (
+        <EditAssignmentModal
+          assignment={editing}
+          onClose={() => setEditing(null)}
+          onSaved={invalidate}
+        />
+      )}
+
+      {/* Single-row delete confirm */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={t('resources.delete_confirm_title', {
+          defaultValue: 'Delete this assignment?',
+        })}
+        message={t('resources.delete_confirm_msg', {
+          defaultValue: 'This action cannot be undone.',
+        })}
+        confirmLabel={t('common.delete', { defaultValue: 'Delete' })}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+        loading={deleteMut.isPending}
+        variant="danger"
+      />
+
+      {/* Bulk delete confirm */}
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title={t('resources.bulk_delete_title', {
+          defaultValue: 'Delete {{count}} assignments?',
+          count: selected.size,
+        })}
+        message={t('resources.bulk_delete_msg', {
+          defaultValue:
+            'You are about to delete {{count}} assignments. This action cannot be undone.',
+          count: selected.size,
+        })}
+        confirmLabel={t('common.delete', { defaultValue: 'Delete' })}
+        onCancel={() => setBulkDeleteOpen(false)}
+        onConfirm={() => bulkDeleteMut.mutate(Array.from(selected))}
+        loading={bulkDeleteMut.isPending}
+        variant="danger"
+      />
+    </>
   );
 }
 
-function ResourceAssignmentRow({
-  resource,
-  onSelect,
+/* ─── Edit assignment modal ─── */
+//
+// Pre-filled inline editor for one Assignment. Mirrors ProposeAssignment-
+// Modal's field layout for muscle-memory. The resource_id is read-only
+// because changing the assignee would effectively delete + re-create
+// the row — Propose Assignment is the right entry point for that.
+
+function toDatetimeLocal(iso: string): string {
+  // Convert an ISO timestamp to the value format expected by
+  // <input type="datetime-local"> (YYYY-MM-DDTHH:mm in local time).
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
+}
+
+function EditAssignmentModal({
+  assignment,
+  onClose,
+  onSaved,
 }: {
-  resource: Resource;
-  onSelect: () => void;
+  assignment: Assignment;
+  onClose: () => void;
+  onSaved: () => void;
 }) {
   const { t } = useTranslation();
-  const q = useQuery({
-    queryKey: ['resources', 'assignments', resource.id],
-    queryFn: () => listAssignmentsForResource(resource.id, { limit: 5 }),
-    staleTime: 30_000,
+  const addToast = useToastStore((s) => s.addToast);
+  const [form, setForm] = useState({
+    start_at: toDatetimeLocal(assignment.start_at),
+    end_at: toDatetimeLocal(assignment.end_at),
+    allocation_percent: assignment.allocation_percent,
+    status: assignment.status,
+    notes: assignment.notes ?? '',
   });
-  const items = q.data ?? [];
-  const active = items.filter((a) => a.status === 'in_progress' || a.status === 'confirmed');
-  const upcoming = items.filter((a) => a.status === 'proposed');
+
+  const isPast = new Date(assignment.end_at).getTime() < Date.now();
+
+  const mut = useMutation({
+    mutationFn: () =>
+      updateAssignment(assignment.id, {
+        start_at: new Date(form.start_at).toISOString(),
+        end_at: new Date(form.end_at).toISOString(),
+        allocation_percent: form.allocation_percent,
+        status: form.status as AssignmentStatus,
+        notes: form.notes,
+      }),
+    onSuccess: () => {
+      addToast({
+        type: 'success',
+        title: t('resources.assign_saved_ok', {
+          defaultValue: 'Assignment saved',
+        }),
+      });
+      onSaved();
+      onClose();
+    },
+    onError: (err) => addToast({ type: 'error', title: getErrorMessage(err) }),
+  });
+
+  const submit = () => {
+    if (!form.start_at || !form.end_at) {
+      addToast({
+        type: 'error',
+        title: t('resources.dates_required', {
+          defaultValue: 'Start and end are required.',
+        }),
+      });
+      return;
+    }
+    if (new Date(form.end_at) <= new Date(form.start_at)) {
+      addToast({
+        type: 'error',
+        title: t('resources.end_after_start', {
+          defaultValue: 'End must be after start.',
+        }),
+      });
+      return;
+    }
+    mut.mutate();
+  };
 
   return (
-    <div className="p-3 hover:bg-surface-secondary cursor-pointer" onClick={onSelect}>
-      <div className="flex items-center gap-2">
-        <Badge variant={TYPE_VARIANT[resource.resource_type]} size="sm">
-          {resource.resource_type}
-        </Badge>
-        <span className="font-medium text-sm">{resource.name}</span>
-        <span className="ms-auto text-xs text-content-tertiary tabular-nums">
-          {items.length} {t('resources.assignments', { defaultValue: 'assignments' })}
-        </span>
-      </div>
-      {(active.length > 0 || upcoming.length > 0) && (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {active.map((a) => (
-            <Badge key={a.id} variant={ASSIGN_VARIANT[a.status]} size="sm">
-              {a.status} · <DateDisplay value={a.start_at} />
-            </Badge>
-          ))}
-          {upcoming.map((a) => (
-            <Badge key={a.id} variant={ASSIGN_VARIANT[a.status]} size="sm">
-              {a.status} · <DateDisplay value={a.start_at} />
-            </Badge>
-          ))}
+    <WideModal
+      open
+      onClose={onClose}
+      busy={mut.isPending}
+      size="lg"
+      title={t('resources.edit_assignment', {
+        defaultValue: 'Edit assignment',
+      })}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={mut.isPending}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={submit}
+            loading={mut.isPending}
+            data-testid="assign-edit-save"
+            icon={mut.isPending ? <Loader2 size={14} /> : <CheckCircle2 size={14} />}
+          >
+            {t('common.save', { defaultValue: 'Save' })}
+          </Button>
+        </>
+      }
+    >
+      {isPast && (
+        <div
+          className="mb-3 flex items-start gap-2 rounded-lg border border-semantic-warning/30 bg-semantic-warning/10 px-3 py-2 text-xs text-semantic-warning"
+          data-testid="assign-edit-past-warning"
+        >
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+          <span>
+            {t('resources.edit_past_warning', {
+              defaultValue:
+                'This assignment is in the past — changes are typically only for record corrections.',
+            })}
+          </span>
         </div>
       )}
-    </div>
+      <WideModalSection columns={2}>
+        <WideModalField label={t('resources.start', { defaultValue: 'Start' })} required>
+          <input
+            type="datetime-local"
+            name="start_at"
+            value={form.start_at}
+            onChange={(e) => setForm({ ...form, start_at: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('resources.end', { defaultValue: 'End' })} required>
+          <input
+            type="datetime-local"
+            name="end_at"
+            value={form.end_at}
+            onChange={(e) => setForm({ ...form, end_at: e.target.value })}
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField
+          label={t('resources.allocation', { defaultValue: 'Allocation %' })}
+        >
+          <input
+            type="number"
+            name="allocation_percent"
+            min={0}
+            max={100}
+            value={form.allocation_percent}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                allocation_percent: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+              })
+            }
+            className={inputCls}
+          />
+        </WideModalField>
+        <WideModalField label={t('resources.col_status', { defaultValue: 'Status' })}>
+          <select
+            name="status"
+            value={form.status}
+            onChange={(e) =>
+              setForm({ ...form, status: e.target.value as AssignmentStatus })
+            }
+            className={inputCls}
+          >
+            <option value="proposed">
+              {t('resources.status_proposed', { defaultValue: 'Proposed' })}
+            </option>
+            <option value="confirmed">
+              {t('resources.status_confirmed', { defaultValue: 'Confirmed' })}
+            </option>
+            <option value="in_progress">
+              {t('resources.status_in_progress', { defaultValue: 'In progress' })}
+            </option>
+            <option value="completed">
+              {t('resources.status_completed', { defaultValue: 'Completed' })}
+            </option>
+            <option value="cancelled">
+              {t('resources.status_cancelled', { defaultValue: 'Cancelled' })}
+            </option>
+          </select>
+        </WideModalField>
+        <WideModalField
+          label={t('resources.notes', { defaultValue: 'Notes' })}
+          span={2}
+        >
+          <textarea
+            name="notes"
+            value={form.notes}
+            onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            rows={3}
+            className={clsx(inputCls, 'h-auto py-2')}
+          />
+        </WideModalField>
+      </WideModalSection>
+    </WideModal>
   );
 }
 

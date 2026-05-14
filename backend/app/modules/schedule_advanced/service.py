@@ -120,7 +120,7 @@ def compute_rnc_pareto(
     to re-fill blanks.
     """
     _ = (period_start, period_end)  # documented but not filtered here
-    out: dict[str, int] = {cat: 0 for cat in _RNC_CATEGORIES}
+    out: dict[str, int] = dict.fromkeys(_RNC_CATEGORIES, 0)
     for r in rncs:
         cat = r.category if r.category in out else "other"
         out[cat] = out.get(cat, 0) + 1
@@ -507,7 +507,7 @@ def compute_rnc_pareto_sorted(
     UIs always see consistent ordering. Within the canonical set, categories
     with the same count are returned alphabetically.
     """
-    counts: dict[str, int] = {cat: 0 for cat in _RNC_CATEGORIES}
+    counts: dict[str, int] = dict.fromkeys(_RNC_CATEGORIES, 0)
     for r in rncs:
         cat = getattr(r, "category", None) if not isinstance(r, dict) else r.get("category")
         cat = cat if cat in counts else "other"

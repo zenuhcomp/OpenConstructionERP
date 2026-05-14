@@ -34,9 +34,9 @@ from app.modules.service.models import (
     ServiceContract,
     ServiceSchedule,
     ServiceTicket,
-    SLADefinition,
     ServiceWorkOrder,
     ServiceWorkOrderItem,
+    SLADefinition,
 )
 
 logger = logging.getLogger(__name__)

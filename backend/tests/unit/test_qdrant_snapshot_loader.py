@@ -159,14 +159,16 @@ def test_restore_from_url_rejects_empty_qdrant_url() -> None:
         )
 
 
-def test_restore_from_url_returns_false_on_non_2xx(monkeypatch) -> None:
-    """recover-from-URL surfaces Qdrant's error verbatim and returns False.
+def test_restore_from_url_raises_with_qdrant_error_verbatim(monkeypatch) -> None:
+    """recover-from-URL raises SnapshotRestoreError carrying Qdrant's message.
 
-    The fix for the install hang relies on this path returning False so the
-    install endpoint raises HTTP 502 — not the silent ``result: false``
-    masquerading as success that the old upload path produced.
+    The router converts that into a 502 with a Windows-AV/disk-space/404
+    hint — so the user sees a concrete fix instead of the old generic
+    "could not fetch or restore" string.
     """
     import httpx
+
+    from app.modules.costs.qdrant_snapshot_loader import SnapshotRestoreError
 
     captured: dict[str, object] = {}
 
@@ -185,12 +187,12 @@ def test_restore_from_url_returns_false_on_non_2xx(monkeypatch) -> None:
 
     monkeypatch.setattr(httpx, "put", _stub_put)
 
-    ok = restore_snapshot_from_url(
-        qdrant_url="http://localhost:6333",
-        collection_name="cwicr_en_v3",
-        snapshot_url="https://hf.co/x.snapshot",
-    )
-    assert ok is False
+    with pytest.raises(SnapshotRestoreError, match="Wrong input: bad url"):
+        restore_snapshot_from_url(
+            qdrant_url="http://localhost:6333",
+            collection_name="cwicr_en_v3",
+            snapshot_url="https://hf.co/x.snapshot",
+        )
     assert captured["url"] == (
         "http://localhost:6333/collections/cwicr_en_v3/snapshots/recover"
     )

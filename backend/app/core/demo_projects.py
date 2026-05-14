@@ -4232,7 +4232,7 @@ async def _seed_module_data(
                 "status": "completed",
                 "attendees": [
                     {"name": "James Harrison", "company": "Canary Properties", "status": "present"},
-                    {"name": "Sarah Chen", "company": "Arup", "status": "present"},
+                    {"name": "Anna Musterfrau", "company": "Arup", "status": "present"},
                     {"name": "David Thompson", "company": "Hoare Lea", "status": "present"},
                     {"name": "Emma Wallace", "company": "G&T", "status": "present"},
                 ],

@@ -20,7 +20,6 @@ from app.modules.resources.models import (
     Skill,
 )
 
-
 # ── ResourceRepository ────────────────────────────────────────────────────
 
 

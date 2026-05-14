@@ -22,11 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.subcontractors.models import (
     Certificate,
     PaymentApplication,
-    PaymentApplicationLine,
     PrequalificationApplication,
     RetentionLedger,
-    Subcontractor,
     SubcontractAgreement,
+    Subcontractor,
     SubcontractorContact,
     SubcontractorRating,
     WorkPackage,

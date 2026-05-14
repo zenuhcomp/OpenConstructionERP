@@ -46,7 +46,7 @@ export function AboutPage() {
         </div>
         <h1 className="text-3xl font-bold text-content-primary tracking-tight">OpenConstructionERP</h1>
         <p className="mt-2 text-base text-content-secondary">
-          {t('about.tagline', { defaultValue: 'The #1 open-source platform for construction cost estimation‌⁠‍' })}
+          {t('about.tagline', { defaultValue: 'The #1 open-source platform for construction cost estimation, project management and resource control‌⁠‍' })}
         </p>
         <div className="mt-3 flex items-center justify-center gap-3 text-sm text-content-tertiary">
           <span className="font-mono">v{APP_VERSION}</span>

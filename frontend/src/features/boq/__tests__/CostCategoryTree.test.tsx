@@ -129,7 +129,7 @@ describe('CostCategoryTree', () => {
         t={t}
       />,
     );
-    const filter = screen.getByPlaceholderText('Filter categories...');
+    const filter = screen.getByPlaceholderText(/^Filter categories\.\.\./);
     fireEvent.change(filter, { target: { value: 'C30' } });
 
     // The matching descendant + its ancestors are visible …
@@ -157,7 +157,7 @@ describe('CostCategoryTree', () => {
       .at(-1);
     fireEvent.click(infraExpand!);
 
-    expect(screen.getByText('(Uncategorized)')).toBeInTheDocument();
+    expect(screen.getByText(/^\(Uncategorized\)/)).toBeInTheDocument();
     // The literal sentinel token must NOT leak to the UI.
     expect(screen.queryByText('__unspecified__')).toBeNull();
   });

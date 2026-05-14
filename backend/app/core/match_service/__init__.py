@@ -31,6 +31,10 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.match_service.determinism import (
+    enter_deterministic_mode,
+    stabilize_response,
+)
 from app.core.match_service.envelope import (
     ElementEnvelope,
     MatchCandidate,
@@ -97,16 +101,24 @@ async def match_envelope(
         use_reranker=use_reranker,
     )
 
+    # OE_MATCH_DETERMINISTIC=1 pins RNGs + forces BGE batch_size=1 so
+    # the bench harness can compare runs without run-to-run variance
+    # drowning out the signal. No-op in production (default off). The
+    # call is idempotent so cost is amortised across the process — only
+    # the first match request pays the seed/patch overhead.
+    enter_deterministic_mode()
+
     rank_fn = _select_ranker()
 
     if db is not None:
-        return await rank_fn(request, db=db, ai_settings=ai_settings)
+        response = await rank_fn(request, db=db, ai_settings=ai_settings)
+        return stabilize_response(response)
 
     async with async_session_factory() as session:
         try:
             response = await rank_fn(request, db=session, ai_settings=ai_settings)
             await session.commit()
-            return response
+            return stabilize_response(response)
         except Exception:
             await session.rollback()
             raise

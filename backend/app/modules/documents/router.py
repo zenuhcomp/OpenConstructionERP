@@ -38,8 +38,6 @@ from app.modules.documents.schemas import (
     DocumentResponse,
     DocumentSummary,
     DocumentUpdate,
-    FolderPermissionCreate,
-    FolderPermissionResponse,
     PhotoResponse,
     PhotoTimelineGroup,
     PhotoUpdate,

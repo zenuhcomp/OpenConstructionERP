@@ -19,7 +19,6 @@ import bcrypt
 from fastapi import HTTPException, status
 from jose import jwt
 from sqlalchemy import update
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings

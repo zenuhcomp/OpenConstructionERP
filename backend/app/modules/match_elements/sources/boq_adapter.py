@@ -268,8 +268,17 @@ class BoqAdapter:
             attrs.setdefault("category", cat)
             attrs.setdefault("description", description)
             attrs.setdefault("unit", unit)
-            # Promote category → ifc_class so cross-source group-by works.
-            attrs.setdefault("ifc_class", cat)
+            # ``ifc_class`` is kept only when the BoQ row carries a real
+            # IFC class name (``IfcWall`` / ``IfcSlab`` / …). The
+            # synthetic source label (default ``"BoQ"``, or whatever the
+            # estimator wrote in the ``category`` / ``section`` column)
+            # is NOT an IFC class — promoting it would poison the
+            # downstream Qdrant ``ifc_class`` hard filter and eliminate
+            # 100% of CWICR candidate rows (see
+            # :doc:`memory/match_elements_three_filter_bugs`).
+            row_ifc = attrs.get("ifc_class")
+            if not (isinstance(row_ifc, str) and row_ifc.startswith("Ifc")):
+                attrs.pop("ifc_class", None)
 
             # Exact-code shortcut (§4.4 — sparse-only would be enough,
             # but the ranker layer reads ``exact_code`` and skips Qdrant

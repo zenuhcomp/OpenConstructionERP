@@ -381,7 +381,7 @@ def convert_opportunity_to_project_payload(opportunity: Any) -> dict[str, Any]:
 class CrmService:
     """Business logic for the CRM module."""
 
-    def __init__(self, session: "AsyncSession") -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.account_repo = AccountRepository(session)
         self.lead_repo = LeadRepository(session)
@@ -395,7 +395,7 @@ class CrmService:
     # ── Accounts ─────────────────────────────────────────────────────────
 
     async def create_account(
-        self, data: "AccountCreate", user_id: str | None = None
+        self, data: AccountCreate, user_id: str | None = None
     ) -> Account:
         account = Account(
             name=data.name,
@@ -420,7 +420,7 @@ class CrmService:
         return account
 
     async def update_account(
-        self, account_id: uuid.UUID, data: "AccountUpdate"
+        self, account_id: uuid.UUID, data: AccountUpdate
     ) -> Account:
         account = await self.get_account(account_id)
         fields = data.model_dump(exclude_unset=True)
@@ -435,7 +435,7 @@ class CrmService:
 
     # ── Leads ────────────────────────────────────────────────────────────
 
-    async def create_lead(self, data: "LeadCreate", user_id: str | None = None) -> Lead:
+    async def create_lead(self, data: LeadCreate, user_id: str | None = None) -> Lead:
         lead = Lead(
             account_id=data.account_id,
             contact_name=data.contact_name,
@@ -456,7 +456,7 @@ class CrmService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
         return lead
 
-    async def update_lead(self, lead_id: uuid.UUID, data: "LeadUpdate") -> Lead:
+    async def update_lead(self, lead_id: uuid.UUID, data: LeadUpdate) -> Lead:
         lead = await self.get_lead(lead_id)
         fields = data.model_dump(exclude_unset=True)
         if "status" in fields and fields["status"] != lead.status:
@@ -532,7 +532,7 @@ class CrmService:
     async def convert_lead(
         self,
         lead_id: uuid.UUID,
-        payload: "LeadConvertRequest",
+        payload: LeadConvertRequest,
         user_id: str | None = None,
     ) -> tuple[Lead, Opportunity]:
         """Convert a qualified lead into an opportunity."""
@@ -603,7 +603,7 @@ class CrmService:
     # ── Opportunities ────────────────────────────────────────────────────
 
     async def create_opportunity(
-        self, data: "OpportunityCreate", user_id: str | None = None
+        self, data: OpportunityCreate, user_id: str | None = None
     ) -> Opportunity:
         stage = await self.stage_repo.get_by_id(data.stage_id)
         if stage is None:
@@ -654,7 +654,7 @@ class CrmService:
         return opp
 
     async def update_opportunity(
-        self, opportunity_id: uuid.UUID, data: "OpportunityUpdate"
+        self, opportunity_id: uuid.UUID, data: OpportunityUpdate
     ) -> Opportunity:
         opp = await self.get_opportunity(opportunity_id)
         fields = data.model_dump(exclude_unset=True)
@@ -871,7 +871,7 @@ class CrmService:
 
     # ── Pipeline stages (catalog) ────────────────────────────────────────
 
-    async def create_stage(self, data: "PipelineStageCreate") -> Any:
+    async def create_stage(self, data: PipelineStageCreate) -> Any:
         from app.modules.crm.models import PipelineStage
 
         stage = PipelineStage(**data.model_dump())
@@ -879,7 +879,7 @@ class CrmService:
         return stage
 
     async def update_stage(
-        self, stage_id: uuid.UUID, data: "PipelineStageUpdate"
+        self, stage_id: uuid.UUID, data: PipelineStageUpdate
     ) -> Any:
         stage = await self.stage_repo.get_by_id(stage_id)
         if stage is None:
@@ -902,7 +902,7 @@ class CrmService:
 
     # ── Win/loss reasons (catalog) ───────────────────────────────────────
 
-    async def create_reason(self, data: "WinLossReasonCreate") -> Any:
+    async def create_reason(self, data: WinLossReasonCreate) -> Any:
         from app.modules.crm.models import WinLossReason
 
         reason = WinLossReason(**data.model_dump())
@@ -910,7 +910,7 @@ class CrmService:
         return reason
 
     async def update_reason(
-        self, reason_id: uuid.UUID, data: "WinLossReasonUpdate"
+        self, reason_id: uuid.UUID, data: WinLossReasonUpdate
     ) -> Any:
         reason = await self.reason_repo.get_by_id(reason_id)
         if reason is None:
@@ -934,7 +934,7 @@ class CrmService:
     # ── Activities ───────────────────────────────────────────────────────
 
     async def create_activity(
-        self, data: "ActivityCreate", user_id: str | None = None
+        self, data: ActivityCreate, user_id: str | None = None
     ) -> CrmActivity:
         activity = CrmActivity(
             owner_user_id=data.owner_user_id or _to_uuid_or_none(user_id),
@@ -961,7 +961,7 @@ class CrmService:
         return activity
 
     async def update_activity(
-        self, activity_id: uuid.UUID, data: "ActivityUpdate"
+        self, activity_id: uuid.UUID, data: ActivityUpdate
     ) -> CrmActivity:
         activity = await self.get_activity(activity_id)
         fields = data.model_dump(exclude_unset=True)

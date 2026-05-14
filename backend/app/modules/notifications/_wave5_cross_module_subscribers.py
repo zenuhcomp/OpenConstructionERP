@@ -449,12 +449,12 @@ async def _on_bid_package_awarded(event: Event) -> None:
             from sqlalchemy import select
 
             from app.modules.bid_management.models import (
+                Bidder,
                 BidInvitation,
                 BidPackage,
                 BidPackageLineItem,
                 BidSubmission,
                 BidSubmissionLine,
-                Bidder,
             )
             from app.modules.contracts.models import Contract, ContractLine
 

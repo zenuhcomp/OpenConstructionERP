@@ -97,11 +97,18 @@ export function SupplierCatalogsPage() {
   // PRs / POs / invoices: backend lacks list endpoints today.  We compute
   // synthetic empty lists and show an EmptyState.  The create-flow still
   // works.  This keeps the surface honest about what the API supports.
+  // Defensive coerce — the offline-cache layer can occasionally hydrate
+  // the query with a non-array value (e.g. a stale FastAPI error envelope
+  // from a previous session), which would crash ``.filter()`` below.
+  const vendorsArr = Array.isArray(vendorsQ.data) ? vendorsQ.data : [];
+  const itemsArr = Array.isArray(itemsQ.data) ? itemsQ.data : [];
+  const warehousesArr = Array.isArray(warehousesQ.data) ? warehousesQ.data : [];
+  const balancesArr = Array.isArray(balancesQ.data) ? balancesQ.data : [];
   const filteredVendors = useMemo(
-    () => filterByText(vendorsQ.data ?? [], search, (v) => `${v.code} ${v.name} ${v.country_code ?? ''}`),
-    [vendorsQ.data, search],
+    () => filterByText(vendorsArr, search, (v) => `${v.code} ${v.name} ${v.country_code ?? ''}`),
+    [vendorsArr, search],
   );
-  const filteredItems = itemsQ.data ?? [];
+  const filteredItems = itemsArr;
 
   const isLoading =
     (tab === 'vendors' && vendorsQ.isLoading) ||
@@ -181,13 +188,13 @@ export function SupplierCatalogsPage() {
             ))}
           </select>
         )}
-        {tab === 'warehouses' && (warehousesQ.data ?? []).length > 0 && (
+        {tab === 'warehouses' && warehousesArr.length > 0 && (
           <select
-            value={selectedWarehouseId || (warehousesQ.data ?? [])[0]?.id || ''}
+            value={selectedWarehouseId || warehousesArr[0]?.id || ''}
             onChange={(e) => setSelectedWarehouseId(e.target.value)}
             className={clsx(inputCls, 'max-w-[280px]')}
           >
-            {(warehousesQ.data ?? []).map((w) => (
+            {warehousesArr.map((w) => (
               <option key={w.id} value={w.id}>
                 {w.code} — {w.name}
               </option>
@@ -214,8 +221,8 @@ export function SupplierCatalogsPage() {
         ) : (
           <WarehousePanel
             warehouses={warehousesQ.data ?? []}
-            selectedId={selectedWarehouseId || (warehousesQ.data ?? [])[0]?.id || ''}
-            balances={balancesQ.data ?? []}
+            selectedId={selectedWarehouseId || warehousesArr[0]?.id || ''}
+            balances={balancesArr}
             onAction={() => setCreateOpen(true)}
           />
         )}

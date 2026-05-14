@@ -36,7 +36,6 @@ from app.modules.bi_dashboards.models import (
 from app.modules.bi_dashboards.schemas import (
     AlertRuleCreate,
     AlertRuleRead,
-    AlertRuleUpdate,
     DashboardCreate,
     DashboardRead,
     DashboardRenderResponse,
@@ -49,7 +48,6 @@ from app.modules.bi_dashboards.schemas import (
     KPIHistoryResponse,
     ReportDefinitionCreate,
     ReportDefinitionRead,
-    ReportDefinitionUpdate,
     ReportRunResponse,
     ReportScheduleCreate,
     ReportScheduleRead,

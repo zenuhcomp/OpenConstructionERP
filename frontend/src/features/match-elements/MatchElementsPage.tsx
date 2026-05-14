@@ -1377,6 +1377,14 @@ export function MatchElementsPage() {
     'wizard' | 'toolbar'
   >('wizard');
 
+  // AbortController for the in-flight runMatch fetch. Stored in a ref
+  // (not state) so the cancel handler in MatchProgressCard can fire
+  // it without retriggering a re-render. Replaced on every kickoff
+  // (wizard or toolbar) so a stale controller from a previous run
+  // can never accidentally abort the current one. ``null`` between
+  // runs.
+  const runMatchAbortRef = useRef<AbortController | null>(null);
+
   // Honour the ?project=<id> deep-link: if the URL names a project that
   // differs from the active one, switch the store. This is what makes
   // /match-elements?project=<uuid> universal — the page actually shows
@@ -1582,20 +1590,33 @@ export function MatchElementsPage() {
               { method },
             ),
       );
-      // Surface the progress card for toolbar-driven re-runs too —
-      // same wall-clock heuristic timeline. Without this the user
-      // re-runs "vector" from the toolbar and stares at the existing
-      // busy banner for 30-90s with no per-stage feedback.
+      // Surface the progress card for toolbar-driven re-runs too — the
+      // card polls /progress for real-stage updates and the abort
+      // controller below lets the Cancel button reach the in-flight
+      // fetch when a backend gets wedged.
       setMatchInFlight(true);
       setMatchStatus('running');
       setMatchError(null);
       setMatchKickoffFrom('toolbar');
-      return matchElementsApi.runMatch(sessionId, {
-        method,
-        top_k: 10,
-        max_groups: 50,
-        group_keys: keys,
-      });
+
+      // Replace any stale controller and wire the new one into the
+      // fetch so the progress card's Cancel button aborts the right
+      // request. Hard 5-minute safety limit — the longest healthy run
+      // we've measured is ~80s; anything beyond is a wedged backend.
+      runMatchAbortRef.current?.abort();
+      const ac = new AbortController();
+      runMatchAbortRef.current = ac;
+      const timeoutId = window.setTimeout(() => ac.abort(), 5 * 60_000);
+      try {
+        return await matchElementsApi.runMatch(
+          sessionId,
+          { method, top_k: 10, max_groups: 50, group_keys: keys },
+          { signal: ac.signal },
+        );
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (runMatchAbortRef.current === ac) runMatchAbortRef.current = null;
+      }
     },
     onSuccess: () => {
       setBusy(null);
@@ -2117,16 +2138,20 @@ export function MatchElementsPage() {
           projectId={projectId}
           projectRegion={projectRegion}
           sessions={sessionsQ.data ?? []}
-          onComplete={(id) => {
+          onComplete={(id, abortController) => {
             // Session exists — mount the progress card on top of the
             // wizard slot. The wizard continues to await runMatch in
             // the background; matchStatus stays "running" until the
             // wizard fires onMatchSuccess or onMatchError below.
+            // The AbortController feeds the in-flight fetch so the
+            // progress card's Cancel button can reach it.
             setSessionId(id);
             setMatchInFlight(true);
             setMatchStatus('running');
             setMatchError(null);
             setMatchKickoffFrom('wizard');
+            runMatchAbortRef.current?.abort();
+            runMatchAbortRef.current = abortController ?? null;
           }}
           onMatchSuccess={() => {
             setMatchStatus('done');
@@ -2147,6 +2172,7 @@ export function MatchElementsPage() {
         <MatchProgressCard
           status={matchStatus}
           errorMessage={matchError}
+          sessionId={sessionId}
           onDone={() => {
             setMatchInFlight(false);
             setMatchStatus('running');
@@ -2154,6 +2180,14 @@ export function MatchElementsPage() {
             qc.invalidateQueries({ queryKey: ['match-groups', sessionId] });
             qc.invalidateQueries({ queryKey: ['match-session', sessionId] });
             qc.invalidateQueries({ queryKey: ['match-sessions', projectId] });
+          }}
+          onCancel={() => {
+            // Fire the AbortController feeding the in-flight runMatch
+            // fetch. The fetch then rejects with AbortError; the
+            // mutation's ``onError`` flips ``matchStatus`` to ``error``
+            // with the cancellation message so the user sees the
+            // retry button instead of a stuck spinner.
+            runMatchAbortRef.current?.abort();
           }}
           onRetry={() => {
             // Wizard kickoffs send the user back to Step 1 of the

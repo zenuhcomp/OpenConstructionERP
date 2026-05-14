@@ -1,0 +1,358 @@
+{
+  "dashboard_keys": {
+    "dashboard.add_api_keys": "Add API Keys",
+    "dashboard.ai_providers": "AI Providers",
+    "dashboard.analytics": "Analytics",
+    "dashboard.kpi_hint": "Summary across all projects. Values update as you add estimates and schedule activities.",
+    "dashboard.api_server": "API Server",
+    "dashboard.boq_status": "BOQ Status",
+    "dashboard.completed": "Completed",
+    "dashboard.configure": "Configure",
+    "dashboard.continue_estimate": "Continue last estimate",
+    "dashboard.create_boq": "Create BOQ",
+    "dashboard.database": "Database",
+    "dashboard.demo": "Demo",
+    "dashboard.getting_started": "Getting Started",
+    "dashboard.import_database": "Import Database",
+    "dashboard.kpi_active_estimates": "Active Estimates",
+    "dashboard.kpi_estimates_unit": "estimate{{s}}",
+    "dashboard.kpi_no_schedules": "No schedules",
+    "dashboard.kpi_quality": "Quality Score",
+    "dashboard.kpi_quality_score_label": "score",
+    "dashboard.kpi_schedule": "Schedule Status",
+    "dashboard.kpi_schedule_active": "active",
+    "dashboard.kpi_total_value": "Total Value",
+    "dashboard.languages": "Languages",
+    "dashboard.modules_loaded": "Modules loaded",
+    "dashboard.new_project": "New Project",
+    "dashboard.no_boq_data": "No BOQ data available",
+    "dashboard.no_projects": "No projects yet",
+    "dashboard.no_projects_desc": "Create your first project to get started",
+    "dashboard.not_configured": "Not configured",
+    "dashboard.project_overview": "Project Overview",
+    "dashboard.quick_actions": "Quick Actions",
+    "dashboard.recent_projects": "Recent Projects",
+    "dashboard.show_shortcuts": "Show keyboard shortcuts",
+    "dashboard.step_ai_search": "Enable AI Search",
+    "dashboard.step_ai_search_desc": "Generate vector embeddings for semantic cost matching",
+    "dashboard.step_build_boq": "Build Your BOQ",
+    "dashboard.step_build_boq_desc": "Create a Bill of Quantities with AI assistance",
+    "dashboard.step_connect_ai": "Connect AI",
+    "dashboard.step_connect_ai_desc": "Add your API keys for AI-powered estimation",
+    "dashboard.step_create_project": "Create Project",
+    "dashboard.step_create_project_desc": "Start your first construction estimation project",
+    "dashboard.step_load_db": "Load Cost Database",
+    "dashboard.step_load_db_desc": "Import regional pricing data with 55,000+ items",
+    "dashboard.subtitle": "Overview of your projects, key metrics, and recent activity",
+    "dashboard.subtitle_2": "Smart resource planning for your construction projects",
+    "dashboard.developed_by": "Developed by",
+    "dashboard.activity": "Recent Activity",
+    "dashboard.system_status": "System Status",
+    "dashboard.total_boqs": "Total BOQs",
+    "dashboard.total_projects": "Total Projects",
+    "dashboard.total_value": "Total Value",
+    "dashboard.validation_rules": "Validation rules",
+    "dashboard.value_by_project": "Value by Project",
+    "dashboard.vector_db": "Vector DB",
+    "dashboard.welcome": "Welcome to OpenConstructionERP",
+    "dashboard.open_source_badge": "The #1 open-source construction ERP",
+    "dashboard.active_projects": "Active Projects",
+    "dashboard.budget_warnings": "Budget Warnings",
+    "dashboard.continue_work": "Continue your work",
+    "dashboard.create_first_project": "Create First Project",
+    "dashboard.create_first_project_desc": "Set up a new estimation from scratch",
+    "dashboard.import_existing_boq": "Import Existing BOQ",
+    "dashboard.import_existing_boq_desc": "Use AI to estimate from an existing document",
+    "dashboard.install_demo": "Install Demo Project",
+    "dashboard.install_demo_desc": "Pre-built residential project with realistic data",
+    "dashboard.kpi_not_validated": "N/A",
+    "dashboard.kpi_run_validation": "run validation",
+    "dashboard.over_budget": "over budget",
+    "dashboard.portfolio_overview": "Portfolio Overview",
+    "dashboard.projects_over_budget": "Projects Over Budget",
+    "dashboard.quick_start": "Quick Start Estimate",
+    "dashboard.run_setup": "Run Setup Wizard",
+    "dashboard.total_budget_all": "Total Budget",
+    "dashboard.welcome_body": "This project is built and maintained by the community. Your support helps us add new features, regional databases, and keep it free for everyone.",
+    "dashboard.welcome_consult": "Professional Consulting",
+    "dashboard.welcome_consult_desc": "Custom deployment, training, and enterprise solutions worldwide",
+    "dashboard.welcome_desc": "Start by installing a demo project or creating your own.",
+    "dashboard.welcome_sponsor": "Become a Sponsor",
+    "dashboard.welcome_sponsor_desc": "Fund new features and keep the project free for everyone",
+    "dashboard.welcome_star": "Star on GitHub",
+    "dashboard.welcome_star_desc": "Help others discover the project — takes 2 seconds",
+    "dashboard.welcome_start": "Get Started",
+    "dashboard.welcome_sub": "Free & open-source construction cost estimation",
+    "dashboard.welcome_title": "Welcome to OpenConstructionERP",
+    "dashboard.with_budget": "With Budget"
+  },
+  "summary": [
+    [
+      "de",
+      0,
+      1
+    ],
+    [
+      "fr",
+      0,
+      1
+    ],
+    [
+      "es",
+      0,
+      1
+    ],
+    [
+      "it",
+      0,
+      3
+    ],
+    [
+      "pt",
+      0,
+      0
+    ],
+    [
+      "ru",
+      0,
+      0
+    ],
+    [
+      "zh",
+      0,
+      0
+    ],
+    [
+      "ja",
+      0,
+      0
+    ],
+    [
+      "ko",
+      0,
+      1
+    ],
+    [
+      "ar",
+      0,
+      0
+    ],
+    [
+      "hi",
+      0,
+      0
+    ],
+    [
+      "th",
+      0,
+      11
+    ],
+    [
+      "vi",
+      0,
+      10
+    ],
+    [
+      "id",
+      0,
+      10
+    ],
+    [
+      "tr",
+      0,
+      2
+    ],
+    [
+      "nl",
+      0,
+      5
+    ],
+    [
+      "pl",
+      0,
+      2
+    ],
+    [
+      "cs",
+      0,
+      2
+    ],
+    [
+      "sv",
+      0,
+      2
+    ],
+    [
+      "no",
+      0,
+      3
+    ],
+    [
+      "da",
+      0,
+      5
+    ],
+    [
+      "fi",
+      0,
+      2
+    ],
+    [
+      "ro",
+      0,
+      10
+    ],
+    [
+      "bg",
+      0,
+      1
+    ],
+    [
+      "hr",
+      0,
+      10
+    ],
+    [
+      "mn",
+      0,
+      0
+    ]
+  ],
+  "missing_by_key": {},
+  "identical_by_key": {
+    "dashboard.demo": [
+      "de",
+      "es",
+      "it",
+      "th",
+      "vi",
+      "id",
+      "tr",
+      "nl",
+      "pl",
+      "cs",
+      "sv",
+      "no",
+      "da",
+      "fi",
+      "ro",
+      "hr"
+    ],
+    "dashboard.kpi_quality_score_label": [
+      "fr",
+      "th",
+      "vi",
+      "id",
+      "nl",
+      "da",
+      "ro",
+      "hr"
+    ],
+    "dashboard.database": [
+      "it",
+      "th",
+      "vi",
+      "id",
+      "nl",
+      "no",
+      "da",
+      "ro",
+      "hr"
+    ],
+    "dashboard.developed_by": [
+      "it",
+      "ko",
+      "th",
+      "vi",
+      "id",
+      "tr",
+      "nl",
+      "pl",
+      "cs",
+      "sv",
+      "no",
+      "da",
+      "fi",
+      "ro",
+      "bg",
+      "hr"
+    ],
+    "dashboard.analytics": [
+      "th",
+      "vi",
+      "id",
+      "ro",
+      "hr"
+    ],
+    "dashboard.completed": [
+      "th",
+      "vi",
+      "id",
+      "ro",
+      "hr"
+    ],
+    "dashboard.configure": [
+      "th",
+      "vi",
+      "id",
+      "ro",
+      "hr"
+    ],
+    "dashboard.kpi_estimates_unit": [
+      "th",
+      "vi",
+      "id",
+      "ro",
+      "hr"
+    ],
+    "dashboard.kpi_schedule_active": [
+      "th",
+      "vi",
+      "id",
+      "ro",
+      "hr"
+    ],
+    "dashboard.languages": [
+      "th",
+      "vi",
+      "id",
+      "ro",
+      "hr"
+    ],
+    "dashboard.vector_db": [
+      "th",
+      "nl"
+    ],
+    "dashboard.over_budget": [
+      "da"
+    ]
+  },
+  "per_locale_missing": {
+    "de": [],
+    "fr": [],
+    "es": [],
+    "it": [],
+    "pt": [],
+    "ru": [],
+    "zh": [],
+    "ja": [],
+    "ko": [],
+    "ar": [],
+    "hi": [],
+    "th": [],
+    "vi": [],
+    "id": [],
+    "tr": [],
+    "nl": [],
+    "pl": [],
+    "cs": [],
+    "sv": [],
+    "no": [],
+    "da": [],
+    "fi": [],
+    "ro": [],
+    "bg": [],
+    "hr": [],
+    "mn": []
+  }
+}

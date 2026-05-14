@@ -137,6 +137,10 @@ class SnapshotLoadSummary:
         return bool(self.loaded) and not self.errors
 
 
+class SnapshotRestoreError(RuntimeError):
+    """Snapshot recover-from-URL failed. ``args[0]`` is the verbatim Qdrant message."""
+
+
 def restore_snapshot_from_url(
     *,
     qdrant_url: str,
@@ -159,8 +163,10 @@ def restore_snapshot_from_url(
     cloud-hosted snapshots (HuggingFace, GitHub raw) the URL is reached
     over the public internet.
 
-    Returns ``True`` on ``{"result": true, "status": "ok"}``, ``False``
-    on any failure (with an ERROR log). Does not raise.
+    Returns ``True`` on ``{"result": true, "status": "ok"}``. Raises
+    :class:`SnapshotRestoreError` with Qdrant's verbatim error message on
+    any non-success — callers convert that to a 502 with a human-readable
+    hint (Windows AV / disk space / 404 / etc.).
     """
 
     if not qdrant_url:
@@ -203,7 +209,7 @@ def restore_snapshot_from_url(
             collection_name,
             exc,
         )
-        return False
+        raise SnapshotRestoreError(f"network error contacting Qdrant: {exc}") from exc
 
     try:
         body = resp.json()
@@ -221,20 +227,22 @@ def restore_snapshot_from_url(
 
     # Surface Qdrant's own error message verbatim — it's the most useful
     # diagnostic ("Failed to download snapshot from <url>: status - 404
-    # Not Found", "Wrong input: <…>", etc).
+    # Not Found", "Wrong input: <…>", "failed to sync file … Access is
+    # denied. (os error 5)" on Windows Defender, etc).
     err = ""
     if isinstance(body, dict):
         status_obj = body.get("status")
         if isinstance(status_obj, dict):
             err = str(status_obj.get("error") or "")
+    err = err or resp.text[:400] or f"HTTP {resp.status_code} from Qdrant"
     logger.error(
         "Snapshot recover-from-URL failed for %s -> %s: HTTP %s -- %s",
         snapshot_url,
         collection_name,
         resp.status_code,
-        err or resp.text[:200],
+        err,
     )
-    return False
+    raise SnapshotRestoreError(err)
 
 
 def restore_snapshot_file(
@@ -570,6 +578,7 @@ def enumerate_qdrant_v3_collections(
 
 __all__ = [
     "SnapshotLoadSummary",
+    "SnapshotRestoreError",
     "cwicr_snapshot_target_for",
     "enumerate_qdrant_v3_collections",
     "load_ddc_snapshot_dir",

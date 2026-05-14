@@ -10,7 +10,8 @@
  * - Custom role names
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
@@ -505,12 +506,49 @@ function RoleDropdown({
   onUpdate: (userId: string, role: UserRole) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const cfg = ROLE_CONFIG[currentRole] ?? ROLE_CONFIG.viewer;
   const Icon = cfg.icon;
 
+  /* Anchor the popover via fixed positioning + a portal to <body> so it
+     escapes parent overflow/transform stacking contexts that were
+     clipping it inside the table row. Right-aligned to the trigger so
+     it matches the previous design but never goes off-screen. */
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const POPOVER_WIDTH = 144; // matches w-36
+    setPos({
+      top: rect.bottom + 4,
+      left: Math.max(8, rect.right - POPOVER_WIDTH),
+    });
+  }, [open]);
+
+  // Re-position on scroll/resize so the popover stays glued to the trigger.
+  useEffect(() => {
+    if (!open) return;
+    const reposition = () => {
+      if (!buttonRef.current) return;
+      const rect = buttonRef.current.getBoundingClientRect();
+      const POPOVER_WIDTH = 144;
+      setPos({
+        top: rect.bottom + 4,
+        left: Math.max(8, rect.right - POPOVER_WIDTH),
+      });
+    };
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open]);
+
   return (
-    <div className="relative">
+    <>
       <button
+        ref={buttonRef}
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors hover:bg-surface-secondary cursor-pointer"
       >
@@ -518,10 +556,13 @@ function RoleDropdown({
         {cfg.label}
         <ChevronDown size={12} className="text-content-quaternary" />
       </button>
-      {open && (
+      {open && pos && createPortal(
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-50 w-36 bg-surface-primary rounded-lg shadow-lg border border-border py-1 animate-fade-in">
+          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-[61] w-36 bg-surface-primary rounded-lg shadow-lg border border-border py-1 animate-fade-in"
+            style={{ top: pos.top, left: pos.left }}
+          >
             {ROLES.map((r) => {
               const rc = ROLE_CONFIG[r];
               const RIcon = rc.icon;
@@ -544,9 +585,10 @@ function RoleDropdown({
               );
             })}
           </div>
-        </>
+        </>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }
 

@@ -19,6 +19,7 @@ from app.modules.costs.query_builder import (
     department_code_for,
     extract_resource_hints,
     unit_dim_for,
+    unit_type_for,
 )
 
 
@@ -56,6 +57,46 @@ def test_unit_dim_drops_when_unknown_or_lumpsum(unit: str | None) -> None:
 def test_unit_dim_strips_and_lowercases() -> None:
     assert unit_dim_for("  M3 ") == "volume"
     assert unit_dim_for("M2") == "area"
+
+
+# ── unit_type_for (v3 DDC snapshot vocabulary, capitalised) ──────────────
+
+
+@pytest.mark.parametrize(
+    ("unit", "bucket"),
+    [
+        ("m3", "Volume"),
+        ("m³", "Volume"),
+        ("CBM", "Volume"),
+        ("m2", "Area"),
+        ("m²", "Area"),
+        ("sqm", "Area"),
+        ("sf", "Area"),
+        ("m", "Linear"),
+        ("lm", "Linear"),
+        ("ft", "Linear"),
+        ("kg", "Mass"),
+        ("t", "Mass"),
+        ("tonne", "Mass"),
+        ("pcs", "Count"),
+        ("Stck", "Count"),
+        ("ea", "Count"),
+        ("h", "Time"),
+    ],
+)
+def test_unit_type_known_units(unit: str, bucket: str) -> None:
+    """``unit_type_for`` returns the snapshot's capitalised bucket name."""
+    assert unit_type_for(unit) == bucket
+
+
+@pytest.mark.parametrize("unit", ["", None, "ls", "psch", "lsum", "weird-unit"])
+def test_unit_type_drops_when_unknown_or_lumpsum(unit: str | None) -> None:
+    assert unit_type_for(unit) is None
+
+
+def test_unit_type_strips_and_lowercases_input_keeping_output_capitalised() -> None:
+    assert unit_type_for("  M3 ") == "Volume"
+    assert unit_type_for("M2") == "Area"
 
 
 # ── department_code_for ──────────────────────────────────────────────────
@@ -156,10 +197,12 @@ def test_build_query_dense_concrete_wall_has_full_payload() -> None:
     assert isinstance(payload, QueryPayload)
     assert "Stahlbetonwand" in payload.core_query
     assert "C30/37" in payload.core_query  # CORE keeps the verbatim grade for sparse
+    # v3 emits the capitalised ``unit_type`` (DDC snapshot vocabulary),
+    # NOT the legacy lowercase ``unit_dim``.
     assert payload.filters == {
         "is_abstract": False,
         "department_code": "33",
-        "unit_dim": "volume",
+        "unit_type": "Volume",
     }
     assert payload.resources_query is not None
     assert "C30/37" in payload.resources_query
@@ -174,7 +217,7 @@ def test_build_query_no_classifier_drops_department() -> None:
     )
     payload = build_query(env)
     assert "department_code" not in payload.filters
-    assert payload.filters["unit_dim"] == "area"
+    assert payload.filters["unit_type"] == "Area"
 
 
 def test_build_query_lump_sum_drops_unit_filter() -> None:
@@ -185,6 +228,7 @@ def test_build_query_lump_sum_drops_unit_filter() -> None:
         unit_hint="lsum",
     )
     payload = build_query(env)
+    assert "unit_type" not in payload.filters
     assert "unit_dim" not in payload.filters
 
 
@@ -244,8 +288,10 @@ def test_build_query_infers_unit_from_quantities_when_hint_missing() -> None:
         quantities={"volume_m3": 9.0, "area_m2": 37.5, "length_m": 12.5},
     )
     payload = build_query(env)
-    # volume_m3 wins — first non-zero key in priority order
-    assert payload.filters.get("unit_dim") == "volume"
+    # volume_m3 wins — first non-zero key in priority order. v3 emits
+    # the capitalised ``unit_type`` (Volume), not the legacy
+    # lowercase ``unit_dim`` (volume).
+    assert payload.filters.get("unit_type") == "Volume"
 
 
 def test_build_query_truncates_long_descriptions() -> None:

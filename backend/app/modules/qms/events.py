@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from decimal import Decimal
 
 from app.core.events import Event, event_bus
 from app.database import async_session_factory

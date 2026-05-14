@@ -32,7 +32,6 @@ from app.modules.property_dev.models import (
     WarrantyClaim,
 )
 
-
 _SEED = 42
 
 _HOUSE_TYPE_BASE: Sequence[dict[str, object]] = (

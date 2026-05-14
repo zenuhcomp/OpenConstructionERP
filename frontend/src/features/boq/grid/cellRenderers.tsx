@@ -3571,80 +3571,90 @@ export function EditableResourceRow({ data, ctx, slots, leftPad }: { data: Recor
     </span>
   );
 
+  /* v3.0.4: pin the formatted number absolutely to the slot's right
+   *  edge (right-2 = 8px = same as position cells' !pr-2). Auxiliary
+   *  controls (combobox, variant pill) flow LEFT of the number,
+   *  cannot push it off the column edge no matter how wide they get.
+   *  Earlier flex-1 layouts let the input's flex sizing diverge from
+   *  the position cell's text-right baseline, so columns visually
+   *  shifted whenever a currency code or pill appeared. */
   const renderQuantitySlot = (width: number) => (
     <span
       key="quantity"
-      className="shrink-0 text-right tabular-nums text-content-secondary self-center pr-2 pl-2"
+      className="shrink-0 self-stretch relative block"
       style={{ width: `${width}px` }}
     >
-      {/* v2.9.31: !px-0 cancels InlineNumberInput's built-in px-1 so the
-          right edge of the formatted number sits exactly at slot.right - 8,
-          matching the position quantity cell's `!pr-2` padding. */}
-      <InlineNumberInput value={qty} onCommit={handleQtyChange} fmt={ctx.fmt} className="w-full text-xs !px-0" />
+      <span className="absolute inset-y-0 left-2 right-2 flex items-center justify-end text-right tabular-nums text-content-secondary text-xs">
+        <InlineNumberInput
+          value={qty}
+          onCommit={handleQtyChange}
+          fmt={ctx.fmt}
+          className="text-right tabular-nums text-xs !px-0"
+        />
+      </span>
     </span>
   );
 
   const renderUnitRateSlot = (width: number) => (
-    /* v2.9.31: layout reordered so the formatted number sits at the
-     *  slot's right edge (slot.right - 8px) — matching the position
-     *  unit_rate cell's `!pr-2` padding. Auxiliary controls (currency
-     *  combobox, variant pill) flow LEFT of the number, not right; the
-     *  earlier order pushed the number 25-30px in from the right edge,
-     *  so resource numbers no longer aligned vertically with position
-     *  numbers above. The combobox and pill stay mid-row, the number
-     *  is the last child and absorbs the remaining width via flex-1. */
     <span
       key="unit_rate"
-      className="shrink-0 inline-flex items-center justify-end self-center gap-1 pr-2 pl-2"
+      className="shrink-0 self-stretch relative block"
       style={{ width: `${width}px` }}
     >
-      <ResourceCurrencyCombobox
-        value={resourceCurrency}
-        onCommit={handleCurrencyChange}
-        projectGroup={projectGroup}
-        otherGroup={otherGroup}
-        fxRate={fxRate}
-        fxSource={fxSource}
-        baseCode={baseCurrency}
-        onCommitFxRate={handleGlobalFxRateChange}
-        isForeign={isForeign}
-        t={ctx.t}
-      />
-      {canRepick && (
-        <button
-          ref={variantPillRef}
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setVariantPickerOpen((open) => !open);
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className={`shrink-0 inline-flex items-center gap-0.5 h-4 px-1 rounded text-[9px] font-semibold
-                      transition-colors cursor-pointer ${
-                        resourceVariant
-                          ? 'bg-oe-blue/15 text-oe-blue hover:bg-oe-blue/25'
-                          : resourceVariantDefault
-                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60'
-                          : 'bg-surface-tertiary/60 text-content-secondary hover:bg-surface-tertiary'
-                      }`}
-          title={variantPillTooltip}
-          aria-label={variantPillTooltip}
-          aria-haspopup="dialog"
-          aria-expanded={variantPickerOpen}
-          data-testid={`resource-variant-pill-${data._resourceIndex}`}
-        >
-          {ctx.t('boq.resource_variant_pill', {
-            defaultValue: '▾ {{count}}',
-            count: availableVariantStats!.count,
-          })}
-        </button>
-      )}
-      <InlineNumberInput
-        value={rate}
-        onCommit={handleRateChange}
-        fmt={ctx.fmt}
-        className="flex-1 min-w-0 text-right tabular-nums text-content-secondary text-xs !px-0"
-      />
+      <span className="absolute inset-y-0 left-2 right-2 flex items-center gap-1">
+        {/* LEFT chrome: combobox + optional pill, packed at the start
+            of the available space — they grow only as much as they need. */}
+        <ResourceCurrencyCombobox
+          value={resourceCurrency}
+          onCommit={handleCurrencyChange}
+          projectGroup={projectGroup}
+          otherGroup={otherGroup}
+          fxRate={fxRate}
+          fxSource={fxSource}
+          baseCode={baseCurrency}
+          onCommitFxRate={handleGlobalFxRateChange}
+          isForeign={isForeign}
+          t={ctx.t}
+        />
+        {canRepick && (
+          <button
+            ref={variantPillRef}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setVariantPickerOpen((open) => !open);
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className={`shrink-0 inline-flex items-center gap-0.5 h-4 px-1 rounded text-[9px] font-semibold
+                        transition-colors cursor-pointer ${
+                          resourceVariant
+                            ? 'bg-oe-blue/15 text-oe-blue hover:bg-oe-blue/25'
+                            : resourceVariantDefault
+                            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60'
+                            : 'bg-surface-tertiary/60 text-content-secondary hover:bg-surface-tertiary'
+                        }`}
+            title={variantPillTooltip}
+            aria-label={variantPillTooltip}
+            aria-haspopup="dialog"
+            aria-expanded={variantPickerOpen}
+            data-testid={`resource-variant-pill-${data._resourceIndex}`}
+          >
+            {ctx.t('boq.resource_variant_pill', {
+              defaultValue: '▾ {{count}}',
+              count: availableVariantStats!.count,
+            })}
+          </button>
+        )}
+        {/* RIGHT: number pushed to the slot's right edge via ml-auto.
+            Always sits at slot.right - 8px, independent of how wide
+            the combobox / pill on the left render. */}
+        <InlineNumberInput
+          value={rate}
+          onCommit={handleRateChange}
+          fmt={ctx.fmt}
+          className="ml-auto text-right tabular-nums text-content-secondary text-xs !px-0"
+        />
+      </span>
       {variantPickerOpen && hasVariants && (
         <VariantPicker
           variants={availableVariants!}
@@ -4634,7 +4644,11 @@ export function UnitRateCellRenderer(params: ICellRendererParams) {
 
   return (
     <span className="flex items-center justify-end gap-1.5 w-full h-full text-xs tabular-nums leading-[32px]">
-      <span className={isResourceDriven ? 'text-content-tertiary' : ''}>{formatted}</span>
+      {/* Pill renders LEFT of the number so the formatted value sits flush
+          with the cell's right edge (= cell.right - 8px from !pr-2). This
+          matches the resource sub-row layout (combobox/pill on the left,
+          number on the right) \u2014 both grids now line up on the same
+          vertical baseline per column. */}
       {!isResourceDriven && (
         <button
           ref={anchorRef}
@@ -4662,6 +4676,7 @@ export function UnitRateCellRenderer(params: ICellRendererParams) {
           })}
         </button>
       )}
+      <span className={isResourceDriven ? 'text-content-tertiary' : ''}>{formatted}</span>
       {pickerOpen && hasVariants && (
         <VariantPicker
           variants={variants!}

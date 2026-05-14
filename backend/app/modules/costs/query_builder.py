@@ -34,18 +34,102 @@ from typing import Any
 
 from app.core.match_service.envelope import ElementEnvelope
 
-# ── Unit → unit_dim filter value ─────────────────────────────────────────
+# ── Unit → unit_type / unit_dim filter value ─────────────────────────────
 #
 # CWICR rates are unit-aware: a wall (m³) should never compete with
 # flooring (m²) or pipework (m) for top-K slots. The ranker passes the
 # envelope's preferred unit; we collapse it onto a coarse dimension
-# class that matches the Qdrant payload's ``unit_dim`` column.
+# class that matches the Qdrant payload's ``unit_type`` column (DDC v3
+# snapshot vocabulary, capitalised: ``Area`` / ``Volume`` / ``Linear`` /
+# ``Mass`` / ``Count``).
+#
+# Historical note: pre-v3 we filtered on a lowercase ``unit_dim`` payload
+# field. The DDC v3 snapshot collections renamed that field to
+# ``unit_type`` AND switched the value casing. Emitting the old
+# lowercase ``unit_dim`` predicate against a v3 snapshot silently
+# eliminates 100% of hits because the filter never matches. ``_UNIT_DIM``
+# + ``unit_dim_for()`` are kept as legacy back-compat for any internal
+# caller that still wants the pre-v3 lowercase bucket (none on the hot
+# path today, but published as part of the package).
 #
 # When the envelope has no explicit ``unit_hint`` we infer from
 # whichever quantity is present — same logic the legacy
 # ``_pick_unit`` used, kept here so the query builder is
 # self-contained.
 
+_UNIT_TYPE: dict[str, str] = {
+    # Volume → "Volume"
+    "m3": "Volume",
+    "m³": "Volume",
+    "cbm": "Volume",
+    "cum": "Volume",
+    "cy": "Volume",
+    # Area → "Area"
+    "m2": "Area",
+    "m²": "Area",
+    "sqm": "Area",
+    "sm": "Area",
+    "sf": "Area",
+    "sft": "Area",
+    "sqft": "Area",
+    # Length → "Linear"
+    "m":   "Linear",
+    "lm":  "Linear",
+    "rm":  "Linear",
+    "lfm": "Linear",
+    "lf":  "Linear",
+    "ft":  "Linear",
+    "in":  "Linear",
+    # Mass → "Mass"
+    "kg":    "Mass",
+    "t":     "Mass",
+    "to":    "Mass",
+    "ton":   "Mass",
+    "tonne": "Mass",
+    "lb":    "Mass",
+    "lbs":   "Mass",
+    # Count → "Count"
+    "pcs":   "Count",
+    "ea":    "Count",
+    "stk":   "Count",
+    "stck":  "Count",
+    "nr":    "Count",
+    "no":    "Count",
+    "u":     "Count",
+    "piece": "Count",
+    # Time → "Time"
+    "h":    "Time",
+    "hr":   "Time",
+    "hour": "Time",
+    "d":    "Time",
+    "day":  "Time",
+    # Lump sum — never filter, drop instead
+    "ls":   "",
+    "psch": "",
+    "lsum": "",
+}
+
+
+def unit_type_for(unit_hint: str | None) -> str | None:
+    """Capitalised ``unit_type`` bucket for a CWICR unit, or ``None`` to skip.
+
+    Matches the DDC v3 snapshot payload's ``unit_type`` field — one of
+    ``Area`` / ``Volume`` / ``Linear`` / ``Mass`` / ``Count`` / ``Time``.
+    Returns ``None`` when the unit is unknown or a lump-sum so the
+    caller drops the predicate rather than over-narrowing the search.
+    """
+    if not unit_hint:
+        return None
+    key = unit_hint.strip().lower().replace(" ", "")
+    bucket = _UNIT_TYPE.get(key)
+    return bucket or None
+
+
+# Legacy lowercase ``unit_dim`` table — kept verbatim for back-compat
+# with pre-v3 code paths and tests that still consult the lowercase
+# bucket. NOT derived from ``_UNIT_TYPE`` because the bucket names
+# differ ("length" vs "Linear") and the set of aliases is intentionally
+# narrower here.
 _UNIT_DIM: dict[str, str] = {
     # Volume
     "m3": "volume",
@@ -87,7 +171,7 @@ _UNIT_DIM: dict[str, str] = {
 
 
 def unit_dim_for(unit_hint: str | None) -> str | None:
-    """Coarse dimension class for a CWICR unit, or ``None`` to skip filter.
+    """Legacy lowercase ``unit_dim`` for back-compat. Prefer :func:`unit_type_for`.
 
     Returns ``None`` when the unit is unknown or a lump-sum — the caller
     should drop the ``unit_dim`` predicate so the search doesn't
@@ -329,14 +413,23 @@ def build_search_plan(
 
     if include_unit_filter:
         unit = envelope.unit_hint or _infer_unit_from_quantities(envelope.quantities or {})
-        unit_dim = unit_dim_for(unit)
-        if unit_dim:
-            hard["unit_dim"] = unit_dim
+        # DDC v3 snapshot uses ``unit_type`` (capitalised) — match the
+        # snapshot vocabulary exactly so the filter actually narrows.
+        # Pre-v3 ``unit_dim`` (lowercase) is kept as a legacy alias by
+        # ``_build_filter`` but not emitted here.
+        unit_type = unit_type_for(unit)
+        if unit_type:
+            hard["unit_type"] = unit_type
 
     # v3 BIM-authoritative fields. Only attach when the envelope has
     # the value — None means the upstream extractor didn't populate it
-    # and we don't want to over-narrow.
-    if envelope.ifc_class:
+    # and we don't want to over-narrow. ``ifc_class`` is additionally
+    # validated to start with the ``Ifc`` prefix so synthetic source
+    # labels (``"BoQ"`` / ``"Text"``) that some adapters write onto
+    # the envelope can't poison the Qdrant filter and eliminate every
+    # candidate row. The catalogue payload's ``ifc_class`` is always a
+    # real IFC class name (``IfcWall``, ``IfcSlab``, etc.).
+    if envelope.ifc_class and str(envelope.ifc_class).startswith("Ifc"):
         hard["ifc_class"] = envelope.ifc_class
     if envelope.ifc_predefined_type:
         hard["ifc_predefined_type"] = envelope.ifc_predefined_type
@@ -439,4 +532,5 @@ __all__ = [
     "department_code_for",
     "extract_resource_hints",
     "unit_dim_for",
+    "unit_type_for",
 ]

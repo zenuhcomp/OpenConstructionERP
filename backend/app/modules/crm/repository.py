@@ -20,7 +20,6 @@ from app.modules.crm.models import (
     WinLossReason,
 )
 
-
 # ── Generic helpers ──────────────────────────────────────────────────────
 
 

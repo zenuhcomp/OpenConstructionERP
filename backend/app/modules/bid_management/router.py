@@ -30,6 +30,7 @@ from app.dependencies import (
 from app.modules.bid_management.models import (
     BidAward,
     BidComparison,
+    Bidder,
     BidInvitation,
     BidPackage,
     BidPackageLineItem,
@@ -37,7 +38,6 @@ from app.modules.bid_management.models import (
     BidRejection,
     BidSubmission,
     BidSubmissionLine,
-    Bidder,
 )
 from app.modules.bid_management.schemas import (
     BidAwardCreate,
@@ -48,6 +48,7 @@ from app.modules.bid_management.schemas import (
     BidComparisonUpdate,
     BidderCreate,
     BidderDisqualify,
+    BidderQABoardResponse,
     BidderResponse,
     BidderUpdate,
     BidInvitationCreate,
@@ -76,7 +77,6 @@ from app.modules.bid_management.schemas import (
     BidSubmissionLineUpdate,
     BidSubmissionResponse,
     BidSubmissionUpdate,
-    BidderQABoardResponse,
     InvitationEmailDispatchRequest,
     InvitationEmailDispatchResponse,
     LevelingMatrixResponse,

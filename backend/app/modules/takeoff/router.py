@@ -49,15 +49,6 @@ from sqlalchemy import delete, select
 from app.core.csv_safety import neutralise_formula
 from app.core.rate_limiter import upload_limiter
 from app.dependencies import CurrentUserId, RequirePermission, SessionDep, verify_project_access
-from app.modules.takeoff.models import CadExtractionSession
-from app.modules.takeoff.schemas import (
-    LinkToBoqRequest,
-    TakeoffMeasurementBulkCreate,
-    TakeoffMeasurementCreate,
-    TakeoffMeasurementResponse,
-    TakeoffMeasurementSummary,
-    TakeoffMeasurementUpdate,
-)
 from app.modules.takeoff.manifest_verifier import (
     InstallNotSupported,
     InstallSHAMismatch,
@@ -67,6 +58,15 @@ from app.modules.takeoff.manifest_verifier import (
     maybe_warn_disabled,
     resolve_install,
     verify_downloaded_file,
+)
+from app.modules.takeoff.models import CadExtractionSession
+from app.modules.takeoff.schemas import (
+    LinkToBoqRequest,
+    TakeoffMeasurementBulkCreate,
+    TakeoffMeasurementCreate,
+    TakeoffMeasurementResponse,
+    TakeoffMeasurementSummary,
+    TakeoffMeasurementUpdate,
 )
 from app.modules.takeoff.service import TakeoffService
 

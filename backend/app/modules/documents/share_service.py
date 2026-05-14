@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 from fastapi import HTTPException, status
@@ -64,7 +64,7 @@ def _verify_password(plain: str, hashed: str) -> bool:
 
 def _now() -> datetime:
     """Timezone-aware "now" — used for expiry comparisons."""
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _is_expired(link: DocumentShareLink, *, at: datetime | None = None) -> bool:
@@ -76,9 +76,9 @@ def _is_expired(link: DocumentShareLink, *, at: datetime | None = None) -> bool:
     # PostgreSQL stores tz-aware; SQLite returns naive UTC. Normalize both
     # sides so the comparison is safe regardless of backend.
     if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
+        expires_at = expires_at.replace(tzinfo=UTC)
     if at.tzinfo is None:
-        at = at.replace(tzinfo=timezone.utc)
+        at = at.replace(tzinfo=UTC)
     return at >= expires_at
 
 

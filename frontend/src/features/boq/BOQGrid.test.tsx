@@ -104,8 +104,11 @@ describe('getColumnDefs', () => {
   it('should have description with flex', () => {
     const defs = getColumnDefs(context);
     const descCol = defs.find((d) => d.field === 'description');
-    expect(descCol?.flex).toBe(1);
-    expect(descCol?.minWidth).toBe(260);
+    // Description carries a heavier flex weight (3) so it absorbs viewport space
+    // when many preset columns are visible, with a non-zero minWidth floor so
+    // custom-column overflow can't squeeze it into a sliver.
+    expect(descCol?.flex).toBe(3);
+    expect(descCol?.minWidth).toBe(180);
   });
 
   it('should use the formula cell editor for quantity (Issue #90)', () => {

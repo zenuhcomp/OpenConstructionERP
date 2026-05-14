@@ -5,6 +5,56 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.5] — 2026-05-14 · Match-elements correctness pass + full Mongolian translation
+
+### Fixed (match-elements — root-cause sweep)
+
+- **`unit_dim` filter excluded every Qdrant hit** — query_builder emitted a `unit_dim` hard filter that doesn't exist on the DDC v3 snapshot payload (it uses `unit_type` with capitalised `Area`/`Volume`/`Linear`/`Mass`/`Count`). Filter never matched, search returned 0, the ranker fell through to a metadata-only path with score ≈0.0002 and surfaced opaque encoded rate codes. Now emits `unit_type` against the snapshot's actual schema; kept `unit_dim_for()` exported for back-compat.
+- **`resources` named-vector prefetch returned 404** — `search()` blindly added a `Prefetch(using="resources", …)` whenever the envelope carried resource hints. The DDC v3 snapshot only exposes `dense` + `sparse` named vectors. Now caches per-collection capabilities (`_collection_vectors`) and only issues prefetches the snapshot actually supports.
+- **`"BoQ"` source label poisoning `ifc_class` filter** — BoQ adapter set `attrs["ifc_class"] = "BoQ"` whenever the row had no category; envelope builder forwarded it as a hard filter; Qdrant dropped 100% of CWICR rows. Fixed in both the adapter (only forward when the row explicitly carries an IFC class) and the envelope builder (only pass values starting with `Ifc`).
+- **Empty description / unit_rate / currency on snapshot-only installs** — snapshot install populates Qdrant vectors but not `oe_costs_item`. With no parquet enrichment, candidates surfaced blank, and the BGE cross-encoder collapsed every score because its passage text was just the opaque rate_code. Now `ranker_qdrant._description_from_payload()` synthesises a human-readable passage from the snapshot's categorical fields (`collection_name`, `material_class`, `ifc_class`, `category_type`, `masterformat_division`); `_hit_to_candidate()` derives currency from the country head via a 60+ ISO-code map. `unit_rate` stays 0.0 — fabricating the operator's load-bearing price would be wrong. UI surfaces "Rate unavailable" instead.
+- **`reranker_bge._build_candidate_text()` defensive fallback** — when `candidate.description` is still empty, folds classification + region into the passage so the cross-encoder has discriminating signal beyond the opaque code.
+
+### Added
+
+- **Mongolian (mn) full translation** — completed the 2300 keys that were left as English-fallback in 3.0.4. Construction terminology curated (BOQ → "ажлын тоо хэмжээ", subcontractor → "туслан гүйцэтгэгч", risk → "эрсдэл"); placeholders `{x}` / `{{x}}` preserved verbatim; technical IDs (IFC, DWG, JWT, USD) kept intact.
+- **14 new unit tests** for the match payload fallback (`test_ranker_qdrant_payload_fallback.py` + `test_reranker_bge_payload_fallback.py`).
+
+### Fixed (frontend tests)
+
+- Pre-existing vitest debt resolved: 9 broken test files repaired (share-link, visual-regression snapshots, ClassificationPicker, NotFoundPage, BOQGrid, CostCategoryTree, _registry, boqResourceTypes, CostDatabaseSearchModal). No production-code changes — only stale mocks, removed imports, and re-aligned selectors.
+
+### Validation
+
+- Live match probe ("Concrete C30/37 wall, 240mm reinforced" against the USA_USD snapshot) now returns a real US rate code with a readable description and currency=USD. Was score ≈0.0002 + opaque rate code with all enrichment fields empty before. Confidence is still relatively low (~0.005) when the top vector hit is semantically distant (e.g., a hydraulic-engineering rebar rate for a wall query) — that's the BGE reranker doing its job, not a bug.
+
+## [3.0.4] — 2026-05-13 · Polish pass + community contributor flow
+
+### Added
+
+- **"Support us" star button in topbar** + 3-action modal: GitHub star · social share (X / LinkedIn / copy) · case-study tip-off to `info@datadrivenconstruction.io` (or just tag `@DataDrivenConstruction` for re-share through DDC newsletter + socials)
+- **Mongolian (mn) locale** registered in `SUPPORTED_LANGUAGES` with starter translation set (nav + common + support keys) — falls back to English for the long tail. Inline soyombo SVG flag added to `CountryFlag.tsx`. Co-authored with @mn-frappe (community contributor invite via PR #125)
+- **DDC brand logo** on the Request-a-module dialog hero (replaces generic Sparkles icon) — sourced from local `/brand/ddc-logo.webp`, no external CDN call
+- **Marketing site auto-version sync** — `website-marketing/pro/breeze/index.html` hero badge and release ticker now fetch the latest GitHub Release tag + date + name at page load, with SSR fallback to the current shipped version
+
+### Changed
+
+- **Dependency bumps** — Frontend: 12 minor/patch (@tanstack/react-query 5.90→5.100, maplibre-gl 5.23→5.24, react-resizable-panels 4.9→4.11, zustand, @playwright/test 1.58→1.60, @typescript-eslint 8.57→8.59, autoprefixer, jsdom, msw 2.12→2.14, postcss, prettier 3.8.1→3.8.3, pdfjs-dist 4.8→4.10). Rust desktop: openssl 0.10.78→0.10.79 (CVE patch), tauri 2.10.3→2.11.1 (Origin-Confusion CVE patch), rand 0.8.5→0.8.6
+- **Rollup pinned to 4.59.0** via `overrides` — Rollup 4.60+ broke vite 6.4's modulepreload-polyfill source-phase import; pin restores the production build
+
+### Fixed
+
+- **`p.data.filter is not a function`** on Vendor DB in demo accounts — `SupplierCatalogsPage.tsx` now defensively coerces all `useQuery` data fields with `Array.isArray(...)` rather than `?? []`, which was letting stale offline-cache error envelopes through
+- **Backend `F821`** — `contracts/router.py` referenced `status.HTTP_400/404` without importing `status` from fastapi (3 endpoints would have crashed on hit)
+- **Backend `F601`** — duplicate `"متر مربع"` dict key in `match_service/boosts/unit.py` (Arabic + Persian sections collided; phrase is byte-identical in both scripts)
+- **Missing Mongolian flag** in language switcher — inline SVG + emoji fallback added to `CountryFlag.tsx`
+- **61 dead backend imports** cleaned via ruff `--fix`
+
+### Housekeeping
+
+- **All 7 stale Dependabot PRs closed** (#117 minor group, #112 cargo openssl, #125 Mongolian, #118 typescript major, #119 i18next-http-backend major, #120 react-is major, #121 eslint major). All were based on pre-filter-repo main; merging would have resurrected the removed `internal-notes/qa_parts_*` tree. Equivalent safe patches applied directly to main; majors deferred to a separate validation cycle.
+- Pre-existing frontend vitest debt documented: 31 failing tests across 9 files (share-link, visual-regression snapshots, ClassificationPicker, NotFoundPage, BOQGrid, CostCategoryTree, _registry, boqResourceTypes, CostDatabaseSearchModal). None caused by v3.0.4 changes — slated for v3.0.5 cleanup.
+
 ## [3.0.3] — 2026-05-13 · Deep correctness pass + UX & supply-chain hardening
 
 ### Added

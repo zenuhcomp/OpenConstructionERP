@@ -163,6 +163,15 @@ def _build_candidate_text(candidate: MatchCandidate) -> str:
     carry the discriminating signal — code, description, unit. Skip
     fields the bi-encoder already scored (vector_score) since the
     cross-encoder isn't operating on the embedding.
+
+    Defensive fallback for snapshot-only installs: when ``description``
+    is empty (parquet missing, payload synthesis already attempted and
+    yielded nothing) we fold classification IDs + region into the
+    passage so the cross-encoder has at least the categorical anchor
+    instead of just an opaque rate_code. Without this the BGE score
+    collapses to ≈ 0 for every candidate and the ranker effectively
+    flattens — same UX as a metadata-only fallback even when the
+    bi-encoder hit was genuinely good.
     """
     parts: list[str] = []
     if candidate.code:
@@ -171,6 +180,17 @@ def _build_candidate_text(candidate: MatchCandidate) -> str:
         parts.append(str(candidate.description))
     if candidate.unit:
         parts.append(f"unit {candidate.unit}")
+    if not candidate.description:
+        for std in ("din276", "nrm", "masterformat"):
+            cls = (
+                candidate.classification.get(std)
+                if candidate.classification
+                else None
+            )
+            if cls:
+                parts.append(f"{std} {cls}")
+        if candidate.region_code:
+            parts.append(f"region {candidate.region_code}")
     return " ".join(p.strip() for p in parts if p.strip())
 
 
@@ -271,7 +291,14 @@ def rerank(
             )
         )
 
-    reranked.sort(key=lambda c: c.score, reverse=True)
+    # Deterministic tie-break on rate_code: BGE logits collapse at the
+    # 0.001–0.04 band on payload-only snapshots, so equal-score ties
+    # are common. Without ``c.code`` as the secondary key, Python's
+    # stable sort preserves whatever order the input list happened to
+    # arrive in — which is itself a function of upstream async ordering
+    # and HNSW tie resolution. Pin the lex order so the bench can
+    # measure ranker quality instead of run-to-run permutation noise.
+    reranked.sort(key=lambda c: (-c.score, c.code))
     return reranked + tail
 
 

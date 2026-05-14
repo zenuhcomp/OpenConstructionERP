@@ -197,7 +197,9 @@ describe('CostDatabaseSearchModal — paginated catalog', () => {
 
   it('calls the next page with the previous cursor when "Load more" is clicked', async () => {
     renderModal();
-    await waitFor(() => expect(fetchCostSearch).toHaveBeenCalled());
+    // Wait for the first page to actually render — otherwise the "Load more"
+    // sentinel hasn't mounted yet and the findByText below races the fetch.
+    expect(await screen.findByText('Concrete C30/37 wall')).toBeInTheDocument();
 
     // Page 1 → page 2 → no more.
     (fetchCostSearch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
@@ -221,7 +223,7 @@ describe('CostDatabaseSearchModal — paginated catalog', () => {
       }),
     );
 
-    const loadMoreText = await screen.findByText('Load more');
+    const loadMoreText = await screen.findByText(/^Load more/);
     fireEvent.click(loadMoreText);
 
     await waitFor(() => {

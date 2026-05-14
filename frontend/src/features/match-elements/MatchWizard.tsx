@@ -84,8 +84,14 @@ interface Props {
    *  POST has been *kicked off* (not awaited). The parent mounts
    *  MatchProgressCard immediately so the user sees the timeline; the
    *  wizard continues to await the matcher in the background and
-   *  reports the outcome via ``onMatchSuccess`` / ``onMatchError``. */
-  onComplete: (sessionId: string) => void;
+   *  reports the outcome via ``onMatchSuccess`` / ``onMatchError``.
+   *
+   *  ``abortController`` (when supplied) feeds the in-flight run-match
+   *  fetch — the parent stores it so the progress card's Cancel button
+   *  can abort the request without the user refreshing the tab. The
+   *  argument is optional only for back-compat with callers built
+   *  before the cancel affordance landed. */
+  onComplete: (sessionId: string, abortController?: AbortController) => void;
   /** Called once the background run-match POST resolves successfully —
    *  the page flips MatchProgressCard to ``status='done'`` and the
    *  card hands over to the results pane. */
@@ -1142,17 +1148,28 @@ export function MatchWizard({
       return session.id;
     },
     onSuccess: (sessionId) => {
-      // Mount the progress card the instant the session exists — the
-      // wall-clock heuristic starts ticking from here. Then await the
-      // actual run-match POST in the background and forward the
-      // outcome to the parent so the card can flip to done / error.
-      onComplete(sessionId);
+      // Mount the progress card the instant the session exists — it
+      // begins polling /progress for real-stage updates from here.
+      // Hand the parent an AbortController feeding the in-flight
+      // run-match fetch so the card's Cancel button can abort the
+      // request when a backend wedges. Hard 5-minute timeout matches
+      // the toolbar path — anything beyond that is a wedged backend,
+      // not a slow one.
+      const ac = new AbortController();
+      const timeoutId = window.setTimeout(() => ac.abort(), 5 * 60_000);
+      onComplete(sessionId, ac);
       matchElementsApi
-        .runMatch(sessionId, { method: 'vector', top_k: 10, max_groups: 50 })
+        .runMatch(
+          sessionId,
+          { method: 'vector', top_k: 10, max_groups: 50 },
+          { signal: ac.signal },
+        )
         .then(() => {
+          window.clearTimeout(timeoutId);
           onMatchSuccess?.(sessionId);
         })
         .catch((err) => {
+          window.clearTimeout(timeoutId);
           const msg = err instanceof Error ? err.message : String(err);
           if (onMatchError) {
             onMatchError(sessionId, msg);

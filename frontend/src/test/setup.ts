@@ -1,6 +1,28 @@
 // @ts-nocheck
 import '@testing-library/jest-dom';
 
+// Node's `undici`-backed `fetch` rejects an `AbortSignal` created via the
+// jsdom-provided `AbortController` ("Expected signal to be an instance of
+// AbortSignal") because the two constructors come from different realms.
+// jsdom replaces the global classes, leaving production code (which calls
+// `new AbortController()` against the active global) with signals that
+// undici treats as foreign. Wrap `fetch` so any non-native signal is silently
+// dropped — tests don't exercise abort behaviour and MSW intercepts requests
+// regardless of the signal field.
+{
+  const originalFetch = globalThis.fetch;
+  if (typeof originalFetch === 'function') {
+    globalThis.fetch = ((input, init) => {
+      if (init && 'signal' in init) {
+        // Drop the realm-mismatched signal; keep the rest of the init.
+        const { signal: _signal, ...rest } = init;
+        return originalFetch(input, rest);
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+  }
+}
+
 
 // Mock i18next. We expose the same surface that production code imports
 // from `react-i18next` — `useTranslation`, `Trans`, AND `initReactI18next`

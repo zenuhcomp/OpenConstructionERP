@@ -26,7 +26,8 @@ Tables (prefix ``oe_supplier_catalogs_``):
 from __future__ import annotations
 
 import uuid
-from datetime import date as _date, datetime
+from datetime import date as _date
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (

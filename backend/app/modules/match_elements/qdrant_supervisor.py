@@ -80,11 +80,25 @@ QDRANT_STORAGE_DIR: Path = QDRANT_HOME / "storage"
 QDRANT_SNAPSHOTS_DIR: Path = QDRANT_HOME / "snapshots"
 QDRANT_CONFIG_DIR: Path = QDRANT_HOME / "config"
 
-# GitHub Releases API for the official Qdrant repository. The `latest`
-# endpoint redirects to the most recent stable tag; we hit the API
-# directly so we can read the asset list and pick the right triple.
+# GitHub Releases API for the official Qdrant repository. We pin to a
+# specific tag rather than `/releases/latest` because Qdrant 1.17+
+# introduced WAL clock replication (`newest_clocks.json`) which trips
+# Windows Defender on fsync during snapshot restore — every install
+# of a CWICR catalogue on native Windows fails with `os error 5`. The
+# pinned tag is the newest version that:
+#   1. Reads DDC's current BGE-M3 v3 snapshot format (post-RocksDB
+#      removal, so 1.13–1.15 are out).
+#   2. Does not write `newest_clocks.json`, so Defender never blocks
+#      the fsync — the install just works with no exclusion needed.
+# Verified empirically on 2026-05-13: 1.13.6 fails (RocksDB legacy),
+# 1.16.3 succeeds end-to-end (HTTP 200, 55719 points loaded), 1.17.x
+# and 1.18.0 fail with the Defender lock. Bump this with care: re-test
+# on Windows before changing.
 _QDRANT_REPO = "qdrant/qdrant"
-_LATEST_RELEASE_URL = f"https://api.github.com/repos/{_QDRANT_REPO}/releases/latest"
+_QDRANT_PINNED_TAG = "v1.16.3"
+_PINNED_RELEASE_URL = (
+    f"https://api.github.com/repos/{_QDRANT_REPO}/releases/tags/{_QDRANT_PINNED_TAG}"
+)
 
 # Map (system, machine) → release asset filename pattern. Qdrant
 # publishes static binaries for the three desktop triples we care
@@ -281,10 +295,14 @@ def spawn_qdrant(binary_path: Path) -> int | None:
 def _resolve_release_asset() -> tuple[str, str]:
     """Return ``(asset_name, asset_download_url)`` for the current platform.
 
-    Hits ``/releases/latest`` and walks the asset list. Raises
+    Hits the pinned-tag Releases API (see ``_QDRANT_PINNED_TAG`` for
+    why we don't use ``/latest``) and walks the asset list. Raises
     ``RuntimeError`` if the platform is unsupported (e.g. 32-bit
     Windows, FreeBSD) or GitHub is unreachable — the install endpoint
-    surfaces this as a clear 503 to the UI.
+    surfaces this as a clear 503 to the UI. We fall back to the
+    well-known ``releases/download/<tag>/<asset>`` URL pattern if the
+    Releases API itself is rate-limited; the asset URL is stable per
+    tag so this is safe.
     """
 
     system = platform.system().lower()
@@ -297,7 +315,7 @@ def _resolve_release_asset() -> tuple[str, str]:
         )
 
     req = urllib.request.Request(
-        _LATEST_RELEASE_URL,
+        _PINNED_RELEASE_URL,
         headers={
             "Accept": "application/vnd.github+json",
             "User-Agent": "OpenConstructionERP-qdrant-installer",
@@ -307,6 +325,22 @@ def _resolve_release_asset() -> tuple[str, str]:
         with urllib.request.urlopen(req, timeout=30) as resp:
             payload = json.loads(resp.read())
     except urllib.error.HTTPError as exc:
+        # Rate-limited or transient GitHub error — fall back to the
+        # well-known download URL for the pinned tag. The asset URL
+        # pattern is stable, so this stays correct as long as Qdrant
+        # doesn't rename the asset (we'd notice in CI on the first
+        # download).
+        if exc.code in (403, 404, 429):
+            fallback = (
+                f"https://github.com/{_QDRANT_REPO}/releases/download/"
+                f"{_QDRANT_PINNED_TAG}/{asset_key}"
+            )
+            logger.warning(
+                "GitHub API rate-limited (%s) — falling back to direct URL %s",
+                exc.code,
+                fallback,
+            )
+            return asset_key, fallback
         raise RuntimeError(
             f"GitHub Releases API returned {exc.code}: {exc.reason}"
         ) from exc
@@ -323,8 +357,8 @@ def _resolve_release_asset() -> tuple[str, str]:
 
     available = ", ".join(a.get("name", "?") for a in assets)
     raise RuntimeError(
-        f"Latest Qdrant release does not include asset {asset_key!r}. "
-        f"Available assets: {available}"
+        f"Qdrant {_QDRANT_PINNED_TAG} release does not include asset "
+        f"{asset_key!r}. Available assets: {available}"
     )
 
 

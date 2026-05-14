@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import event_bus
 from app.modules.qms.models import (
+    QMSNCR,
     ITPItem,
     ITPPlan,
     ITPTemplate,
@@ -28,7 +29,6 @@ from app.modules.qms.models import (
     QMSCalibration,
     QMSInspection,
     QMSInspectionSignature,
-    QMSNCR,
     QMSNCRAction,
     QMSPunchItem,
 )

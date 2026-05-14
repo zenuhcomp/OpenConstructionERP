@@ -1215,3 +1215,211 @@ async def test_analytics_unauthenticated_rejected(http_client):
     """No bearer token → 401, not silent zero counters."""
     resp = await http_client.get("/api/v1/match_elements/analytics?days=7")
     assert resp.status_code in (401, 403), resp.text
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  Progress polling — regression tests for v3.0.6 "Currency normalization"
+#  hang fix. The /progress endpoint already existed but the frontend's
+#  MatchProgressCard was wall-clock-only and so painted a fake "Currency
+#  normalization" stage at the 28s mark; on real matches that take
+#  60-300s the label sat there forever. The fix wires the card to poll
+#  /progress, so this endpoint becomes part of the user-visible contract
+#  and these tests pin its shape + access control.
+# ═════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_progress_idle_session_returns_neutral_shape(
+    http_client, two_tenants,
+):
+    """A freshly-created session that has never been matched returns the
+    documented idle shape — stage='idle', status='idle', zero counters —
+    so the FE can render its initial state without a 404 path."""
+    a = two_tenants["a"]
+    project_id, bim_model_id = await _seed_project_with_bim_model(
+        owner_id=a["user_id"],
+    )
+    r = await http_client.post(
+        "/api/v1/match_elements/sessions",
+        json={
+            "project_id": str(project_id),
+            "bim_model_id": str(bim_model_id),
+            "source": "bim",
+        },
+        headers=a["headers"],
+    )
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+
+    resp = await http_client.get(
+        f"/api/v1/match_elements/sessions/{sid}/progress",
+        headers=a["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Stable shape — the FE relies on every key being present.
+    for key in (
+        "stage",
+        "stage_idx",
+        "total_stages",
+        "groups_done",
+        "groups_total",
+        "status",
+    ):
+        assert key in body, f"missing key {key}"
+    assert body["stage"] == "idle"
+    assert body["status"] == "idle"
+    assert body["groups_done"] == 0
+    assert body["groups_total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_progress_reflects_run_match_terminal_stage(
+    http_client, two_tenants, monkeypatch,
+):
+    """After a synchronous run_match call resolves, /progress reports
+    ``status='done'`` and ``stage='done'`` so the FE's poll loop sees
+    the terminal state on its next tick. Regression: v3.0.6
+    "Currency normalization" hang — the FE timed out on a 28s
+    wall-clock heuristic because /progress was never wired. With this
+    test in place a regression that stops writing the terminal stage
+    would fail loudly."""
+    a = two_tenants["a"]
+    project_id, bim_model_id = await _seed_project_with_bim_model(
+        owner_id=a["user_id"],
+    )
+    cost_ids = await _seed_cwicr_items()
+    fake_cost_id = str(cost_ids[0])
+
+    from app.core.match_service.envelope import (
+        MatchCandidate as _MC,
+    )
+    from app.core.match_service.envelope import (
+        MatchRequest as _MReq,
+    )
+    from app.core.match_service.envelope import (
+        MatchResponse as _MR,
+    )
+
+    async def _stub_match_envelope(envelope, *, project_id, top_k=10,
+                                   use_reranker=False, db=None,
+                                   ai_settings=None):
+        return _MR(
+            request=_MReq(
+                envelope=envelope,
+                project_id=(
+                    project_id
+                    if isinstance(project_id, uuid.UUID)
+                    else uuid.UUID(str(project_id))
+                ),
+                top_k=top_k,
+                use_reranker=use_reranker,
+            ),
+            candidates=[
+                _MC(
+                    id=fake_cost_id,
+                    code="PROG-001",
+                    description="Progress regression rate",
+                    unit="m2",
+                    unit_rate=42.0,
+                    currency="EUR",
+                    score=0.5,
+                    vector_score=0.5,
+                    boosts_applied={},
+                    confidence_band="low",
+                    region_code="ME-TEST",
+                    source="cwicr",
+                    classification={},
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(
+        "app.modules.match_elements.matchers.vector.match_envelope",
+        _stub_match_envelope,
+    )
+
+    r = await http_client.post(
+        "/api/v1/match_elements/sessions",
+        json={
+            "project_id": str(project_id),
+            "bim_model_id": str(bim_model_id),
+            "source": "bim",
+        },
+        headers=a["headers"],
+    )
+    sid = r.json()["id"]
+
+    # Kick the matcher; it returns inline (small fixture) so by the time
+    # we poll progress the runner has stamped the terminal stage.
+    resp = await http_client.post(
+        f"/api/v1/match_elements/sessions/{sid}/match",
+        json={"method": "vector", "max_groups": 5, "top_k": 5},
+        headers=a["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+
+    progress = await http_client.get(
+        f"/api/v1/match_elements/sessions/{sid}/progress",
+        headers=a["headers"],
+    )
+    assert progress.status_code == 200, progress.text
+    body = progress.json()
+    assert body["status"] == "done", body
+    assert body["stage"] == "done", body
+    # On done the runner should have flushed groups_total to the total
+    # it iterated — strictly >= 1 because we got at least one group back.
+    assert body["groups_total"] >= 1, body
+    assert body["groups_done"] == body["groups_total"], body
+
+
+@pytest.mark.asyncio
+async def test_progress_idor_blocks_non_admin_outsider(http_client):
+    """A non-admin user from a different tenant cannot read another
+    tenant's progress snapshot — defence in depth for the new poll
+    endpoint now that the FE relies on it. Returns 404 (not 403) to
+    avoid leaking session-id existence to an attacker scanning UUID
+    space.
+
+    Important: ``two_tenants`` creates two admins, and admins bypass
+    project access checks. This test creates a viewer-role outsider
+    to exercise the actual gate (mirrors the analytics IDOR test
+    pattern above)."""
+    # Owner — admin so seeding succeeds without extra promotion.
+    owner_uid, _, owner_headers = await _register_login_promote(
+        http_client, tenant=f"prog-owner-{uuid.uuid4().hex[:6]}",
+    )
+    project_id, bim_model_id = await _seed_project_with_bim_model(
+        owner_id=owner_uid,
+    )
+    r = await http_client.post(
+        "/api/v1/match_elements/sessions",
+        json={
+            "project_id": str(project_id),
+            "bim_model_id": str(bim_model_id),
+            "source": "bim",
+        },
+        headers=owner_headers,
+    )
+    sid = r.json()["id"]
+
+    # Outsider — plain viewer, no admin bypass.
+    _, _, outsider_headers = await _register_login_promote(
+        http_client,
+        tenant=f"prog-viewer-{uuid.uuid4().hex[:6]}",
+        role="viewer",
+    )
+
+    # Owner can read.
+    own = await http_client.get(
+        f"/api/v1/match_elements/sessions/{sid}/progress",
+        headers=owner_headers,
+    )
+    assert own.status_code == 200, own.text
+
+    # Outsider is blocked.
+    other = await http_client.get(
+        f"/api/v1/match_elements/sessions/{sid}/progress",
+        headers=outsider_headers,
+    )
+    assert other.status_code == 404, other.text

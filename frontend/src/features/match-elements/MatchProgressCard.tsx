@@ -7,33 +7,45 @@
  * generic spinner that previously made the app look frozen for the
  * 5–30s the backend takes to grind through a vector match.
  *
- * Backend has no real-time progress feed for matching — it's a single
- * synchronous POST — so we mirror the wall-clock heuristic pioneered
- * by ``GlobalCatalogueInstallIndicator``: rotate stage labels on a
- * fixed timetable and ramp an indeterminate bar from 5% → 95%, then
- * flip to 100% the instant the parent reports ``status='done'``.
+ * Driven by real backend progress when a ``sessionId`` is supplied
+ * (preferred): polls ``GET /api/v1/match_elements/sessions/{id}/progress``
+ * every 800ms and reflects whichever of the five real stages the runner
+ * is on right now (init / elements / ranking / save / done), with the
+ * ``ranking`` stage rendering a live ``groups_done / groups_total``
+ * counter so the user sees per-group progress instead of a flat bar.
  *
- * Pure prop-driven; no polling, no global store. The card knows only
- * what the parent tells it via ``status`` / ``errorMessage`` / the
- * three lifecycle callbacks.
+ * Falls back to a wall-clock heuristic when no session id is wired
+ * (legacy callers or when the poll endpoint 404s on an old backend) so
+ * the card never goes dark.
+ *
+ * v3.0.6 fix: previously the card was wall-clock-only with a fake
+ * "Currency normalization" stage that activated at the 28s mark — on
+ * any match exceeding 28s (which is most real projects) the label sat
+ * on that stage forever and the user reported the pipeline "hanging
+ * on currency normalization". The backend has no currency stage; the
+ * label was a heuristic that outran reality. Real-stage polling fixes
+ * the UI; a 5-minute fetch timeout + an explicit Cancel button means a
+ * genuinely wedged backend can no longer wedge the page.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Banknote,
-  Building2,
   Check,
   Database,
   Layers,
   Loader2,
   RefreshCw,
+  Save,
   Search,
   Sparkles,
   TriangleAlert,
   X,
 } from 'lucide-react';
 import clsx from 'clsx';
+
+import { matchElementsApi } from './api';
+import type { MatchProgress } from './api';
 
 export type MatchProgressStatus = 'running' | 'done' | 'error';
 
@@ -52,18 +64,27 @@ interface Props {
   /** Called when the user clicks "Try again" in the error footer. The
    *  parent is expected to return to Step 4 of the wizard. */
   onRetry?: () => void;
+  /** When supplied, the card polls
+   *  ``/api/v1/match_elements/sessions/{id}/progress`` every 800ms while
+   *  ``status === 'running'`` so the timeline reflects what the
+   *  ``run_match`` runner is actually doing instead of a wall-clock
+   *  heuristic. Optional for back-compat with callers that don't have
+   *  a session id wired (the wall-clock fallback still works). */
+  sessionId?: string | null;
+  /** Optional Cancel-button handler. Mounts a "Cancel" affordance
+   *  alongside the spinner so the user can abort a genuinely stuck
+   *  backend instead of refreshing the tab. Caller is expected to fire
+   *  the AbortController feeding the in-flight ``runMatch`` fetch. */
+  onCancel?: () => void;
 }
 
+type StageId = 'init' | 'elements' | 'ranking' | 'save' | 'done';
+
 interface StageDef {
-  id:
-    | 'load'
-    | 'embed'
-    | 'vector'
-    | 'lexical'
-    | 'rerank'
-    | 'currency';
-  /** Wall-clock seconds at which this stage becomes the "active" one.
-   *  The last stage's range extends to infinity. */
+  id: StageId;
+  /** Wall-clock seconds at which this stage becomes the "active" one
+   *  when no real progress is available. The last stage's range
+   *  extends to infinity. */
   startSec: number;
   label: string;
   Icon: typeof Layers;
@@ -78,14 +99,13 @@ function formatElapsed(ms: number): string {
   return `${m}m ${rem.toString().padStart(2, '0')}s`;
 }
 
-/** Indeterminate ramp 5% → 95% over ~30s. Smooth ease-out so the bar
- *  rushes early and slows down — matches user expectation that the
- *  long tail is "almost done, just finishing up". Flips to 100% the
- *  instant the parent flips to status='done'. */
+/** Indeterminate ramp 5% → 95% over ~30s. Used only when no real
+ *  ``groups_done / groups_total`` counter is available — once polling
+ *  is live we compute a deterministic percentage from those values.
+ *  Smooth ease-out so the bar rushes early and slows down. */
 function rampPct(elapsedSec: number): number {
   if (elapsedSec <= 0) return 5;
-  // Logistic-ish curve: saturates near 95% as time → 60s.
-  const k = elapsedSec / 30; // half-life ~15s
+  const k = elapsedSec / 30;
   const eased = 1 - 1 / (1 + k * 1.6);
   return Math.min(95, Math.round(5 + eased * 90));
 }
@@ -95,26 +115,71 @@ export function MatchProgressCard({
   errorMessage,
   onDone,
   onRetry,
+  sessionId,
+  onCancel,
 }: Props) {
   const { t } = useTranslation();
   const startedAtRef = useRef<number>(Date.now());
   const [now, setNow] = useState<number>(Date.now());
+  const [progress, setProgress] = useState<MatchProgress | null>(null);
+  const [pollFailed, setPollFailed] = useState(false);
   const firedDoneRef = useRef(false);
 
   // Reset the wall-clock the moment the card mounts. Using a ref keeps
   // the start time stable across re-renders without a useState ceremony.
   useEffect(() => {
     startedAtRef.current = Date.now();
-  }, []);
+    firedDoneRef.current = false;
+    setProgress(null);
+    setPollFailed(false);
+  }, [sessionId]);
 
-  // 1Hz ticker — drives the elapsed counter and stage rotation. Stops
-  // as soon as status flips terminal so we don't churn timers in the
-  // success / error tail.
+  // 1Hz wall-clock ticker for the elapsed counter and (when no real
+  // progress is available) the fallback stage rotation. Stops the
+  // instant ``status`` flips terminal so we don't churn timers.
   useEffect(() => {
     if (status !== 'running') return;
     const handle = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(handle);
   }, [status]);
+
+  // Real-progress poll. When the parent gives us a session id, hit the
+  // backend every 800ms while running. AbortController makes the
+  // in-flight fetch cancellable on unmount so we don't leak network
+  // calls across remounts (the parent remounts this component on
+  // every kickoff). One failed poll is OK — we flip ``pollFailed`` to
+  // surface the wall-clock fallback only after a sustained failure
+  // window (3 consecutive errors).
+  useEffect(() => {
+    if (status !== 'running') return;
+    if (!sessionId) return;
+    let consecFailures = 0;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const snap = await matchElementsApi.getProgress(sessionId);
+        if (cancelled) return;
+        setProgress(snap);
+        consecFailures = 0;
+        setPollFailed(false);
+      } catch {
+        consecFailures += 1;
+        if (consecFailures >= 3) {
+          setPollFailed(true);
+        }
+      }
+    };
+    // Immediate poll on mount so the card has real data on the first
+    // render — without it the user sees the wall-clock fallback for
+    // ~800ms before the first poll lands.
+    void poll();
+    const handle = window.setInterval(poll, 800);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+    };
+  }, [sessionId, status]);
 
   // Fire onDone exactly once, ~800ms after the parent flips to done.
   // Gives the user a satisfying "all green, bar full" frame before the
@@ -129,52 +194,44 @@ export function MatchProgressCard({
   const stages: StageDef[] = useMemo(
     () => [
       {
-        id: 'load',
+        id: 'init',
         startSec: 0,
-        label: t('match_progress.stage_load', {
-          defaultValue: 'Loading BIM elements',
-        }),
-        Icon: Layers,
-      },
-      {
-        id: 'embed',
-        startSec: 2,
-        label: t('match_progress.stage_embed', {
-          defaultValue: 'Building embeddings',
+        label: t('match_progress.stage_init', {
+          defaultValue: 'Preparing session',
         }),
         Icon: Sparkles,
       },
       {
-        id: 'vector',
+        id: 'elements',
+        startSec: 2,
+        label: t('match_progress.stage_elements', {
+          defaultValue: 'Loading elements',
+        }),
+        Icon: Layers,
+      },
+      {
+        id: 'ranking',
         startSec: 5,
-        label: t('match_progress.stage_vector', {
-          defaultValue: 'Vector search (top candidates)',
+        label: t('match_progress.stage_ranking', {
+          defaultValue: 'Ranking candidates',
         }),
         Icon: Search,
       },
       {
-        id: 'lexical',
-        startSec: 12,
-        label: t('match_progress.stage_lexical', {
-          defaultValue: 'Lexical + region boost',
+        id: 'save',
+        startSec: 22,
+        label: t('match_progress.stage_save', {
+          defaultValue: 'Saving results',
+        }),
+        Icon: Save,
+      },
+      {
+        id: 'done',
+        startSec: 28,
+        label: t('match_progress.stage_done', {
+          defaultValue: 'Wrapping up',
         }),
         Icon: Database,
-      },
-      {
-        id: 'rerank',
-        startSec: 20,
-        label: t('match_progress.stage_rerank', {
-          defaultValue: 'Rerank by relevance',
-        }),
-        Icon: Building2,
-      },
-      {
-        id: 'currency',
-        startSec: 28,
-        label: t('match_progress.stage_currency', {
-          defaultValue: 'Currency normalization',
-        }),
-        Icon: Banknote,
       },
     ],
     [t],
@@ -183,24 +240,68 @@ export function MatchProgressCard({
   const elapsedMs = Math.max(0, now - startedAtRef.current);
   const elapsedSec = Math.floor(elapsedMs / 1000);
 
-  // Active stage index — wall-clock heuristic. On done, all stages
-  // are past so we point past the array. On error, the active stage
-  // is the one the wall-clock was on when error hit.
+  // Real progress wins when we have it; otherwise fall back to the
+  // wall-clock heuristic so the card stays informative even on legacy
+  // backends or while the first poll is in flight.
+  const useRealProgress = !pollFailed && progress != null && progress.status !== 'idle';
+
+  // Map backend stage → the timeline index. ``init`` / ``elements`` /
+  // ``ranking`` / ``save`` align 1-to-1; ``done`` flips every row
+  // green. Unknown / idle stages collapse onto the wall-clock pass.
   const activeIdx = useMemo(() => {
     if (status === 'done') return stages.length;
+    if (useRealProgress && progress) {
+      const idx = stages.findIndex((s) => s.id === progress.stage);
+      if (idx >= 0) return idx;
+    }
     let idx = 0;
     for (let i = 0; i < stages.length; i++) {
       const s = stages[i];
       if (s && elapsedSec >= s.startSec) idx = i;
     }
     return idx;
-  }, [elapsedSec, status, stages]);
+  }, [elapsedSec, status, stages, useRealProgress, progress]);
 
-  const overallPct = status === 'done' ? 100 : rampPct(elapsedSec);
+  // Per-group counter for the ranking stage. Computed from the real
+  // poll snapshot when available so the bar advances proportionally to
+  // actual work done. Outside the ranking stage we fall back to the
+  // wall-clock ramp.
+  const overallPct = useMemo(() => {
+    if (status === 'done') return 100;
+    if (useRealProgress && progress) {
+      // Stage weight: init=5, elements=10, ranking=70, save=10, done=5
+      const stageWeights: Record<StageId, [number, number]> = {
+        init: [0, 5],
+        elements: [5, 15],
+        ranking: [15, 85],
+        save: [85, 95],
+        done: [95, 100],
+      };
+      const [lo, hi] = stageWeights[progress.stage as StageId] ?? [5, 95];
+      if (progress.stage === 'ranking' && progress.groups_total > 0) {
+        const frac = Math.min(
+          1,
+          Math.max(0, progress.groups_done / progress.groups_total),
+        );
+        return Math.round(lo + (hi - lo) * frac);
+      }
+      // Mid-stage default — sit halfway between the stage's lo/hi so
+      // the bar visibly advances at each stage boundary.
+      return Math.round((lo + hi) / 2);
+    }
+    return rampPct(elapsedSec);
+  }, [status, useRealProgress, progress, elapsedSec]);
 
   const isRunning = status === 'running';
   const isDone = status === 'done';
   const isError = status === 'error';
+
+  const rankingCounter = useMemo(() => {
+    if (!useRealProgress || !progress) return null;
+    if (progress.stage !== 'ranking') return null;
+    if (progress.groups_total <= 0) return null;
+    return `${progress.groups_done} / ${progress.groups_total}`;
+  }, [useRealProgress, progress]);
 
   const headline = useMemo(() => {
     if (isError) {
@@ -213,14 +314,22 @@ export function MatchProgressCard({
         defaultValue: 'All done — opening your results',
       });
     }
+    const stageLabel = stages[activeIdx]?.label ?? stages[0]?.label ?? '';
+    if (rankingCounter) {
+      return `${stageLabel} — ${rankingCounter}`;
+    }
     if (elapsedSec >= 60) {
       return t('match_progress.headline_long', {
         defaultValue:
           'Almost done — large projects can take a minute',
       });
     }
-    return stages[activeIdx]?.label ?? stages[0]?.label ?? '';
-  }, [isError, isDone, elapsedSec, stages, activeIdx, t]);
+    return stageLabel;
+  }, [isError, isDone, elapsedSec, stages, activeIdx, t, rankingCounter]);
+
+  const handleCancel = useCallback(() => {
+    onCancel?.();
+  }, [onCancel]);
 
   return (
     <div
@@ -231,6 +340,7 @@ export function MatchProgressCard({
       data-testid="match-progress-card"
       data-status={status}
       data-stage={stages[activeIdx]?.id ?? 'done'}
+      data-progress-source={useRealProgress ? 'backend' : 'heuristic'}
     >
       {/* Header — title + elapsed */}
       <header className="flex items-start justify-between gap-3 mb-5">
@@ -289,8 +399,9 @@ export function MatchProgressCard({
         </div>
       </header>
 
-      {/* Overall progress bar — smooth indeterminate ramp; pinned at
-          100% on done, paused at current value on error. */}
+      {/* Overall progress bar — proportional to real groups_done /
+          groups_total during the ranking stage when polling is live,
+          otherwise a smooth wall-clock ramp. */}
       <div
         className={clsx(
           'h-1.5 rounded-full mb-5 overflow-hidden',
@@ -318,8 +429,7 @@ export function MatchProgressCard({
       </div>
 
       {/* Rotating headline — the current stage label, or the long-tail
-          reassurance message after 60s. Bumped to text-sm and bold so
-          it reads as the focal element when the user scans the card. */}
+          reassurance message after 60s. */}
       <p
         className={clsx(
           'text-sm font-semibold mb-5 transition-colors',
@@ -334,9 +444,9 @@ export function MatchProgressCard({
         {headline}
       </p>
 
-      {/* Vertical timeline — 6 stages. Past stages are emerald + check;
-          active stage is indigo + spinner; pending stages dim down. On
-          error the active row flips to a rose X. */}
+      {/* Vertical timeline — 5 real stages. Past stages are emerald +
+          check; active stage is indigo + spinner; pending stages dim
+          down. On error the active row flips to a rose X. */}
       <ol className="space-y-3">
         {stages.map((s, i) => {
           const isPast = !isError && i < activeIdx;
@@ -399,6 +509,11 @@ export function MatchProgressCard({
                 )}
               >
                 {s.label}
+                {isCurrent && s.id === 'ranking' && rankingCounter && (
+                  <span className="ml-2 text-content-tertiary tabular-nums">
+                    {rankingCounter}
+                  </span>
+                )}
               </span>
             </li>
           );
@@ -432,6 +547,31 @@ export function MatchProgressCard({
               {t('match_progress.retry', { defaultValue: 'Try again' })}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Cancel affordance — mounted only while the match is running
+          AND elapsed time has passed the point where most healthy runs
+          would have completed. Earlier than 20s it's noisy ("wait,
+          this is fast!"); past 20s it's a genuine safety valve for a
+          stuck backend. */}
+      {isRunning && onCancel && elapsedSec >= 20 && (
+        <div className="mt-5 flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-secondary/40 p-3">
+          <div className="text-xs text-content-secondary">
+            {t('match_progress.cancel_hint', {
+              defaultValue:
+                'Taking longer than usual? You can cancel and try a smaller selection.',
+            })}
+          </div>
+          <button
+            type="button"
+            data-testid="match-progress-cancel"
+            onClick={handleCancel}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-border bg-surface-primary text-content-primary hover:bg-surface-tertiary transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+            {t('match_progress.cancel', { defaultValue: 'Cancel' })}
+          </button>
         </div>
       )}
 

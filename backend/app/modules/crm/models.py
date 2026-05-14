@@ -30,7 +30,6 @@ from decimal import Decimal
 from sqlalchemy import (
     JSON,
     Boolean,
-    DateTime,
     ForeignKey,
     Integer,
     Numeric,
@@ -40,7 +39,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import GUID, Base
-
 
 # ── Catalogue tables ──────────────────────────────────────────────────────
 

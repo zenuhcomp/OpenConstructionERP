@@ -50,7 +50,6 @@ from app.modules.hse_advanced.schemas import (
     CAPAUpdate,
     CertificationCreate,
     CertificationUpdate,
-    FiveWhyStep,
     IncidentEscalationEntry,
     IncidentEscalationMatrix,
     InvestigationCreate,

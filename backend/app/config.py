@@ -178,6 +178,15 @@ class Settings(BaseSettings):
     embedding_model_name: str = "intfloat/multilingual-e5-small"
     embedding_model_dim: int = 384
     embedding_model_fallback: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # Override the HuggingFace cache directory for embedding model downloads.
+    # When ``None`` (default), HuggingFace's own resolution applies
+    # (HF_HOME, then XDG_CACHE_HOME, then ~/.cache/huggingface). Set this
+    # to pin the cache to a writable volume on locked-down hosts.
+    huggingface_cache_dir: str | None = None
+    # Hard ceiling (seconds) on the first-time embedder load. Set lower
+    # on workstations that should fail fast rather than block the boot
+    # for minutes while a 2 GB model trickles over a slow link.
+    embedding_download_timeout_seconds: int = 300
     # ── Match backend ────────────────────────────────────────────────────
     # The CWICR migration to Qdrant (BAAI/bge-m3, 30 per-language
     # collections, hard/soft filter split, BGE local reranker) is the

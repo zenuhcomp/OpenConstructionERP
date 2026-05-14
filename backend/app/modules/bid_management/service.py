@@ -23,6 +23,7 @@ from app.core.events import event_bus
 from app.modules.bid_management.models import (
     BidAward,
     BidComparison,
+    Bidder,
     BidInvitation,
     BidLeveling,
     BidPackage,
@@ -31,7 +32,6 @@ from app.modules.bid_management.models import (
     BidRejection,
     BidSubmission,
     BidSubmissionLine,
-    Bidder,
 )
 from app.modules.bid_management.repository import (
     BidAwardRepository,
@@ -155,7 +155,7 @@ def compute_completeness_score(
             if line_item_id is not None:
                 priced_ids.add(line_item_id)
 
-    mandatory_ids = {getattr(ln, "id") for ln in mandatory}  # type: ignore[arg-type]
+    mandatory_ids = {ln.id for ln in mandatory}  # type: ignore[arg-type]
     matched = mandatory_ids & priced_ids
     pct = (Decimal(len(matched)) / Decimal(len(mandatory_ids))) * Decimal("100")
     return pct.quantize(Decimal("0.01"))
@@ -310,7 +310,7 @@ def recommend_bidder(
             r for r in levelings if _to_decimal(getattr(r, "total_score", 0)) == top_score
         ]
 
-    bidder_lookup = {getattr(b, "id"): b for b in bidders}  # type: ignore[arg-type]
+    bidder_lookup = {b.id: b for b in bidders}  # type: ignore[arg-type]
     chosen = rank_one[0]
     return bidder_lookup.get(getattr(chosen, "bidder_id", None))
 

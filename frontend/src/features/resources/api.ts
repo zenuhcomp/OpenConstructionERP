@@ -277,6 +277,30 @@ export function completeAssignment(id: string): Promise<Assignment> {
   return apiPost<Assignment>(`/v1/resources/assignments/${id}/complete`, {});
 }
 
+/** Partial update for an existing assignment. */
+export interface UpdateAssignmentPayload {
+  project_id?: string | null;
+  task_id?: string | null;
+  start_at?: string;
+  end_at?: string;
+  allocation_percent?: number;
+  status?: AssignmentStatus;
+  cost_rate?: number | string;
+  currency?: string;
+  notes?: string;
+}
+
+export function updateAssignment(
+  id: string,
+  data: UpdateAssignmentPayload,
+): Promise<Assignment> {
+  return apiPatch<Assignment>(`/v1/resources/assignments/${id}`, data);
+}
+
+export function deleteAssignment(id: string): Promise<void> {
+  return apiDelete(`/v1/resources/assignments/${id}`);
+}
+
 /* ── Requests ───────────────────────────────────────────────────────────── */
 
 export function listRequests(params: {
@@ -293,6 +317,28 @@ export function listRequests(params: {
 
 export function createRequest(data: CreateRequestPayload): Promise<ResourceRequest> {
   return apiPost<ResourceRequest>('/v1/resources/requests/', data);
+}
+
+export interface UpdateRequestPayload {
+  title?: string;
+  description?: string;
+  required_skills?: string[];
+  start_at?: string;
+  end_at?: string;
+  quantity?: number;
+  priority?: RequestPriority;
+  status?: RequestStatus;
+}
+
+export function updateRequest(
+  id: string,
+  data: UpdateRequestPayload,
+): Promise<ResourceRequest> {
+  return apiPatch<ResourceRequest>(`/v1/resources/requests/${id}`, data);
+}
+
+export function deleteRequest(id: string): Promise<void> {
+  return apiDelete(`/v1/resources/requests/${id}`);
 }
 
 export function fulfillRequest(

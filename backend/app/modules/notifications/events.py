@@ -591,14 +591,14 @@ def register_notification_subscribers() -> None:
     from app.modules.notifications._wave1_subscribers import (
         register_wave1_notification_subscribers,
     )
-    from app.modules.notifications._wave23_subscribers import (
-        register_wave23_notification_subscribers,
-    )
     from app.modules.notifications._wave4_subscribers import (
         register_wave4_notification_subscribers,
     )
     from app.modules.notifications._wave5_cross_module_subscribers import (
         register_wave5_notification_subscribers,
+    )
+    from app.modules.notifications._wave23_subscribers import (
+        register_wave23_notification_subscribers,
     )
     register_wave1_notification_subscribers()
     register_wave23_notification_subscribers()

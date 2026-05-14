@@ -12,7 +12,7 @@ describe('ClassificationPicker', () => {
         mode="dropdown"
       />,
     );
-    expect(screen.getByText('Classification...')).toBeInTheDocument();
+    expect(screen.getByText(/^Classification\.\.\./)).toBeInTheDocument();
   });
 
   it('should render selected code when value is provided', () => {
@@ -36,10 +36,10 @@ describe('ClassificationPicker', () => {
         mode="dropdown"
       />,
     );
-    fireEvent.click(screen.getByText('Classification...'));
+    fireEvent.click(screen.getByText(/^Classification\.\.\./));
     // Should show the search input and DIN 276 label
     expect(screen.getByText('DIN276')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Search...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/^Search\.\.\./)).toBeInTheDocument();
   });
 
   it('should show DIN 276 tree root nodes', () => {
@@ -51,7 +51,7 @@ describe('ClassificationPicker', () => {
         mode="dropdown"
       />,
     );
-    fireEvent.click(screen.getByText('Classification...'));
+    fireEvent.click(screen.getByText(/^Classification\.\.\./));
 
     // Top-level DIN 276 codes
     expect(screen.getByText('100')).toBeInTheDocument();
@@ -69,7 +69,7 @@ describe('ClassificationPicker', () => {
         mode="dropdown"
       />,
     );
-    fireEvent.click(screen.getByText('Classification...'));
+    fireEvent.click(screen.getByText(/^Classification\.\.\./));
 
     expect(screen.getByText('NRM')).toBeInTheDocument();
     expect(screen.getByText('Substructure')).toBeInTheDocument();
@@ -86,7 +86,7 @@ describe('ClassificationPicker', () => {
         mode="dropdown"
       />,
     );
-    fireEvent.click(screen.getByText('Classification...'));
+    fireEvent.click(screen.getByText(/^Classification\.\.\./));
 
     // Click on the "100" code node
     const node100 = screen.getByText('100');
@@ -104,9 +104,9 @@ describe('ClassificationPicker', () => {
         mode="dropdown"
       />,
     );
-    fireEvent.click(screen.getByText('Classification...'));
+    fireEvent.click(screen.getByText(/^Classification\.\.\./));
 
-    const searchInput = screen.getByPlaceholderText('Search...');
+    const searchInput = screen.getByPlaceholderText(/^Search\.\.\./);
     fireEvent.change(searchInput, { target: { value: 'wall' } });
 
     // Should find wall-related items (multiple matches expected)
@@ -125,7 +125,7 @@ describe('ClassificationPicker', () => {
     );
     // Should immediately show tree content
     expect(screen.getByText('100')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Search...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/^Search\.\.\./)).toBeInTheDocument();
   });
 
   it('should highlight selected value', () => {
@@ -151,7 +151,7 @@ describe('ClassificationPicker', () => {
         mode="inline"
       />,
     );
-    const searchInput = screen.getByPlaceholderText('Search...');
+    const searchInput = screen.getByPlaceholderText(/^Search\.\.\./);
     fireEvent.change(searchInput, { target: { value: 'concrete' } });
 
     // Find and click the X button

@@ -11,7 +11,7 @@ import csv
 import io
 import logging
 import uuid
-from datetime import UTC, date as _date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from importlib import resources
 from typing import Any

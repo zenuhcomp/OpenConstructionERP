@@ -38,10 +38,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -125,7 +125,7 @@ async def grant_permission(
         user_id=user_id,
         role=role,
         granted_by=granted_by,
-        granted_at=datetime.now(tz=timezone.utc),
+        granted_at=datetime.now(tz=UTC),
         revoked=False,
     )
     session.add(row)

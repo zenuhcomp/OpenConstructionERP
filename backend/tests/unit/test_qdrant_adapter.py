@@ -20,6 +20,8 @@ from app.config import get_settings
 from app.modules.costs.qdrant_adapter import (
     QdrantHit,
     _build_filter,
+    _collection_vectors,
+    _collection_vectors_cache,
     _dedup_hits,
     _dedup_hits_by_base_code,
     _enumerate_target_codes,
@@ -1176,3 +1178,108 @@ async def test_cross_lang_lookup_pins_country_for_multi_region_languages(
     assert len(must) >= 2, "expected rate_code + country predicates"
     country_keys = [getattr(c, "key", None) for c in must]
     assert "country" in country_keys
+
+
+# ── _collection_vectors capability cache ────────────────────────────────
+
+
+class _FakeVectorsParams:
+    """Stand-in for qdrant_client's CollectionInfo.config.params."""
+
+    def __init__(self, vectors=None, sparse_vectors=None):
+        self.vectors = vectors
+        self.sparse_vectors = sparse_vectors
+
+
+class _FakeCollectionInfo:
+    def __init__(self, vectors=None, sparse_vectors=None):
+        self.config = type("Cfg", (), {})()
+        self.config.params = _FakeVectorsParams(vectors=vectors, sparse_vectors=sparse_vectors)
+
+
+class _CapClient:
+    """Records get_collection calls and returns canned CollectionInfo."""
+
+    def __init__(self, info=None, raises=False):
+        self._info = info
+        self._raises = raises
+        self.calls: list[str] = []
+
+    def get_collection(self, name):
+        self.calls.append(name)
+        if self._raises:
+            raise RuntimeError("collection missing")
+        return self._info
+
+
+@pytest.fixture(autouse=True)
+def _clear_capability_cache():
+    """Clear the per-collection capability cache between tests."""
+    _collection_vectors_cache.clear()
+    yield
+    _collection_vectors_cache.clear()
+
+
+def test_collection_vectors_returns_dense_sparse_for_v3_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DDC v3 snapshot exposes ``dense`` + ``sparse`` only — no ``resources``."""
+    info = _FakeCollectionInfo(
+        vectors={"dense": object()},
+        sparse_vectors={"sparse": object()},
+    )
+    client = _CapClient(info=info)
+    monkeypatch.setattr(
+        "app.modules.costs.qdrant_adapter._get_client", lambda: client,
+    )
+
+    out = _collection_vectors("cwicr_en_v3")
+    assert out == frozenset({"dense", "sparse"})
+    assert "resources" not in out
+
+
+def test_collection_vectors_includes_resources_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Locally-built catalogue carries dense + sparse + resources."""
+    info = _FakeCollectionInfo(
+        vectors={"dense": object(), "resources": object()},
+        sparse_vectors={"sparse": object()},
+    )
+    client = _CapClient(info=info)
+    monkeypatch.setattr(
+        "app.modules.costs.qdrant_adapter._get_client", lambda: client,
+    )
+
+    out = _collection_vectors("cwicr_de_v3")
+    assert out == frozenset({"dense", "sparse", "resources"})
+
+
+def test_collection_vectors_caches_per_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Capability probe must hit Qdrant at most once per collection per boot."""
+    info = _FakeCollectionInfo(vectors={"dense": object()}, sparse_vectors={"sparse": object()})
+    client = _CapClient(info=info)
+    monkeypatch.setattr(
+        "app.modules.costs.qdrant_adapter._get_client", lambda: client,
+    )
+
+    _collection_vectors("cwicr_en_v3")
+    _collection_vectors("cwicr_en_v3")
+    _collection_vectors("cwicr_en_v3")
+    # Three calls, one round-trip
+    assert client.calls == ["cwicr_en_v3"]
+
+
+def test_collection_vectors_returns_empty_on_qdrant_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unreachable Qdrant / missing collection → empty frozenset (no raise)."""
+    client = _CapClient(raises=True)
+    monkeypatch.setattr(
+        "app.modules.costs.qdrant_adapter._get_client", lambda: client,
+    )
+
+    out = _collection_vectors("cwicr_xx_v9")
+    assert out == frozenset()

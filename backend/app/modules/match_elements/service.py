@@ -911,6 +911,25 @@ def _envelope_from_group(
     elif diameter_mm:
         nominal_size_mm = int(round(diameter_mm))
 
+    # Forward ``ifc_class`` only when it's an actual IFC class — BIM
+    # extractors set ``sample.category="IfcWall"`` / ``IfcSlab``, but BoQ /
+    # text / image adapters synthesise placeholders (``"BoQ"``, ``"Text"``)
+    # that aren't valid IFC identifiers. Promoting those to the v3
+    # SearchPlan's ``ifc_class`` hard filter eliminates every Qdrant hit
+    # (CWICR rates carry empty / IfcCovering / etc. for non-BIM rows) and
+    # collapses the search to the metadata-only fallback (score ≈ 0.0002).
+    # An explicit ``Ifc`` prefix is the cheapest, most defensive check —
+    # callers who know the IFC class for a BoQ row can put it in
+    # ``attributes["ifc_class"]`` (the BoqAdapter forwards that key
+    # verbatim).
+    raw_cat = (sample.category or "").strip()
+    attr_ifc_class = _attr("ifc_class", "IfcClass")
+    forwarded_ifc_class: str | None = None
+    if attr_ifc_class and attr_ifc_class.lower().startswith("ifc"):
+        forwarded_ifc_class = attr_ifc_class
+    elif raw_cat.lower().startswith("ifc"):
+        forwarded_ifc_class = raw_cat
+
     return ElementEnvelope(
         source=source,
         category=category_label.lower(),
@@ -919,7 +938,7 @@ def _envelope_from_group(
         quantities=quantities,
         unit_hint=unit_hint_map.get(unit),
         classifier_hint=classifier_hint,
-        ifc_class=sample.category or None,  # raw IFC class, e.g. "IfcWall"
+        ifc_class=forwarded_ifc_class,
         ifc_predefined_type=_attr("ifc_predefined_type", "PredefinedType"),
         ost_category=_attr("ost_category", "Category", "OST_Category"),
         material_class=_normalise_material_class(material),

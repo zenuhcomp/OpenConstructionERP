@@ -358,14 +358,60 @@ class TestBoqAdapter:
         elements = _run(adapter.iter_elements(project_id=PROJECT_ID))
         assert len(elements) == 1
 
-    def test_ifc_class_promoted_from_category(self):
-        # Cross-source group-by ("ifc_class") should resolve on BoQ.
+    def test_ifc_class_not_promoted_from_synthetic_category(self):
+        # ``category`` on a BoQ row is operator-facing free text — NOT
+        # an IFC class name. Previously the adapter promoted it onto
+        # ``ifc_class`` which then got forwarded as a hard Qdrant filter
+        # and eliminated every CWICR candidate row (see
+        # ``match_elements_three_filter_bugs`` memory). Verify the
+        # synthetic label is no longer mirrored.
         sess = _fake_session({"boq_rows": [
             {"description": "x", "qty": 1, "unit": "m3", "category": "Wall"},
+            {"description": "y", "qty": 1, "unit": "m3"},  # default "BoQ" cat
         ]})
         adapter = BoqAdapter(session=None, match_session=sess)
         elements = _run(adapter.iter_elements(project_id=PROJECT_ID))
-        assert elements[0].attributes["ifc_class"] == "Wall"
+        # category still surfaces verbatim — it just doesn't masquerade
+        # as an IFC class.
+        assert elements[0].attributes["category"] == "Wall"
+        assert "ifc_class" not in elements[0].attributes
+        assert elements[1].attributes["category"] == "BoQ"
+        assert "ifc_class" not in elements[1].attributes
+
+    def test_ifc_class_forwarded_when_row_carries_one(self):
+        # When the BoQ row explicitly carries a real IFC class (e.g. the
+        # estimator exported a pre-classified BoQ from a BIM tool), the
+        # adapter MUST forward it so the downstream Qdrant filter narrows
+        # to the right element family.
+        sess = _fake_session({"boq_rows": [
+            {
+                "description": "Cast-in-place concrete wall",
+                "qty": 25,
+                "unit": "m3",
+                "ifc_class": "IfcWall",
+            },
+            {
+                "description": "Pre-cast slab",
+                "qty": 100,
+                "unit": "m2",
+                "ifc_class": "IfcSlab",
+                "category": "Floors",
+            },
+            {
+                "description": "garbage value should be rejected",
+                "qty": 1,
+                "unit": "m",
+                "ifc_class": "BoQ",  # not Ifc-prefixed → rejected
+            },
+        ]})
+        adapter = BoqAdapter(session=None, match_session=sess)
+        elements = _run(adapter.iter_elements(project_id=PROJECT_ID))
+        assert elements[0].attributes["ifc_class"] == "IfcWall"
+        assert elements[1].attributes["ifc_class"] == "IfcSlab"
+        # The non-Ifc-prefixed value is filtered out — the downstream
+        # envelope builder applies the same guard but the adapter
+        # should not have written it in the first place.
+        assert "ifc_class" not in elements[2].attributes
 
 
 if __name__ == "__main__":

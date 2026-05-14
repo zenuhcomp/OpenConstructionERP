@@ -1,0 +1,491 @@
+# i18n Coverage Audit Report
+Master: en.ts — 4944 keys
+Locales audited: 26
+
+## Summary table
+
+locale    missing  identical  total_keys  status
+------------------------------------------------
+ar              0        293        5005  RED >=200
+bg              0       1512        4944  RED >=200
+cs              0       1554        4944  RED >=200
+da              0       1632        4944  RED >=200
+de              0       1308        5000  RED >=200
+es              0       1271        4981  RED >=200
+fi              0       1518        4944  RED >=200
+fr              0       1533        4981  RED >=200
+hi              0       1453        4944  RED >=200
+hr              0       2261        4944  RED >=200
+id              0       2281        4944  RED >=200
+it              0       1488        4944  RED >=200
+ja              0       1439        4944  RED >=200
+ko              0       1440        4944  RED >=200
+mn              0          6        4944  GREEN <50
+nl              0       1626        4944  RED >=200
+no              0       1593        4944  RED >=200
+pl              0       1482        4944  RED >=200
+pt              0       1424        4944  RED >=200
+ro              0       2274        4944  RED >=200
+ru              0       1360        4985  RED >=200
+sv              0       1546        4944  RED >=200
+th              0       2293        4944  RED >=200
+tr              0       1470        4944  RED >=200
+vi              0       2255        4944  RED >=200
+zh              0       1399        4944  RED >=200
+
+## Top 20 missing keys per locale
+
+### ar (0 missing, 293 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/ar.ts
+  (no missing keys)
+
+### bg (0 missing, 1512 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/bg.ts
+  (no missing keys)
+
+### cs (0 missing, 1554 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/cs.ts
+  (no missing keys)
+
+### da (0 missing, 1632 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/da.ts
+  (no missing keys)
+
+### de (0 missing, 1308 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/de.ts
+  (no missing keys)
+
+### es (0 missing, 1271 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/es.ts
+  (no missing keys)
+
+### fi (0 missing, 1518 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/fi.ts
+  (no missing keys)
+
+### fr (0 missing, 1533 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/fr.ts
+  (no missing keys)
+
+### hi (0 missing, 1453 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/hi.ts
+  (no missing keys)
+
+### hr (0 missing, 2261 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/hr.ts
+  (no missing keys)
+
+### id (0 missing, 2281 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/id.ts
+  (no missing keys)
+
+### it (0 missing, 1488 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/it.ts
+  (no missing keys)
+
+### ja (0 missing, 1439 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/ja.ts
+  (no missing keys)
+
+### ko (0 missing, 1440 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/ko.ts
+  (no missing keys)
+
+### mn (0 missing, 6 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/mn.ts
+  (no missing keys)
+
+### nl (0 missing, 1626 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/nl.ts
+  (no missing keys)
+
+### no (0 missing, 1593 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/no.ts
+  (no missing keys)
+
+### pl (0 missing, 1482 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/pl.ts
+  (no missing keys)
+
+### pt (0 missing, 1424 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/pt.ts
+  (no missing keys)
+
+### ro (0 missing, 2274 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/ro.ts
+  (no missing keys)
+
+### ru (0 missing, 1360 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/ru.ts
+  (no missing keys)
+
+### sv (0 missing, 1546 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/sv.ts
+  (no missing keys)
+
+### th (0 missing, 2293 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/th.ts
+  (no missing keys)
+
+### tr (0 missing, 1470 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/tr.ts
+  (no missing keys)
+
+### vi (0 missing, 2255 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/vi.ts
+  (no missing keys)
+
+### zh (0 missing, 1399 identical)
+path: C:/Users/Artem Boiko/Desktop/CodeProjects/ERP_26030500/frontend/src/app/locales/zh.ts
+  (no missing keys)
+
+## v3.0.5 critical-key coverage
+
+All v3.0.5 keys present and translated in every locale.
+
+## Top keys missing in the MOST locales (backfill priority)
+
+(No missing keys — every locale has every key. Backfill priority comes from the identical-value list below.)
+
+## Top keys identical-to-EN across the MOST locales (real backfill priority)
+
+- [26/26 locales identical] boq.export_format_csv  :: EN='CSV (.csv)'
+- [26/26 locales identical] boq.export_format_gaeb  :: EN='GAEB XML (.x83)'
+- [26/26 locales identical] boq.export_format_excel  :: EN='Excel (.xlsx)'
+- [26/26 locales identical] boq.shortcut_del  :: EN='Del'
+- [26/26 locales identical] boq.shortcut_ctrl_slash  :: EN='Ctrl+/'
+- [26/26 locales identical] requirements.regex_placeholder  :: EN='^F[0-9]+$'
+- [25/26 locales identical] nav.hse_advanced  :: EN='HSE Management'
+- [25/26 locales identical] nav.group_commercial_desc  :: EN='Commercial pipeline — CRM, contracts, bids, variations, suppliers, property deve'
+- [25/26 locales identical] nav.supplier_catalogs  :: EN='Supplier Catalogs'
+- [25/26 locales identical] notification.submittal_status_changed_body  :: EN='{{submittal_number}} ({{title}}) — {{new_status}}'
+- [25/26 locales identical] bim.upload_advanced_element_data_hint  :: EN='CSV / Excel'
+- [25/26 locales identical] notifications.transmittal.issued.body  :: EN='{{code}} — {{title}}'
+- [25/26 locales identical] boq.resource_variant_pill  :: EN='▾ {{count}}'
+- [25/26 locales identical] finance.original  :: EN='Original'
+- [25/26 locales identical] nav.schedule_advanced  :: EN='Advanced Schedule'
+- [25/26 locales identical] nav.carbon  :: EN='Carbon & ESG'
+- [25/26 locales identical] nav.resources  :: EN='Resources & Crew'
+- [25/26 locales identical] nav.group_bi_desc  :: EN='BI dashboards built on warehouse projections'
+- [25/26 locales identical] nav.service  :: EN='Service & Maintenance'
+- [25/26 locales identical] notifications.submittal.approved.body  :: EN='{{code}} — {{title}}'
+- [25/26 locales identical] match_elements.new_text.lines_placeholder  :: EN='Stahlbetonwand C30/37, d=240mm ленточный фундамент 800x600 concrete slab 200mm'
+- [25/26 locales identical] nav.qms  :: EN='Quality Management'
+- [25/26 locales identical] notifications.rfi.assigned.body  :: EN='{{code}} — {{title}}'
+- [25/26 locales identical] notifications.risk.assigned.body  :: EN='{{code}} — {{title}}'
+- [25/26 locales identical] projects.photos.position_label  :: EN='{{current}} / {{total}}'
+- [25/26 locales identical] reports.gaeb_xml  :: EN='GAEB XML'
+- [25/26 locales identical] bim.upload_advanced_geometry_hint  :: EN='DAE / COLLADA'
+- [25/26 locales identical] boq.resource_total_in_base  :: EN='{{foreign}} ≈ {{base}} (1 {{code}} = {{rate}} {{baseCode}})'
+- [25/26 locales identical] notifications.submittal.submitted.body  :: EN='{{code}} — {{title}}'
+- [25/26 locales identical] nav.equipment  :: EN='Equipment & Fleet'
+
+## Identical-values samples (top 10 per locale)
+
+### ar — 293 identical-to-EN values
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - boq.export_format_csv  :: 'CSV (.csv)'
+  - boq.export_format_excel  :: 'Excel (.xlsx)'
+  - boq.export_format_gaeb  :: 'GAEB XML (.x83)'
+  - boq.resource_total_in_base  :: '{{foreign}} ≈ {{base}} (1 {{code}} = {{rate}} {{baseCode}})'
+  - boq.resource_variant_pill  :: '▾ {{count}}'
+  - boq.shortcut_ctrl_slash  :: 'Ctrl+/'
+  - boq.shortcut_del  :: 'Del'
+  - cde.action_promote  :: 'Promote'
+
+### bg — 1512 identical-to-EN values
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+  - boq.accept_all_anomaly_suggestions  :: 'Accept All Suggested Rates ({{count}})'
+  - boq.add_all_failed  :: 'Could not add any of the {{count}} positions'
+  - boq.add_as_resources  :: 'Add {{count}} as resources'
+  - boq.add_custom_column  :: 'Or add a custom one'
+  - boq.add_failed  :: 'Failed to add position\u200c\u2060\u200d'
+  - boq.add_from_catalog_short  :: 'From Catalog'
+
+### cs — 1554 identical-to-EN values
+  - ai.standard_label  :: 'Standard'
+  - analytics.col_region  :: 'Region'
+  - bim.getting_started  :: 'BIM Viewer'
+  - bim.landing_hero_title  :: 'BIM 3D Viewer'
+  - bim.title  :: 'BIM Viewer'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+  - bim.upload_size_hint  :: 'Revit (.rvt), IFC (.ifc)'
+
+### da — 1632 identical-to-EN values
+  - ai.col_pos  :: 'Pos'
+  - ai.col_total  :: 'Total'
+  - ai.currency_auto  :: 'Auto'
+  - ai.standard_label  :: 'Standard'
+  - analytics.col_budget  :: 'Budget'
+  - analytics.col_region  :: 'Region'
+  - analytics.col_status  :: 'Status'
+  - analytics.over_budget_label  :: 'over budget'
+  - bim.prop_type  :: 'Type'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+
+### de — 1308 identical-to-EN values
+  - about.cap.import  :: 'Import & Export'
+  - ai.col_pos  :: 'Pos'
+  - ai.standard_label  :: 'Standard'
+  - analytics.col_budget  :: 'Budget'
+  - analytics.col_region  :: 'Region'
+  - analytics.col_status  :: 'Status'
+  - bim.landing_hero_title  :: 'BIM 3D Viewer'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+
+### es — 1271 identical-to-EN values
+  - ai.building_industrial  :: 'Industrial'
+  - ai.col_total  :: 'Total'
+  - ai.currency_auto  :: 'Auto'
+  - analytics.col_variance_pct  :: 'Var. %'
+  - bim.getting_started  :: 'BIM Viewer'
+  - bim.landing_hero_title  :: 'BIM 3D Viewer'
+  - bim.title  :: 'BIM Viewer'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+
+### fi — 1518 identical-to-EN values
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+  - boq.accept_all_anomaly_suggestions  :: 'Accept All Suggested Rates ({{count}})'
+  - boq.add_all_failed  :: 'Could not add any of the {{count}} positions'
+  - boq.add_as_resources  :: 'Add {{count}} as resources'
+  - boq.add_custom_column  :: 'Or add a custom one'
+  - boq.add_failed  :: 'Failed to add position\u200c\u2060\u200d'
+  - boq.add_from_catalog_short  :: 'From Catalog'
+
+### fr — 1533 identical-to-EN values
+  - ai.building_infrastructure  :: 'Infrastructure'
+  - ai.col_description  :: 'Description'
+  - ai.col_total  :: 'Total'
+  - ai.currency_auto  :: 'Auto'
+  - analytics.col_budget  :: 'Budget'
+  - bim.classification  :: 'Classification'
+  - bim.disc_architecture  :: 'Architecture'
+  - bim.discipline_label  :: 'Discipline'
+  - bim.disciplines  :: 'Disciplines'
+  - bim.prop_discipline  :: 'Discipline'
+
+### hi — 1453 identical-to-EN values
+  - bim.getting_started  :: 'BIM Viewer'
+  - bim.landing_hero_title  :: 'BIM 3D Viewer'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+  - boq.accept_all_anomaly_suggestions  :: 'Accept All Suggested Rates ({{count}})'
+  - boq.add_all_failed  :: 'Could not add any of the {{count}} positions'
+  - boq.add_as_resources  :: 'Add {{count}} as resources'
+  - boq.add_custom_column  :: 'Or add a custom one'
+
+### hr — 2261 identical-to-EN values
+  - ai.advisor_sources  :: 'Sources:'
+  - ai.area  :: 'Area (m²)'
+  - ai.building_education  :: 'Education'
+  - ai.building_healthcare  :: 'Healthcare'
+  - ai.building_hospitality  :: 'Hospitality'
+  - ai.building_industrial  :: 'Industrial'
+  - ai.building_infrastructure  :: 'Infrastructure'
+  - ai.building_residential  :: 'Residential'
+  - ai.building_retail  :: 'Retail'
+  - ai.col_description  :: 'Description'
+
+### id — 2281 identical-to-EN values
+  - ai.advisor_sources  :: 'Sources:'
+  - ai.area  :: 'Area (m²)'
+  - ai.building_education  :: 'Education'
+  - ai.building_healthcare  :: 'Healthcare'
+  - ai.building_hospitality  :: 'Hospitality'
+  - ai.building_industrial  :: 'Industrial'
+  - ai.building_infrastructure  :: 'Infrastructure'
+  - ai.building_residential  :: 'Residential'
+  - ai.building_retail  :: 'Retail'
+  - ai.col_description  :: 'Description'
+
+### it — 1488 identical-to-EN values
+  - ai.col_pos  :: 'Pos'
+  - ai.standard_label  :: 'Standard'
+  - analytics.col_budget  :: 'Budget'
+  - auth.email  :: 'Email'
+  - auth.password  :: 'Password'
+  - bim.landing_hero_title  :: 'BIM 3D Viewer'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+
+### ja — 1439 identical-to-EN values
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - boq.accept_all_anomaly_suggestions  :: 'Accept All Suggested Rates ({{count}})'
+  - boq.add_all_failed  :: 'Could not add any of the {{count}} positions'
+  - boq.add_as_resources  :: 'Add {{count}} as resources'
+  - boq.add_custom_column  :: 'Or add a custom one'
+  - boq.add_failed  :: 'Failed to add position\u200c\u2060\u200d'
+  - boq.add_from_catalog_short  :: 'From Catalog'
+  - boq.add_partial_failed_items  :: 'Failed: {{items}}{{more}}'
+
+### ko — 1440 identical-to-EN values
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+  - boq.accept_all_anomaly_suggestions  :: 'Accept All Suggested Rates ({{count}})'
+  - boq.add_all_failed  :: 'Could not add any of the {{count}} positions'
+  - boq.add_as_resources  :: 'Add {{count}} as resources'
+  - boq.add_custom_column  :: 'Or add a custom one'
+  - boq.add_failed  :: 'Failed to add position\u200c\u2060\u200d'
+  - boq.add_from_catalog_short  :: 'From Catalog'
+
+### mn — 6 identical-to-EN values
+  - boq.export_format_csv  :: 'CSV (.csv)'
+  - boq.export_format_excel  :: 'Excel (.xlsx)'
+  - boq.export_format_gaeb  :: 'GAEB XML (.x83)'
+  - boq.shortcut_ctrl_slash  :: 'Ctrl+/'
+  - boq.shortcut_del  :: 'Del'
+  - requirements.regex_placeholder  :: '^F[0-9]+$'
+
+### nl — 1626 identical-to-EN values
+  - about.cap.import  :: 'Import & Export'
+  - ai.col_pos  :: 'Pos'
+  - ai.items  :: 'items'
+  - analytics.col_budget  :: 'Budget'
+  - analytics.col_project  :: 'Project'
+  - analytics.col_status  :: 'Status'
+  - analytics.col_variance_pct  :: 'Var. %'
+  - bim.discipline_label  :: 'Discipline'
+  - bim.disciplines  :: 'Disciplines'
+  - bim.getting_started  :: 'BIM Viewer'
+
+### no — 1593 identical-to-EN values
+  - ai.col_pos  :: 'Pos'
+  - ai.col_total  :: 'Total'
+  - ai.currency_auto  :: 'Auto'
+  - ai.standard_label  :: 'Standard'
+  - analytics.col_region  :: 'Region'
+  - analytics.col_status  :: 'Status'
+  - bim.prop_type  :: 'Type'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+
+### pl — 1482 identical-to-EN values
+  - ai.currency_auto  :: 'Auto'
+  - ai.standard_label  :: 'Standard'
+  - analytics.col_region  :: 'Region'
+  - analytics.col_status  :: 'Status'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+  - boq.accept_all_anomaly_suggestions  :: 'Accept All Suggested Rates ({{count}})'
+  - boq.add_all_failed  :: 'Could not add any of the {{count}} positions'
+
+### pt — 1424 identical-to-EN values
+  - ai.building_industrial  :: 'Industrial'
+  - ai.col_total  :: 'Total'
+  - analytics.col_status  :: 'Status'
+  - analytics.col_variance_pct  :: 'Var. %'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+  - bim.upload_size_hint  :: 'Revit (.rvt), IFC (.ifc)'
+  - bim.wireframe  :: 'Wireframe'
+
+### ro — 2274 identical-to-EN values
+  - ai.advisor_sources  :: 'Sources:'
+  - ai.area  :: 'Area (m²)'
+  - ai.building_education  :: 'Education'
+  - ai.building_healthcare  :: 'Healthcare'
+  - ai.building_hospitality  :: 'Hospitality'
+  - ai.building_industrial  :: 'Industrial'
+  - ai.building_infrastructure  :: 'Infrastructure'
+  - ai.building_residential  :: 'Residential'
+  - ai.building_retail  :: 'Retail'
+  - ai.col_description  :: 'Description'
+
+### ru — 1360 identical-to-EN values
+  - auth.email  :: 'Email'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+  - boq.accept_all_anomaly_suggestions  :: 'Accept All Suggested Rates ({{count}})'
+  - boq.add_all_failed  :: 'Could not add any of the {{count}} positions'
+  - boq.add_as_resources  :: 'Add {{count}} as resources'
+  - boq.add_custom_column  :: 'Or add a custom one'
+  - boq.add_failed  :: 'Failed to add position\u200c\u2060\u200d'
+  - boq.add_from_catalog_short  :: 'From Catalog'
+
+### sv — 1546 identical-to-EN values
+  - ai.area  :: 'Area (m²)'
+  - ai.col_pos  :: 'Pos'
+  - ai.currency_auto  :: 'Auto'
+  - ai.standard_label  :: 'Standard'
+  - analytics.col_budget  :: 'Budget'
+  - analytics.col_region  :: 'Region'
+  - analytics.col_status  :: 'Status'
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+
+### th — 2293 identical-to-EN values
+  - ai.advisor_sources  :: 'Sources:'
+  - ai.area  :: 'Area (m²)'
+  - ai.building_education  :: 'Education'
+  - ai.building_healthcare  :: 'Healthcare'
+  - ai.building_hospitality  :: 'Hospitality'
+  - ai.building_industrial  :: 'Industrial'
+  - ai.building_infrastructure  :: 'Infrastructure'
+  - ai.building_residential  :: 'Residential'
+  - ai.building_retail  :: 'Retail'
+  - ai.col_description  :: 'Description'
+
+### tr — 1470 identical-to-EN values
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - bim.upload_panel_subtitle  :: 'IFC, RVT, CSV, Excel'
+  - boq.accept_all_anomaly_suggestions  :: 'Accept All Suggested Rates ({{count}})'
+  - boq.add_all_failed  :: 'Could not add any of the {{count}} positions'
+  - boq.add_as_resources  :: 'Add {{count}} as resources'
+  - boq.add_custom_column  :: 'Or add a custom one'
+  - boq.add_failed  :: 'Failed to add position\u200c\u2060\u200d'
+  - boq.add_from_catalog_short  :: 'From Catalog'
+
+### vi — 2255 identical-to-EN values
+  - ai.advisor_sources  :: 'Sources:'
+  - ai.area  :: 'Area (m²)'
+  - ai.building_education  :: 'Education'
+  - ai.building_healthcare  :: 'Healthcare'
+  - ai.building_hospitality  :: 'Hospitality'
+  - ai.building_industrial  :: 'Industrial'
+  - ai.building_infrastructure  :: 'Infrastructure'
+  - ai.building_residential  :: 'Residential'
+  - ai.building_retail  :: 'Retail'
+  - ai.col_description  :: 'Description'
+
+### zh — 1399 identical-to-EN values
+  - bim.upload_advanced_element_data_hint  :: 'CSV / Excel'
+  - bim.upload_advanced_geometry_hint  :: 'DAE / COLLADA'
+  - bim.upload_generate_pdf_help  :: 'Exports the sheets the designer prepared inside the model as'
+  - boq.accept_all_anomaly_suggestions  :: 'Accept All Suggested Rates ({{count}})'
+  - boq.add_all_failed  :: 'Could not add any of the {{count}} positions'
+  - boq.add_as_resources  :: 'Add {{count}} as resources'
+  - boq.add_custom_column  :: 'Or add a custom one'
+  - boq.add_failed  :: 'Failed to add position\u200c\u2060\u200d'
+  - boq.add_from_catalog_short  :: 'From Catalog'
+  - boq.add_partial_failed_items  :: 'Failed: {{items}}{{more}}'

@@ -21,12 +21,12 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.qms.models import (
+    QMSNCR,
     ITPItem,
     ITPPlan,
     QMSAudit,
     QMSAuditFinding,
     QMSInspection,
-    QMSNCR,
     QMSPunchItem,
 )
 

@@ -473,6 +473,24 @@ h4 {
   white-space: nowrap;
 }
 
+/* ── BOQ numeric cell alignment (v3.0.4 fix) ────────────────────────────
+   When a column uses a custom `cellRenderer` (Quantity / Unit Rate / Total
+   here), AG Grid wraps the renderer output in `.ag-cell-wrapper` →
+   `.ag-cell-value`. Both default to `flex: 0 1 auto` which collapses them
+   to their content width, so `w-full` inside the renderer ends up only
+   as wide as the text — and right-aligned numbers visibly drift left by
+   whatever blank space remains. Force the wrapper + value spans to fill
+   the cell so the renderer's `w-full / justify-end / text-right` actually
+   reaches the cell's right padding edge. Right-aligned numeric columns
+   (`type: numericColumn`, or our explicit `text-right` cellClass) anchor
+   to the cell's right edge regardless of text width — positions and
+   resources line up on a single vertical baseline per column. */
+.ag-theme-quartz .ag-cell .ag-cell-wrapper,
+.ag-theme-quartz .ag-cell .ag-cell-value {
+  width: 100%;
+  flex: 1 1 auto;
+}
+
 /* ── AG Grid drag handle column ───────────────────────────────────────── */
 
 .oe-drag-handle-cell {

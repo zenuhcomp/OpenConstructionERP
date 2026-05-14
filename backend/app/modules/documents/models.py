@@ -239,9 +239,9 @@ class DocumentBIMLink(Base):
 from app.modules.documents.activity_models import (  # noqa: E402,F401
     DocumentActivity,
 )
-from app.modules.documents.share_models import (  # noqa: E402,F401
-    DocumentShareLink,
-)
 from app.modules.documents.folder_permissions_models import (  # noqa: E402,F401
     FolderPermission,
+)
+from app.modules.documents.share_models import (  # noqa: E402,F401
+    DocumentShareLink,
 )

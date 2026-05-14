@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import random
-import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 

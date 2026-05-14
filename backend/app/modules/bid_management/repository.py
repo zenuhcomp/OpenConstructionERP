@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.bid_management.models import (
     BidAward,
     BidComparison,
+    Bidder,
     BidInvitation,
     BidLeveling,
     BidPackage,
@@ -19,7 +20,6 @@ from app.modules.bid_management.models import (
     BidRejection,
     BidSubmission,
     BidSubmissionLine,
-    Bidder,
 )
 
 

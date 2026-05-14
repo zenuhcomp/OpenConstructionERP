@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 
 from app.dependencies import CurrentUserId, RequirePermission, SessionDep, verify_project_access
 from app.modules.variations.schemas import (
-    DayworkBillingResponse,
     DayworkSheetCreate,
     DayworkSheetLineCreate,
     DayworkSheetLineResponse,
@@ -28,7 +27,6 @@ from app.modules.variations.schemas import (
     ExtensionOfTimeClaimUpdate,
     FinalAccountCreate,
     FinalAccountResponse,
-    FinalAccountSummary,
     FinalAccountUpdate,
     NEC4TimerStatusResponse,
     NoticeCreate,

@@ -20,9 +20,9 @@ from app.modules.service.models import (
     ServiceContract,
     ServiceSchedule,
     ServiceTicket,
-    SLADefinition,
     ServiceWorkOrder,
     ServiceWorkOrderItem,
+    SLADefinition,
 )
 
 ModelT = TypeVar("ModelT", bound=Base)

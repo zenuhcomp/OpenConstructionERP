@@ -28,7 +28,6 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   X,
-  Sparkles,
   Users,
   Lock,
   ArrowRight,
@@ -39,6 +38,7 @@ import {
   Plug,
   BarChart3,
 } from 'lucide-react';
+import ddcLogoUrl from '/brand/ddc-logo.webp';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 
@@ -170,8 +170,14 @@ export function RequestCustomModuleDialog({ open, onClose }: Props) {
             <X size={18} />
           </button>
           <div className="relative px-6 sm:px-10 py-8 sm:py-10 text-center">
-            <div className="inline-flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow-lg mb-4">
-              <Sparkles size={28} />
+            <div className="inline-flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-2xl bg-white dark:bg-white shadow-lg mb-4 p-2 ring-1 ring-border-light">
+              <img
+                src={ddcLogoUrl}
+                alt="DataDrivenConstruction"
+                className="max-h-full max-w-full object-contain"
+                width="48"
+                height="48"
+              />
             </div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-600 dark:text-purple-300 mb-2">
               {t('modules.request_eyebrow', {

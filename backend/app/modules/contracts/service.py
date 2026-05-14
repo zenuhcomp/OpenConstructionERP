@@ -1086,7 +1086,8 @@ class ContractsService:
         )
         # Persist into metadata
         releases = list(meta.get("retention_releases", []) or [])
-        from datetime import UTC, datetime as _dt
+        from datetime import UTC
+        from datetime import datetime as _dt
         releases.append({
             "event": event,
             "released_at": _dt.now(UTC).isoformat(),
@@ -1144,7 +1145,8 @@ class ContractsService:
             raise HTTPException(status_code=404, detail="Progress claim not found")
         meta = dict(claim.metadata_ or {})
         waivers = list(meta.get("lien_waivers", []) or [])
-        from datetime import UTC, datetime as _dt
+        from datetime import UTC
+        from datetime import datetime as _dt
         record = {
             "waiver_type": payload["waiver_type"],
             "through_date": payload["through_date"],

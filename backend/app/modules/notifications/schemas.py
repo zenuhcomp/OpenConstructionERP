@@ -21,6 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.notifications.templates import (
     icon_category_for,
+)
+from app.modules.notifications.templates import (
     render as render_template,
 )
 

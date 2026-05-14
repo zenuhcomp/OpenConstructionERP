@@ -1769,9 +1769,7 @@ class UnitContext:
         # how to handle. When the IFC declares a unit we overwrite the
         # entry; when it doesn't we keep the SI default (ISO 16739-1
         # §5.4.3 explicitly says "metric SI" is the default).
-        self.scale_for: dict[str, float] = {
-            u: 1.0 for u in _IFC_UNIT_TYPES
-        }
+        self.scale_for: dict[str, float] = dict.fromkeys(_IFC_UNIT_TYPES, 1.0)
         self.label_for: dict[str, str] = {
             "LENGTHUNIT": "metre",
             "AREAUNIT": "squaremetre",

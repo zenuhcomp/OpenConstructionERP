@@ -784,6 +784,34 @@ async def get_vector_status() -> dict:
     return vs()
 
 
+@router.get("/vector/download-status/")
+async def vector_download_status() -> dict:
+    """Embedder load state — used by /modules to poll while a model is being
+    pulled from HuggingFace on first vector install.
+
+    Returns the active model name (whichever of ``embedding_model_name`` or
+    ``embedding_model_fallback`` successfully loaded), a coarse ``status``
+    flag (``ready`` once the singleton is materialised, ``unavailable``
+    otherwise — typically while the model is still downloading or after
+    both candidates failed to load), and the configured embedding
+    dimension.
+
+    Idempotent: if the singleton is already loaded, returns immediately.
+    Otherwise touches ``get_embedder()`` which is a no-op after the first
+    attempt fails (``_embedder_tried`` short-circuit).
+    """
+    from app.config import get_settings
+    from app.core.vector import active_model_name, get_embedder
+
+    embedder = get_embedder()
+    settings = get_settings()
+    return {
+        "model": active_model_name(),
+        "status": "ready" if embedder is not None else "unavailable",
+        "dimension": getattr(settings, "embedding_model_dim", 384),
+    }
+
+
 @router.get("/vector/regions/")
 async def vector_region_stats() -> list[dict]:
     """Return per-region vector counts from the vector DB.
@@ -1642,6 +1670,51 @@ def _v3_snapshot_cache_path(region: str) -> Path:
     return Path.home() / ".openestimator" / "cache" / "snapshots-v3" / f"{region}.snapshot"
 
 
+def _snapshot_error_hint(err: str) -> str | None:
+    """Map Qdrant's recover-from-URL error to a user-actionable hint.
+
+    Qdrant 1.18+ on native Windows reliably trips ``os error 5`` on
+    ``newest_clocks.json`` (and occasionally other clock/WAL files)
+    during snapshot recovery because Windows Defender real-time
+    scanning holds a handle on the file Qdrant has just written and
+    is trying to ``fsync``. The download succeeds — only the final
+    sync fails — so the user sees "could not fetch or restore" with
+    no obvious cause. Surface a concrete fix instead of leaving them
+    to grep the backend log.
+    """
+    if not err:
+        return None
+    low = err.lower()
+    if "os error 5" in low or "access is denied" in low:
+        return (
+            "Windows Defender is locking files in Qdrant's storage folder during "
+            "fsync. The download succeeded — only the final disk write was blocked. "
+            "Fix: open PowerShell AS ADMINISTRATOR and run:\n"
+            "  Add-MpPreference -ExclusionPath \"$env:USERPROFILE\\.openestimator\"\n"
+            "Then click Install again. (No restart needed — Qdrant picks it up "
+            "on the next attempt.) GUI alternative: Settings → Update & Security → "
+            "Windows Security → Virus & threat protection → Manage settings → "
+            "Add or remove exclusions → Folder → pick %USERPROFILE%\\.openestimator."
+        )
+    if "no space left" in low or "out of space" in low or "disk full" in low:
+        return (
+            "Disk is full — the BGE-M3 snapshot needs ~1–2 GB free during restore. "
+            "Free up space on the drive holding ~/.openestimator and retry."
+        )
+    if "status - 404" in low or "404 not found" in low:
+        return (
+            "The DDC catalogue file is missing on HuggingFace. The region may "
+            "still be marked 'available' in the registry before DDC publishes. "
+            "Check huggingface.co/datasets/DataDrivenConstruction/cwicr-vector-db-bgem3-v3."
+        )
+    if "timed out" in low or "timeout" in low or "connection refused" in low:
+        return (
+            "Qdrant timed out fetching the snapshot. Verify outbound HTTPS to "
+            "huggingface.co works from the Qdrant host, then retry."
+        )
+    return None
+
+
 def _v3_qdrant_url() -> str | None:
     """Resolve the server-mode Qdrant URL for the v3 catalogue path.
 
@@ -1770,6 +1843,7 @@ async def install_v3_catalogue(
 
     from app.modules.costs.cwicr_v3_catalogue import get_catalogue
     from app.modules.costs.qdrant_snapshot_loader import (
+        SnapshotRestoreError,
         restore_snapshot_from_url,
         server_collections,
     )
@@ -1832,7 +1906,7 @@ async def install_v3_catalogue(
     )
     loop = asyncio.get_event_loop()
     try:
-        ok = await loop.run_in_executor(
+        await loop.run_in_executor(
             None,
             lambda: restore_snapshot_from_url(
                 qdrant_url=qdrant_url,
@@ -1844,18 +1918,22 @@ async def install_v3_catalogue(
                 timeout_s=1500,
             ),
         )
+    except SnapshotRestoreError as exc:
+        qdrant_err = str(exc)
+        hint = _snapshot_error_hint(qdrant_err)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            (
+                f"Qdrant could not restore the snapshot from {snapshot_url}.\n"
+                f"Qdrant said: {qdrant_err}"
+                + (f"\nHint: {hint}" if hint else "")
+            ),
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             f"Snapshot restore failed: {exc}",
         ) from exc
-    if not ok:
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY,
-            f"Qdrant could not fetch or restore the snapshot from {snapshot_url}. "
-            "Check the backend log for Qdrant's error message (404, network "
-            "timeout, disk space, etc).",
-        )
 
     # Verify the collection actually registered. Qdrant returns
     # ``result: true`` once the recover RPC finishes, but the

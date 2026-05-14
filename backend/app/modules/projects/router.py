@@ -51,15 +51,15 @@ from app.modules.projects.file_manager_schemas import (
 from app.modules.projects.file_manager_service import (
     file_tree as fm_file_tree,
 )
-from app.modules.projects.member_schemas import (
-    AddProjectMemberRequest,
-    ProjectMemberResponse,
-)
 from app.modules.projects.file_manager_service import (
     list_project_files as fm_list_files,
 )
 from app.modules.projects.file_manager_service import (
     resolve_storage_locations as fm_resolve_locations,
+)
+from app.modules.projects.member_schemas import (
+    AddProjectMemberRequest,
+    ProjectMemberResponse,
 )
 from app.modules.projects.schemas import (
     MatchProjectSettingsRead,

@@ -16,6 +16,7 @@ import { exportErrorReport, getErrorCount, getLastError } from '@/shared/lib/err
 import { APP_VERSION, APP_BUILD_FINGERPRINT } from '@/shared/lib/version';
 import { useToastStore } from '@/stores/useToastStore';
 import { useI18nReady } from '@/shared/lib/useI18nReady';
+import { SupportUsButton } from './SupportUsButton';
 
 /** Map English page titles (passed from App.tsx routes) to i18n keys. */
 const TITLE_I18N_MAP: Record<string, string> = {
@@ -135,10 +136,14 @@ export function Header({ title, onMenuClick }: HeaderProps) {
           onClick={openCommandPalette}
           className={clsx(
             'hidden sm:flex h-8 items-center gap-2 rounded-lg px-3',
-            'border border-border-light bg-surface-secondary/60',
-            'text-sm text-content-tertiary',
+            // Solid-ish white background so the field doesn't dissolve into
+            // the translucent header background; falls back to a dark tint
+            // in dark mode so the chip stays readable on the dark blurred
+            // topbar.
+            'border border-border-light bg-white/85 backdrop-blur-sm dark:bg-surface-primary/70',
+            'text-sm text-content-tertiary shadow-sm',
             'transition-colors duration-fast ease-oe',
-            'hover:border-content-quaternary/30 hover:bg-surface-secondary hover:text-content-secondary',
+            'hover:border-content-quaternary/40 hover:bg-white dark:hover:bg-surface-primary hover:text-content-secondary',
             'w-40 md:w-44 lg:w-56',
           )}
         >
@@ -167,6 +172,7 @@ export function Header({ title, onMenuClick }: HeaderProps) {
             help dropdown. The little red dot turns on when errors were
             captured this session. */}
         <NotificationBell />
+        <SupportUsButton />
         <BugReportMenu />
         <HelpMenu />
 

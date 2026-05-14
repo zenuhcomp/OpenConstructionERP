@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, date as _date, datetime
+from datetime import UTC, datetime
+from datetime import date as _date
 from typing import Any
 
-from fastapi import HTTPException, status as http_status
+from fastapi import HTTPException
+from fastapi import status as http_status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

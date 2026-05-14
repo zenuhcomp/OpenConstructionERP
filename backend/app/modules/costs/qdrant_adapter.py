@@ -187,6 +187,16 @@ def country_filter_for(country: str | None) -> str | None:
 _client: Any = None  # qdrant_client.QdrantClient
 _encoder: Any = None  # FlagEmbedding.BGEM3FlagModel
 
+# Per-collection capability cache — maps collection name to the set of
+# named-vector keys the collection actually exposes (``dense`` /
+# ``sparse`` / ``resources`` for fully-featured local catalogues; just
+# ``dense`` + ``sparse`` for the DDC v3 snapshots). Populated on first
+# ``search()`` against a given collection and consulted before issuing
+# a ``Prefetch(using=…)`` so we never ask Qdrant for a vector the
+# collection doesn't carry — that would 404 the whole query and force
+# the ranker into the metadata-only fallback.
+_collection_vectors_cache: dict[str, frozenset[str]] = {}
+
 
 def _get_client() -> Any:
     """Lazy-init a QdrantClient pointed at the configured store.
@@ -308,6 +318,72 @@ def _encode(texts: list[str], *, with_resources: bool = False) -> dict[str, Any]
         "dense": [list(map(float, v)) for v in out["dense_vecs"]],
         "sparse": sparse_vectors,
     }
+
+
+# ── Per-collection capability discovery ──────────────────────────────────
+
+
+def _collection_vectors(collection_name: str) -> frozenset[str]:
+    """Return the set of named-vector keys a collection exposes.
+
+    Cached per-process via :data:`_collection_vectors_cache` so the
+    ``client.get_collection`` round-trip happens at most once per
+    collection per backend boot. Unknown / unreachable collections
+    resolve to an empty frozenset so the caller's "is the resources
+    vector present?" probe degrades cleanly to "no" instead of raising.
+
+    Used by :func:`search` to skip the ``resources`` prefetch when the
+    target collection only carries ``dense`` + ``sparse`` (DDC v3
+    snapshot shape). Without this, every match call against a snapshot
+    install issued a ``Prefetch(using="resources", …)`` that Qdrant
+    answered with a 404, forcing the ranker into the metadata-only
+    fallback path (score ≈ 0.0002, opaque rate codes — see
+    :doc:`memory/match_elements_three_filter_bugs`).
+    """
+    cached = _collection_vectors_cache.get(collection_name)
+    if cached is not None:
+        return cached
+
+    try:
+        client = _get_client()
+        info = client.get_collection(collection_name)
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug(
+            "qdrant_adapter: get_collection(%s) failed for capability probe: %s",
+            collection_name,
+            exc,
+        )
+        _collection_vectors_cache[collection_name] = frozenset()
+        return _collection_vectors_cache[collection_name]
+
+    # qdrant_client surfaces named vectors through
+    # ``config.params.vectors`` (dict for multi-vector schemas) and
+    # ``config.params.sparse_vectors`` for the sparse half. Both are
+    # mappings keyed by the vector name; we union their keys so callers
+    # can probe either kind via the same interface.
+    names: set[str] = set()
+    try:
+        params = info.config.params  # type: ignore[union-attr]
+        vectors = getattr(params, "vectors", None)
+        if isinstance(vectors, dict):
+            names.update(vectors.keys())
+        elif vectors is not None:
+            # Single unnamed vector — pre-multivector schema. Treat as
+            # the canonical ``dense`` channel.
+            names.add("dense")
+        sparse = getattr(params, "sparse_vectors", None)
+        if isinstance(sparse, dict):
+            names.update(sparse.keys())
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug(
+            "qdrant_adapter: capability extraction failed for %s: %s",
+            collection_name,
+            exc,
+        )
+
+    result = frozenset(names)
+    _collection_vectors_cache[collection_name] = result
+    return result
 
 
 # ── Public API ───────────────────────────────────────────────────────────
@@ -454,14 +530,34 @@ async def search(
             merged_filters["country"] = auto_country
     qdrant_filter = _build_filter(merged_filters)
 
-    # Encode both queries in one forward pass when resources_query is set.
+    # Probe the collection's named-vector set BEFORE encoding the
+    # resources query. The DDC v3 snapshot ships only ``dense`` +
+    # ``sparse`` — issuing a ``Prefetch(using="resources", …)`` against
+    # such a collection 404s the entire query API call and the ranker
+    # falls through to metadata-only (score ≈ 0). Skipping the encode
+    # when the vector isn't there saves a BGE-M3 forward pass on every
+    # match request against a snapshot install.
+    vectors_available = _collection_vectors(collection)
+    use_resources = bool(
+        resources_query and (not vectors_available or "resources" in vectors_available)
+    )
+    if resources_query and not use_resources:
+        logger.debug(
+            "qdrant_adapter: collection %s has no 'resources' named vector "
+            "(available=%s); skipping resources prefetch",
+            collection,
+            sorted(vectors_available) if vectors_available else "unknown",
+        )
+
+    # Encode both queries in one forward pass when resources_query is set
+    # AND the collection actually carries the resources named vector.
     texts = [core_query]
-    if resources_query:
-        texts.append(resources_query)
+    if use_resources:
+        texts.append(resources_query)  # type: ignore[arg-type]
     encoded = _encode(texts)
     core_dense = encoded["dense"][0]
     core_sparse = encoded["sparse"][0]
-    res_dense = encoded["dense"][1] if resources_query else None
+    res_dense = encoded["dense"][1] if use_resources else None
 
     from qdrant_client.http.models import (
         Fusion,

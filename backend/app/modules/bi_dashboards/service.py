@@ -11,8 +11,8 @@ from __future__ import annotations
 import calendar
 import logging
 import uuid
-from dataclasses import asdict
-from datetime import UTC, date as _date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
+from datetime import date as _date
 from decimal import Decimal
 from typing import Any
 
@@ -39,7 +39,6 @@ from app.modules.bi_dashboards.report_builder import (
 from app.modules.bi_dashboards.repository import BIDashboardsRepository
 from app.modules.bi_dashboards.schemas import (
     AlertRuleCreate,
-    AlertRuleUpdate,
     DashboardCreate,
     DashboardRenderResponse,
     DashboardUpdate,

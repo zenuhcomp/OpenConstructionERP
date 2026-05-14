@@ -447,7 +447,7 @@ exports[`Visual Regression — ConfirmDialog > renders danger variant (open) 1`]
     class="fixed inset-0 z-50 flex items-center justify-center"
   >
     <div
-      class="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in"
+      class="absolute inset-0 bg-black/70 backdrop-blur-lg animate-fade-in"
     />
     <div
       aria-describedby="confirm-dialog-message"
@@ -517,14 +517,14 @@ exports[`Visual Regression — ConfirmDialog > renders danger variant (open) 1`]
           class="flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-all bg-surface-primary text-content-primary border border-border hover:bg-surface-secondary active:bg-surface-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue focus-visible:ring-offset-2 disabled:opacity-40 disabled:pointer-events-none"
           type="button"
         >
-          Cancel
+          Cancel‌⁠‍
         </button>
         <button
           class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all text-content-inverse bg-semantic-error hover:opacity-90 active:opacity-80 shadow-xs hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-semantic-error disabled:opacity-40 disabled:pointer-events-none"
           data-testid="confirm-dialog-confirm"
           type="button"
         >
-          Delete
+          Delete‌⁠‍
         </button>
       </div>
     </div>
@@ -538,7 +538,7 @@ exports[`Visual Regression — ConfirmDialog > renders loading state 1`] = `
     class="fixed inset-0 z-50 flex items-center justify-center"
   >
     <div
-      class="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in"
+      class="absolute inset-0 bg-black/70 backdrop-blur-lg animate-fade-in"
     />
     <div
       aria-describedby="confirm-dialog-message"
@@ -609,7 +609,7 @@ exports[`Visual Regression — ConfirmDialog > renders loading state 1`] = `
           disabled=""
           type="button"
         >
-          Cancel
+          Cancel‌⁠‍
         </button>
         <button
           class="flex-1 inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all text-content-inverse bg-semantic-error hover:opacity-90 active:opacity-80 shadow-xs hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-semantic-error disabled:opacity-40 disabled:pointer-events-none"
@@ -633,7 +633,7 @@ exports[`Visual Regression — ConfirmDialog > renders loading state 1`] = `
               d="M21 12a9 9 0 1 1-6.219-8.56"
             />
           </svg>
-          Delete
+          Delete‌⁠‍
         </button>
       </div>
     </div>
@@ -649,7 +649,7 @@ exports[`Visual Regression — ConfirmDialog > renders warning variant (open) 1`
     class="fixed inset-0 z-50 flex items-center justify-center"
   >
     <div
-      class="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in"
+      class="absolute inset-0 bg-black/70 backdrop-blur-lg animate-fade-in"
     />
     <div
       aria-describedby="confirm-dialog-message"
@@ -725,51 +725,22 @@ exports[`Visual Regression — ConfirmDialog > renders warning variant (open) 1`
 exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`] = `
 <div>
   <div
-    class="space-y-5 animate-fade-in pt-4"
+    class="space-y-5 animate-fade-in"
   >
     <div
-      class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between animate-card-in"
+      class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between animate-card-in"
     >
-      <div>
-        <h1
-          class="text-3xl font-bold tracking-tight gradient-text"
-        >
-          dashboard.welcome
-        </h1>
-        <a
-          class="flex items-center gap-3 mt-2.5 animate-stagger-in group/ddc"
-          href="https://datadrivenconstruction.io/?utm_source=erp"
-          rel="noopener noreferrer"
-          style="animation-delay: 100ms;"
-          target="_blank"
-        >
-          <img
-            alt="DataDrivenConstruction"
-            class="h-[34px] w-auto opacity-75 group-hover/ddc:opacity-100 transition-opacity shrink-0"
-            src="/brand/ddc-logo.webp"
-          />
-          <div
-            class="flex flex-col leading-tight"
-          >
-            <span
-              class="text-xs font-semibold text-content-secondary"
-            >
-              dashboard.subtitle
-            </span>
-            <span
-              class="text-[11px] text-content-tertiary"
-            >
-              Smart resource planning for your construction projects
-            </span>
-          </div>
-        </a>
-      </div>
+      <h1
+        class="text-2xl font-semibold tracking-tight gradient-text pl-2"
+      >
+        Good morning
+      </h1>
       <div
         class="flex items-center gap-2 flex-wrap animate-stagger-in"
-        style="animation-delay: 150ms;"
+        style="animation-delay: 100ms;"
       >
         <button
-          class="inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-all duration-normal ease-oe transform-gpu will-change-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue focus-visible:ring-offset-2 bg-oe-blue text-content-inverse hover:bg-oe-blue-hover active:bg-oe-blue-active shadow-xs hover:shadow-md border border-transparent hover:scale-[1.02] active:scale-[0.98] h-10 px-5 text-sm gap-2 rounded-xl btn-shimmer"
+          class="inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-all duration-normal ease-oe transform-gpu will-change-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue focus-visible:ring-offset-2 bg-oe-blue text-content-inverse hover:bg-oe-blue-hover active:bg-oe-blue-active shadow-xs hover:shadow-md border border-transparent hover:scale-[1.02] active:scale-[0.98] h-8 px-3.5 text-sm gap-1.5 rounded-lg"
         >
           <span
             class="shrink-0"
@@ -777,13 +748,13 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
             <svg
               class="lucide lucide-folder-plus"
               fill="none"
-              height="18"
+              height="16"
               stroke="currentColor"
               stroke-linecap="round"
               stroke-linejoin="round"
               stroke-width="2"
               viewBox="0 0 24 24"
-              width="18"
+              width="16"
               xmlns="http://www.w3.org/2000/svg"
             >
               <path
@@ -804,7 +775,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           </span>
         </button>
         <button
-          class="inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-all duration-normal ease-oe transform-gpu will-change-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue focus-visible:ring-offset-2 bg-surface-primary text-content-primary border border-border hover:bg-surface-secondary active:bg-surface-tertiary shadow-xs hover:shadow-sm active:scale-[0.98] h-10 px-5 text-sm gap-2 rounded-xl"
+          class="inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-all duration-normal ease-oe transform-gpu will-change-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue focus-visible:ring-offset-2 bg-surface-primary text-content-primary border border-border hover:bg-surface-secondary active:bg-surface-tertiary shadow-xs hover:shadow-sm active:scale-[0.98] h-8 px-3.5 text-sm gap-1.5 rounded-lg"
           title="Start a new Bill of Quantities for an existing project"
         >
           <span
@@ -813,13 +784,13 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
             <svg
               class="lucide lucide-file-spreadsheet"
               fill="none"
-              height="16"
+              height="15"
               stroke="currentColor"
               stroke-linecap="round"
               stroke-linejoin="round"
               stroke-width="2"
               viewBox="0 0 24 24"
-              width="16"
+              width="15"
               xmlns="http://www.w3.org/2000/svg"
             >
               <path
@@ -849,7 +820,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           </span>
         </button>
         <button
-          class="inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-all duration-normal ease-oe transform-gpu will-change-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue focus-visible:ring-offset-2 bg-transparent text-content-secondary hover:bg-surface-secondary active:bg-surface-tertiary border border-transparent active:scale-[0.98] h-10 px-5 text-sm gap-2 rounded-xl"
+          class="inline-flex items-center justify-center font-medium whitespace-nowrap select-none transition-all duration-normal ease-oe transform-gpu will-change-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue focus-visible:ring-offset-2 bg-transparent text-content-secondary hover:bg-surface-secondary active:bg-surface-tertiary border border-transparent active:scale-[0.98] h-8 px-3.5 text-sm gap-1.5 rounded-lg"
           title="Jump into an estimate — resumes the latest or starts a new one"
         >
           <span
@@ -893,40 +864,59 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
       </div>
     </div>
     <div
-      class="flex flex-col sm:flex-row sm:items-center gap-3"
+      class="flex items-center flex-wrap gap-x-4 gap-y-2 pl-2 animate-stagger-in"
+      style="animation-delay: 140ms;"
     >
       <a
-        class="inline-flex items-center gap-2.5 rounded-xl bg-gradient-to-r from-oe-blue/8 via-violet-500/8 to-emerald-500/8 border border-oe-blue/15 py-1.5 px-3 hover:shadow-md hover:border-oe-blue/30 transition-all animate-stagger-in shrink-0"
+        class="group/ddc inline-flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+        href="https://datadrivenconstruction.io/?utm_source=erp"
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        <img
+          alt="DataDrivenConstruction"
+          class="h-3.5 w-auto opacity-60 group-hover/ddc:opacity-100 transition-opacity"
+          src="/brand/ddc-logo.webp"
+        />
+        <span
+          class="hidden sm:inline"
+        >
+          by DataDrivenConstruction
+        </span>
+      </a>
+      <span
+        aria-hidden="true"
+        class="h-3 w-px bg-border-light"
+      />
+      <a
+        class="group/oss inline-flex items-center gap-2 text-xs font-medium text-content-secondary hover:text-content-primary transition-colors"
         href="https://github.com/datadrivenconstruction/OpenConstructionERP"
         rel="noopener noreferrer"
-        style="animation-delay: 200ms;"
         target="_blank"
       >
         <span
-          class="relative flex h-2.5 w-2.5 shrink-0"
+          class="relative flex h-2 w-2 shrink-0"
         >
           <span
             class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"
           />
           <span
-            class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"
+            class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"
           />
         </span>
-        <span
-          class="text-sm font-bold bg-gradient-to-r from-oe-blue via-violet-600 to-emerald-600 bg-clip-text text-transparent"
-        >
-          The #1 open-source construction ERP
+        <span>
+          Open-source construction ERP
         </span>
         <svg
-          class="lucide lucide-external-link text-oe-blue opacity-50 shrink-0"
+          class="lucide lucide-external-link text-content-quaternary group-hover/oss:text-oe-blue transition-colors"
           fill="none"
-          height="12"
+          height="11"
           stroke="currentColor"
           stroke-linecap="round"
           stroke-linejoin="round"
           stroke-width="2"
           viewBox="0 0 24 24"
-          width="12"
+          width="11"
           xmlns="http://www.w3.org/2000/svg"
         >
           <path
@@ -940,12 +930,18 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           />
         </svg>
       </a>
+      <span
+        aria-hidden="true"
+        class="h-3 w-px bg-border-light"
+      />
       <div
         class="flex flex-wrap items-center gap-2 animate-card-in"
         style="animation-delay: 40ms;"
       >
-        <div
-          class="inline-flex items-center gap-1.5 rounded-lg bg-oe-blue-subtle px-2.5 py-1.5 transition-colors"
+        <button
+          aria-label="0 Projects"
+          class="inline-flex items-center gap-1.5 rounded-lg bg-oe-blue-subtle px-2.5 py-1.5 transition-colors hover:brightness-95 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/40 cursor-pointer"
+          type="button"
         >
           <span
             class="text-oe-blue"
@@ -983,9 +979,11 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           >
             Projects
           </span>
-        </div>
-        <div
-          class="inline-flex items-center gap-1.5 rounded-lg bg-[#7c3aed]/10 px-2.5 py-1.5 transition-colors"
+        </button>
+        <button
+          aria-label="0 BOQs"
+          class="inline-flex items-center gap-1.5 rounded-lg bg-[#7c3aed]/10 px-2.5 py-1.5 transition-colors hover:brightness-95 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/40 cursor-pointer"
+          type="button"
         >
           <span
             class="text-[#7c3aed]"
@@ -1032,9 +1030,11 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           >
             BOQs
           </span>
-        </div>
-        <div
-          class="inline-flex items-center gap-1.5 rounded-lg bg-[#0891b2]/10 px-2.5 py-1.5 transition-colors"
+        </button>
+        <button
+          aria-label="0 Modules"
+          class="inline-flex items-center gap-1.5 rounded-lg bg-[#0891b2]/10 px-2.5 py-1.5 transition-colors hover:brightness-95 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/40 cursor-pointer"
+          type="button"
         >
           <span
             class="text-[#0891b2]"
@@ -1101,9 +1101,11 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           >
             Modules
           </span>
-        </div>
-        <div
-          class="inline-flex items-center gap-1.5 rounded-lg bg-[#16a34a]/10 px-2.5 py-1.5 transition-colors"
+        </button>
+        <button
+          aria-label="0 Users"
+          class="inline-flex items-center gap-1.5 rounded-lg bg-[#16a34a]/10 px-2.5 py-1.5 transition-colors hover:brightness-95 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/40 cursor-pointer"
+          type="button"
         >
           <span
             class="text-[#16a34a]"
@@ -1146,50 +1148,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           >
             Users
           </span>
-        </div>
-      </div>
-    </div>
-    <div>
-      <button
-        aria-expanded="false"
-        class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all text-content-tertiary hover:text-content-secondary hover:bg-surface-secondary/60"
-      >
-        <svg
-          class="lucide lucide-info shrink-0"
-          fill="none"
-          height="14"
-          stroke="currentColor"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          viewBox="0 0 24 24"
-          width="14"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <circle
-            cx="12"
-            cy="12"
-            r="10"
-          />
-          <path
-            d="M12 16v-4"
-          />
-          <path
-            d="M12 8h.01"
-          />
-        </svg>
-        <span>
-          How it works
-        </span>
-      </button>
-      <div
-        class="overflow-hidden transition-all duration-200 ease-out max-h-0 opacity-0"
-      >
-        <div
-          class="rounded-lg border border-border-light bg-surface-secondary/40 px-4 py-2.5 text-xs text-content-secondary leading-relaxed"
-        >
-          Summary across all projects. Values update as you add estimates and schedule activities.
-        </div>
+        </button>
       </div>
     </div>
     <div
@@ -1252,7 +1211,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
         style="animation-delay: 130ms;"
       >
         <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#7c3aed]/10 text-[#7c3aed] transition-transform duration-normal ease-oe group-hover:scale-105"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400 transition-transform duration-normal ease-oe group-hover:scale-105"
         >
           <svg
             class="lucide lucide-file-text"
@@ -1309,7 +1268,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
         style="animation-delay: 180ms;"
       >
         <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#0891b2]/10 text-[#0891b2] transition-transform duration-normal ease-oe group-hover:scale-105"
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 transition-transform duration-normal ease-oe group-hover:scale-105"
         >
           <svg
             class="lucide lucide-calendar"
@@ -1446,7 +1405,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           <div
             class="text-xs text-content-tertiary mt-0.5 truncate"
           >
-            Quality Score
+            Priced positions
           </div>
         </div>
       </button>
@@ -1580,7 +1539,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
               class="flex flex-col items-center justify-center py-16 px-6 text-center"
             >
               <div
-                class="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-secondary text-content-tertiary"
+                class="mb-4 flex h-14 w-14 items-center justify-center rounded-md bg-surface-secondary text-content-tertiary shadow-[inset_0_2px_4px_rgba(0,0,0,0.06),inset_0_-1px_0_rgba(255,255,255,0.6)]"
               >
                 <svg
                   class="lucide lucide-folder-plus"
@@ -1843,7 +1802,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           <h2
             class="text-lg font-semibold text-content-primary"
           >
-            Getting Started
+            Getting Started‌⁠‍
           </h2>
           <span
             class="inline-flex items-center rounded-full font-medium whitespace-nowrap animate-scale-in transition-colors duration-fast ease-oe bg-oe-blue-subtle text-oe-blue h-5 px-1.5 text-2xs gap-1"
@@ -2599,7 +2558,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
           style="animation-delay: 100ms;"
         >
           <div
-            class="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 transition-transform group-hover:scale-110"
+            class="text-amber-600 transition-transform group-hover:scale-110"
           >
             <svg
               class="lucide lucide-users"
@@ -2666,6 +2625,146 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
             </svg>
           </span>
         </button>
+        <button
+          class="group flex flex-col items-start gap-2 rounded-xl border border-border-light bg-surface-primary p-4 text-left transition-all duration-normal ease-oe hover:border-oe-blue/30 hover:bg-oe-blue-subtle/20 hover:shadow-sm animate-stagger-in"
+          style="animation-delay: 160ms;"
+        >
+          <div
+            class="text-amber-600 transition-transform group-hover:scale-110"
+          >
+            <svg
+              class="lucide lucide-sparkles"
+              fill="none"
+              height="18"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.75"
+              viewBox="0 0 24 24"
+              width="18"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+              />
+              <path
+                d="M20 3v4"
+              />
+              <path
+                d="M22 5h-4"
+              />
+              <path
+                d="M4 17v2"
+              />
+              <path
+                d="M5 18H3"
+              />
+            </svg>
+          </div>
+          <div>
+            <h4
+              class="text-sm font-semibold text-content-primary leading-snug"
+            >
+              Try the AI Quick Estimate
+            </h4>
+            <p
+              class="mt-1 text-xs leading-relaxed text-content-tertiary line-clamp-2"
+            >
+              Describe a project in plain language and get a draft BOQ in seconds — review, adjust, and ship.
+            </p>
+          </div>
+          <span
+            class="mt-auto flex items-center gap-1 text-xs font-medium text-oe-blue"
+          >
+            Open AI Estimate
+            <svg
+              class="lucide lucide-arrow-right"
+              fill="none"
+              height="12"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="12"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M5 12h14"
+              />
+              <path
+                d="m12 5 7 7-7 7"
+              />
+            </svg>
+          </span>
+        </button>
+        <button
+          class="group flex flex-col items-start gap-2 rounded-xl border border-border-light bg-surface-primary p-4 text-left transition-all duration-normal ease-oe hover:border-oe-blue/30 hover:bg-oe-blue-subtle/20 hover:shadow-sm animate-stagger-in"
+          style="animation-delay: 220ms;"
+        >
+          <div
+            class="text-amber-600 transition-transform group-hover:scale-110"
+          >
+            <svg
+              class="lucide lucide-layers"
+              fill="none"
+              height="18"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.75"
+              viewBox="0 0 24 24"
+              width="18"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"
+              />
+              <path
+                d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"
+              />
+              <path
+                d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"
+              />
+            </svg>
+          </div>
+          <div>
+            <h4
+              class="text-sm font-semibold text-content-primary leading-snug"
+            >
+              Upload a CAD or BIM model
+            </h4>
+            <p
+              class="mt-1 text-xs leading-relaxed text-content-tertiary line-clamp-2"
+            >
+              Drop a RVT, IFC, DWG or DGN file — the converter extracts quantities and matches elements to cost positions.
+            </p>
+          </div>
+          <span
+            class="mt-auto flex items-center gap-1 text-xs font-medium text-oe-blue"
+          >
+            Open BIM
+            <svg
+              class="lucide lucide-arrow-right"
+              fill="none"
+              height="12"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="12"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M5 12h14"
+              />
+              <path
+                d="m12 5 7 7-7 7"
+              />
+            </svg>
+          </span>
+        </button>
       </div>
     </div>
     <div
@@ -2673,7 +2772,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
     >
       <div
         class=" animate-card-in"
-        style="animation-delay: 450ms;"
+        style="animation-delay: 220ms;"
       >
         <div
           class="rounded-xl border border-border-light bg-surface-elevated shadow-xs transition-all duration-normal ease-oe transform-gpu p-6 h-full"
@@ -2872,7 +2971,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
               />
               <div
                 class="flex items-center justify-between animate-stagger-in"
-                style="animation-delay: 640ms;"
+                style="animation-delay: 180ms;"
               >
                 <span
                   class="text-sm text-content-secondary"
@@ -2887,7 +2986,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
               </div>
               <div
                 class="flex items-center justify-between animate-stagger-in"
-                style="animation-delay: 700ms;"
+                style="animation-delay: 200ms;"
               >
                 <span
                   class="text-sm text-content-secondary"
@@ -2902,7 +3001,7 @@ exports[`Visual Regression — DashboardPage > renders loading/skeleton state 1`
               </div>
               <div
                 class="flex items-center justify-between animate-stagger-in"
-                style="animation-delay: 760ms;"
+                style="animation-delay: 220ms;"
               >
                 <span
                   class="text-sm text-content-secondary"
@@ -2972,7 +3071,7 @@ exports[`Visual Regression — EmptyState > renders with icon, description, and 
     class="flex flex-col items-center justify-center py-16 px-6 text-center"
   >
     <div
-      class="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-secondary text-content-tertiary"
+      class="mb-4 flex h-14 w-14 items-center justify-center rounded-md bg-surface-secondary text-content-tertiary shadow-[inset_0_2px_4px_rgba(0,0,0,0.06),inset_0_-1px_0_rgba(255,255,255,0.6)]"
     >
       <span
         data-testid="mock-icon"
@@ -3087,7 +3186,7 @@ exports[`Visual Regression — InfoHint > block mode — collapsed 1`] = `
         />
       </svg>
       <span>
-        How it works
+        How it works‌⁠‍
       </span>
     </button>
     <div
@@ -3863,12 +3962,12 @@ exports[`Visual Regression — NotFoundPage > renders the 404 page with navigati
       <h1
         class="mb-2 text-xl font-semibold text-content-primary"
       >
-        Page not found
+        Page not found‌⁠‍
       </h1>
       <p
         class="mb-8 text-sm text-content-secondary"
       >
-        The page you are looking for does not exist or has been moved. Check the URL or go back to the dashboard.
+        The page you are looking for does not exist or has been moved. Check the URL or go back to the dashboard.‌⁠‍
       </p>
       <div
         class="flex items-center justify-center gap-3"
@@ -3895,7 +3994,7 @@ exports[`Visual Regression — NotFoundPage > renders the 404 page with navigati
               d="M19 12H5"
             />
           </svg>
-          Go back
+          Go back‌⁠‍
         </button>
         <a
           class="inline-flex items-center gap-2 rounded-lg bg-oe-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-oe-blue-dark"
@@ -3920,7 +4019,7 @@ exports[`Visual Regression — NotFoundPage > renders the 404 page with navigati
               d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
             />
           </svg>
-          Dashboard
+          Dashboard‌⁠‍
         </a>
       </div>
     </div>

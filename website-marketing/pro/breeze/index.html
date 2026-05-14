@@ -11375,7 +11375,7 @@
 
       <div class="eyebrow" id="fx-eyebrow">
         <span class="dot" aria-hidden="true"></span>
-        <span><b>v2.0.0</b> &middot; <span data-i18n="hero.version_meta">shipped 2026-04-20</span></span>
+        <span><b id="latest-version">v3.0.4</b> &middot; <span data-i18n="hero.version_meta" id="latest-version-meta">latest stable</span></span>
       </div>
 
       <h1 class="headline" id="headline">
@@ -12643,11 +12643,11 @@
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
         </a>
       </div>
-      <ul class="release-ticker-list">
-        <li>
-          <span class="ver">v2.0.0</span>
-          <span class="note">Second stable release &mdash; AI chat reliability, CAD-BIM BI Explorer, module DX, provenance watermarks</span>
-          <span class="date">2026-04-20</span>
+      <ul class="release-ticker-list" id="release-ticker-list">
+        <li id="latest-release-li">
+          <span class="ver" id="latest-release-tag">v3.0.4</span>
+          <span class="note" id="latest-release-note">Loading latest release notes&hellip;</span>
+          <span class="date" id="latest-release-date">2026-05-13</span>
         </li>
         <li>
           <span class="ver">v1.9.7</span>
@@ -18980,6 +18980,36 @@ manifest = <span class="tok-fn">ModuleManifest</span>(
         });
       }, { threshold: 0.12 });
       io.observe(atlas);
+    })();
+
+    // Auto-fetch latest release from GitHub so the hero badge and the
+    // top ticker entry stay in sync with what's actually published.
+    // Falls back silently to the SSR values when the API is unreachable.
+    (function () {
+      const REPO = 'datadrivenconstruction/OpenConstructionERP';
+      const URL  = `https://api.github.com/repos/${REPO}/releases`;
+      fetch(URL, { headers: { 'Accept': 'application/vnd.github+json' } })
+        .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+        .then((releases) => {
+          if (!Array.isArray(releases) || !releases.length) return;
+          const latest = releases.find((r) => !r.draft && !r.prerelease) || releases[0];
+          const tag = latest.tag_name || '';
+          const dateRaw = latest.published_at ? latest.published_at.slice(0, 10) : '';
+          const noteRaw = (latest.name || latest.body || '').split('\n')[0] || '';
+          // Hero
+          const heroTag = document.getElementById('latest-version');
+          if (heroTag && tag) heroTag.textContent = tag;
+          const heroMeta = document.getElementById('latest-version-meta');
+          if (heroMeta && dateRaw) heroMeta.textContent = 'shipped ' + dateRaw;
+          // Ticker (latest only — older entries stay as static history)
+          const tickTag = document.getElementById('latest-release-tag');
+          if (tickTag && tag) tickTag.textContent = tag;
+          const tickDate = document.getElementById('latest-release-date');
+          if (tickDate && dateRaw) tickDate.textContent = dateRaw;
+          const tickNote = document.getElementById('latest-release-note');
+          if (tickNote && noteRaw) tickNote.textContent = noteRaw.replace(/^[#\s\-]+/, '').slice(0, 120);
+        })
+        .catch(() => { /* keep SSR fallback */ });
     })();
   </script>
 

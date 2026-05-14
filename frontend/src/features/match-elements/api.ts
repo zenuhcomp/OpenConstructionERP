@@ -46,15 +46,31 @@ function formatErrorDetail(body: unknown): string {
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const token = useAuthStore.getState().accessToken;
-  const res = await fetch(`${PREFIX}${path}`, {
-    ...init,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(init?.headers || {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${PREFIX}${path}`, {
+      ...init,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...(init?.headers || {}),
+      },
+    });
+  } catch (err) {
+    // ``fetch`` rejects with AbortError when the caller-supplied signal
+    // fires (timeout or user cancel) and with a generic TypeError on
+    // network failures. Surface a stable, user-readable message either
+    // way so the caller's toast / progress card doesn't render
+    // ``[object Object]`` or a silent "still running" spinner.
+    const name = err instanceof Error ? err.name : '';
+    if (name === 'AbortError' || name === 'TimeoutError') {
+      throw new Error(
+        'Request cancelled or timed out — the backend did not respond in time.',
+      );
+    }
+    throw err;
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -593,10 +609,20 @@ export const matchElementsApi = {
       max_groups?: number;
       top_k?: number;
     },
+    opts?: { signal?: AbortSignal },
   ) =>
+    // Long-running endpoint: BGE-M3 encode + Qdrant + per-group ranking
+    // can take 30–300s on real projects. The caller's AbortSignal
+    // (from MatchProgressCard's Cancel button or a 5-minute safety
+    // timeout) lets the request be cancelled so the UI never wedges
+    // forever — the symptom that previously read as "stuck on
+    // Currency normalization" because the wall-clock progress
+    // heuristic had run out of stages but the synchronous POST hadn't
+    // returned.
     call<GroupSummary[]>(`/sessions/${sessionId}/match`, {
       method: 'POST',
       body: JSON.stringify(spec),
+      signal: opts?.signal,
     }),
 
   confirm: (

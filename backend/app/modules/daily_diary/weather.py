@@ -236,7 +236,7 @@ async def fetch_weather_for_day(
             asyncio.to_thread(_do_get, url),
             timeout=_HTTP_TIMEOUT_SECONDS,
         )
-    except (TimeoutError, asyncio.TimeoutError):
+    except TimeoutError:
         logger.info("Open-Meteo request timed out for %s", url)
         return None
 

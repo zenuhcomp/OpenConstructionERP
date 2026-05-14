@@ -130,8 +130,8 @@ const navGroups: NavGroup[] = [
     defaultOpen: true,
     items: [
       { labelKey: 'boq.title', to: '/boq', icon: Table2, tourId: 'boq' },
-      { labelKey: 'nav.match_elements', to: '/match-elements', icon: Link2, badge: 'NEW' },
       { labelKey: 'costs.title', to: '/costs', icon: Database, tourId: 'costs' },
+      { labelKey: 'nav.match_elements', to: '/match-elements', icon: Link2, badge: 'NEW' },
       { labelKey: 'nav.assemblies', to: '/assemblies', icon: Layers },
       { labelKey: 'catalog.title', to: '/catalog', icon: Boxes },
       { labelKey: 'nav.quantity_rules', to: '/bim/rules', icon: ClipboardCheck, badge: 'BETA' },
@@ -258,6 +258,7 @@ const navGroups: NavGroup[] = [
       { labelKey: 'nav.markups', to: '/markups', icon: PenTool },
       { labelKey: 'nav.field_reports', to: '/field-reports', icon: ClipboardList, advancedOnly: true },
       { labelKey: 'nav.reports', to: '/reports', icon: FileBarChart, advancedOnly: true },
+      { labelKey: 'nav.bi_dashboards', to: '/bi-dashboards', icon: BarChart3, advancedOnly: true },
     ],
   },
   // ── QUALITY & SAFETY ───────────────────────────────────────────────
@@ -279,20 +280,9 @@ const navGroups: NavGroup[] = [
       // sustainability + cost-benchmark injected dynamically from module registry
     ],
   },
-  // ── ANALYTICS (18-Modules Wave) ────────────────────────────────────
-  // BI-style dashboards built on the warehouse projections — separate
-  // from the operational /dashboards snapshot view because these run
-  // against the OLAP path (pg_duckdb / projections), not the OLTP path.
-  {
-    id: 'bi',
-    labelKey: 'nav.group_bi',
-    descriptionKey: 'nav.group_bi_desc',
-    defaultOpen: false,
-    hideInSimple: true,
-    items: [
-      { labelKey: 'nav.bi_dashboards', to: '/bi-dashboards', icon: BarChart3, advancedOnly: true },
-    ],
-  },
+  // BI Dashboards moved into the Documentation group (above) — the
+  // remaining "Analytics" group had only one entry and now feels
+  // redundant alongside Reports / Field Reports in Documentation.
   {
     id: 'regional',
     labelKey: 'modules.cat_regional',
@@ -957,10 +947,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       </nav>
 
       {/* Bottom navigation — soft hairline separator instead of a hard
-          1px border; subtle paper-tint background. */}
+          1px border; subtle paper-tint background. Compact mode: smaller
+          rows, tighter spacing, no pin buttons (pinning Users / Modules /
+          Settings / About has no real value — they're already always
+          available here). */}
       <div
         className={clsx(
-          'relative py-2 bg-black/[0.02] dark:bg-white/[0.02]',
+          'relative py-1 bg-black/[0.02] dark:bg-white/[0.02]',
           iconified ? 'px-2' : 'px-3',
         )}
       >
@@ -970,17 +963,16 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             iconified ? 'left-2 right-2' : 'left-3 right-3',
           )}
         />
-        <ul className="space-y-0.5">
+        <ul className="space-y-px">
           {bottomNav.map((item) => (
             <li key={item.to}>
               <SidebarItem
                 item={item}
                 label={t(item.labelKey)}
                 onClick={onClose}
-                isPinned={pinned.includes(item.to)}
-                onTogglePin={togglePin}
                 activeRoute={activeRoute}
                 iconified={iconified}
+                compact
               />
             </li>
           ))}
@@ -1144,6 +1136,7 @@ function SidebarItem({
   onTogglePin,
   activeRoute,
   iconified,
+  compact,
 }: {
   item: NavItem;
   label: string;
@@ -1153,6 +1146,7 @@ function SidebarItem({
   onTogglePin?: (route: string) => void;
   activeRoute?: string | null;
   iconified?: boolean;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const Icon = item.icon;
@@ -1222,9 +1216,11 @@ function SidebarItem({
             // accent bar is the entire visual change for "active",
             // alongside the subtle background tint and bolded label.
             // This is the Linear/Vercel pattern — solid, calm, fast.
-            'relative flex items-center gap-2 rounded-md pl-[10px] pr-2.5 py-1',
-            'text-[13px] transition-colors duration-fast ease-oe',
-            'border-l-2 border-transparent',
+            'relative flex items-center rounded-md border-l-2 border-transparent',
+            'transition-colors duration-fast ease-oe',
+            compact
+              ? 'gap-1.5 pl-2 pr-1.5 py-[3px] text-[12px]'
+              : 'gap-2 pl-[10px] pr-2.5 py-1 text-[13px]',
             item.highlight && !active
               ? 'font-medium bg-gradient-to-r from-[#7c3aed]/10 to-[#0ea5e9]/10 text-[#6d28d9] hover:from-[#7c3aed]/15 hover:to-[#0ea5e9]/15'
               : active
@@ -1233,7 +1229,7 @@ function SidebarItem({
           );
         }}
       >
-        <Icon size={16} strokeWidth={isActive ? 2 : 1.75} className="shrink-0" />
+        <Icon size={compact ? 14 : 16} strokeWidth={isActive ? 2 : 1.75} className="shrink-0" />
         {/* Hover-tooltip via title falls back to the full label even when
             CSS truncates with an ellipsis. The visible width is now
             264px (was 232) so most labels render in full at default
@@ -1250,21 +1246,23 @@ function SidebarItem({
             empty rows previously paid the same 26px tax for nothing,
             squeezing the label width and triggering avoidable
             ellipsis truncation. */}
-        <span className="ms-auto flex items-center gap-1.5 shrink-0 ps-1.5">
-          <span
-            className={clsx(
-              'hidden lg:inline-flex justify-end items-center gap-0.5 text-[9px] font-medium tracking-wide tabular-nums',
-              kbdHint ? 'min-w-[26px]' : 'min-w-0',
-              isActive ? 'text-oe-blue/60' : 'text-content-quaternary',
-            )}
-          >
-            {kbdHint ?? (
-              <ChevronRight
-                size={12}
-                className="oe-hover-arrow text-content-tertiary"
-              />
-            )}
-          </span>
+        <span className={clsx('ms-auto flex items-center shrink-0', compact ? 'gap-1 ps-1' : 'gap-1.5 ps-1.5')}>
+          {!compact && (
+            <span
+              className={clsx(
+                'hidden lg:inline-flex justify-end items-center gap-0.5 text-[9px] font-medium tracking-wide tabular-nums',
+                kbdHint ? 'min-w-[26px]' : 'min-w-0',
+                isActive ? 'text-oe-blue/60' : 'text-content-quaternary',
+              )}
+            >
+              {kbdHint ?? (
+                <ChevronRight
+                  size={12}
+                  className="oe-hover-arrow text-content-tertiary"
+                />
+              )}
+            </span>
+          )}
           {numericBadge != null && numericBadge > 0 && (
             <span
               className={clsx(
