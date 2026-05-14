@@ -109,6 +109,7 @@ def mount_frontend(app: FastAPI) -> None:
     _root_static_extensions = {
         ".ico", ".png", ".svg", ".webmanifest", ".json", ".txt", ".xml",
         ".webp", ".avif", ".jpg", ".jpeg", ".gif", ".woff", ".woff2",
+        ".csv", ".tsv", ".xlsx", ".xls",
     }
 
     # ── Conventional API path aliases ────────────────────────────────────
