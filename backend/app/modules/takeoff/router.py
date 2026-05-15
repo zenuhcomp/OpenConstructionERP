@@ -581,6 +581,41 @@ def _download_one_file(download_url: str, target: Path) -> int:
     return bytes_written
 
 
+def _verify_pe_executable(path: Path) -> str | None:
+    """Return a human-readable reason if ``path`` is not a well-formed
+    Windows PE executable, or ``None`` if it looks structurally valid.
+
+    The converter exes are always Windows PE binaries regardless of the
+    host OS. A text-mode-corrupted download (every ``0x0A`` rewritten as
+    ``0x0D 0x0A`` — the WinError 216 root cause) keeps the leading ``MZ``
+    but shifts ``e_lfanew``, so the ``PE\\0\\0`` signature is no longer
+    where the DOS header points. Validating that chain catches exactly
+    that corruption at install time instead of at launch time.
+    """
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(0x40)
+            if len(head) < 0x40 or head[:2] != b"MZ":
+                return "missing 'MZ' DOS signature (not a PE executable)"
+            # e_lfanew: little-endian uint32 at offset 0x3C → file offset
+            # of the PE header.
+            pe_off = int.from_bytes(head[0x3C:0x40], "little")
+            if pe_off <= 0 or pe_off > path.stat().st_size - 4:
+                return (
+                    f"e_lfanew points outside the file ({pe_off}); "
+                    "binary is truncated or text-mode-corrupted"
+                )
+            fh.seek(pe_off)
+            if fh.read(4) != b"PE\x00\x00":
+                return (
+                    "PE signature not found where the DOS header points "
+                    "(CRLF-mangled or otherwise corrupt download)"
+                )
+    except OSError as exc:
+        return f"could not read the binary: {exc}"
+    return None
+
+
 def _download_converter_files_windows(converter_id: str) -> Path:
     """Download every file of a Windows converter into the install dir.
 
@@ -733,6 +768,24 @@ def _download_converter_files_windows(converter_id: str) -> Path:
         bytes_done=total_bytes,
         file=None,
     )
+
+    # Structural integrity gate. A file that merely *exists* is not
+    # enough: a text-mode-corrupted download (the WinError 216 bug)
+    # leaves a same-name file whose PE header is shifted. Catch it here
+    # and roll back so a corrupt copy can't linger on disk and shadow a
+    # pristine toolkit binary that find_converter() would otherwise use.
+    pe_problem = _verify_pe_executable(exe_path)
+    if pe_problem is not None:
+        import shutil as _shutil
+        _shutil.rmtree(dest_root, ignore_errors=True)
+        _clear_install_progress(converter_id)
+        raise RuntimeError(
+            f"{converter_id} install verification failed: {exe_name} "
+            f"{pe_problem}. The partial install was removed — please "
+            f"retry the download (the binary-mode write fix ensures a "
+            f"clean retry)."
+        )
+
     logger.info(
         "Installed %s converter: %d files, %.1f MB -> %s",
         converter_id, file_count, total_bytes / 1024 / 1024, exe_path,

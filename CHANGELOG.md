@@ -5,6 +5,16 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.9] — 2026-05-15 · Project setup wizard UI + converter binary-integrity gate
+
+### Added
+
+- **Project setup wizard UI (Slice 2).** `New Project` is now a 5-step wizard — Basics → Region & currency → Project type (9 preset cards) → Scope (activities / phases / focus mode) → Site & review — that creates the project and applies the Slice-1 profile in one flow. Preset grid has a loading skeleton + error fallback.
+
+### Fixed
+
+- **Converter install now verifies the binary, not just its presence.** The `verifying` stage runs a PE-header integrity check (`MZ` + `e_lfanew` → `PE\0\0`); a corrupt/CRLF-mangled download is rejected immediately with an actionable message and the partial install is rolled back, instead of failing later at launch with `WinError 216`.
+
 ## [3.0.8] — 2026-05-15 · Converter download fix + project setup wizard (backend) + visible match pipeline
 
 ### Fixed
