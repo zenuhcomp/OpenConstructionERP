@@ -5,6 +5,14 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] — 2026-05-17 · 7-project localized showcase on fresh install
+
+### Added
+
+- Fresh install seeds the 7-project localized showcase (EN/DE/ZH/AR/HI/RU/pt-BR) from a committed snapshot — real CWICR-resource estimates, linked BIM, WBS, cost-model/EVM and every operational module filled, each in its own language and currency.
+- Idempotent boot loader with demo-owner re-mapping; never breaks boot.
+- `SEED_SHOWCASE=false` opts out; the classic 5 demo projects remain the fallback when the snapshot or SQLite is unavailable.
+
 ## [3.3.0] — 2026-05-16 · Reusable BOQ codes (linked positions) + deep correctness pass
 
 ### Added
