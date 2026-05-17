@@ -14,6 +14,14 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.4.1',
+    date: '2026-05-17',
+    changes: [
+      'Fix: photo & file-grid thumbnails / full images no longer fail to load — auth-protected media is now fetched with the access token (galleries, file manager, project photos)',
+      'Add: each showcase project now ships a second Autodesk Revit (.rvt) structural model alongside the IFC architectural model — visible in both the BIM viewer and Match Elements',
+    ],
+  },
+  {
     version: '3.3.0',
     date: '2026-05-16',
     changes: [

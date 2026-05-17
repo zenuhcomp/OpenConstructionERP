@@ -28,7 +28,7 @@ import {
   Image as ImageIcon,
   CheckSquare,
 } from 'lucide-react';
-import { Card, Button, Badge, EmptyState, Breadcrumb } from '@/shared/ui';
+import { Card, Button, Badge, EmptyState, Breadcrumb, AuthImage } from '@/shared/ui';
 import { apiGet } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -238,10 +238,21 @@ function Lightbox({
         className="relative max-w-[90vw] max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <img
+        <AuthImage
           src={getPhotoFileUrl(photo.id)}
           alt={photo.caption || photo.filename}
           className="max-w-full max-h-[70vh] object-contain rounded-lg"
+          placeholder={
+            <div className="flex h-64 w-64 items-center justify-center">
+              <Loader2 size={28} className="animate-spin text-white/70" />
+            </div>
+          }
+          fallback={
+            <div className="flex h-64 w-64 flex-col items-center justify-center gap-2 text-white/70">
+              <ImageIcon size={40} />
+              <span className="text-xs">{photo.filename}</span>
+            </div>
+          }
         />
 
         {/* Info panel */}
@@ -382,10 +393,20 @@ function EditPhotoModal({
         <div className="p-5 space-y-4">
           {/* Thumbnail */}
           <div className="flex justify-center">
-            <img
+            <AuthImage
               src={getPhotoThumbUrl(photo.id)}
               alt={photo.filename}
               className="h-32 w-auto rounded-lg object-cover"
+              placeholder={
+                <div className="flex h-32 w-32 items-center justify-center rounded-lg bg-surface-secondary">
+                  <Loader2 size={20} className="animate-spin text-content-quaternary" />
+                </div>
+              }
+              fallback={
+                <div className="flex h-32 w-32 items-center justify-center rounded-lg bg-surface-secondary">
+                  <ImageIcon size={28} className="text-content-quaternary" />
+                </div>
+              }
             />
           </div>
 
@@ -498,23 +519,21 @@ function PhotoCard({
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectMode ? onToggleSelect?.() : onClick(); } }}
       aria-label={photo.caption || photo.filename}
     >
-      <img
+      <AuthImage
         src={getPhotoThumbUrl(photo.id)}
         alt={photo.caption || photo.filename}
         className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
         loading="lazy"
-        onError={(e) => {
-          const target = e.currentTarget;
-          target.style.display = 'none';
-          const parent = target.parentElement;
-          if (parent && !parent.querySelector('.photo-fallback')) {
-            const fallback = document.createElement('div');
-            fallback.className = 'photo-fallback absolute inset-0 flex items-center justify-center bg-surface-secondary';
-            // codeql[js/xss-through-dom]: hardcoded SVG literal, no user input — safe.
-            fallback.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-content-quaternary"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
-            parent.appendChild(fallback);
-          }
-        }}
+        placeholder={
+          <div className="absolute inset-0 flex items-center justify-center bg-surface-secondary">
+            <Loader2 size={20} className="animate-spin text-content-quaternary" />
+          </div>
+        }
+        fallback={
+          <div className="absolute inset-0 flex items-center justify-center bg-surface-secondary">
+            <ImageIcon size={32} className="text-content-quaternary" />
+          </div>
+        }
       />
 
       {/* Selection checkbox */}

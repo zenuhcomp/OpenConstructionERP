@@ -5,6 +5,16 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.1] — 2026-05-17 · Authenticated media loading + dual IFC/RVT showcase
+
+### Fixed
+
+- Photo & file-grid thumbnails and full-size images failed to load (HTTP 401) — JWT-protected media endpoints can't authenticate a plain `<img src>`. New shared `AuthImage` fetches with the bearer token and renders an object URL; applied across the photo gallery, file manager grid and project photos tab. Affects every real uploaded photo, not only the showcase.
+
+### Changed
+
+- Showcase snapshot regenerated: each of the 7 projects now ships a second Autodesk Revit (.rvt) structural model alongside the IFC architectural model — both visible in the BIM viewer and the Match Elements (data-analytics) module.
+
 ## [3.4.0] — 2026-05-17 · Professional showcase BOQ + colored real-IFC BIM + viewer fix
 
 ### Added
