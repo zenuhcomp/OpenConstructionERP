@@ -33,8 +33,10 @@ import {
   LogOut,
   ChevronRight,
   Wrench,
+  LayoutGrid,
 } from 'lucide-react';
 import { Card, CardHeader, CardContent, CardFooter, Button, Badge, InfoHint, Skeleton, Breadcrumb } from '@/shared/ui';
+import { DashboardLayoutManager } from '@/features/dashboard/DashboardLayoutManager';
 import { UpdateNotification } from '@/shared/ui/UpdateChecker';
 import { apiGet, apiPatch, apiPost } from '@/shared/lib/api';
 import { SUPPORTED_LANGUAGES } from '@/app/i18n';
@@ -953,7 +955,7 @@ function ProfileCard({ profile, loading, editing, setEditing, formName, setFormN
 
 // ── Tab definitions ──────────────────────────────────────────────────────────
 
-type SettingsTab = 'general' | 'account' | 'regional' | 'bimcad' | 'ai' | 'integrations' | 'advanced';
+type SettingsTab = 'general' | 'dashboard' | 'account' | 'regional' | 'bimcad' | 'ai' | 'integrations' | 'advanced';
 
 interface TabDef {
   id: SettingsTab;
@@ -975,6 +977,7 @@ const DEFAULT_TAB: TabDef = {
 
 const TABS: readonly TabDef[] = [
   DEFAULT_TAB,
+  { id: 'dashboard',    labelKey: 'settings.tab_dashboard',    defaultLabel: 'Dashboard',    icon: LayoutGrid, descKey: 'settings.tab_dashboard_desc',  descDefault: 'Reorder, show or hide dashboard sections' },
   { id: 'account',      labelKey: 'settings.tab_account',      defaultLabel: 'Account',      icon: User,     descKey: 'settings.tab_account_desc',      descDefault: 'Password and sign out' },
   { id: 'regional',     labelKey: 'settings.tab_regional',     defaultLabel: 'Regional',     icon: Globe,    descKey: 'settings.tab_regional_desc',     descDefault: 'Language, timezone, and formats' },
   { id: 'bimcad',       labelKey: 'settings.tab_bimcad',       defaultLabel: 'BIM / CAD',    icon: Layers,   descKey: 'settings.tab_bimcad_desc',       descDefault: 'BIM, takeoff, and DWG modules' },
@@ -1211,6 +1214,22 @@ export function SettingsPage() {
               <AppearanceCard />
               <InterfaceModeCard />
             </>
+          )}
+
+          {/* ── DASHBOARD LAYOUT ─────────────────────────────────── */}
+          {activeTab === 'dashboard' && (
+            <Card className="lg:col-span-2">
+              <CardHeader
+                title={t('dashboard.layout.title', { defaultValue: 'Customize dashboard' })}
+                subtitle={t('settings.dashboard_layout_subtitle', {
+                  defaultValue:
+                    'Choose which sections appear on your dashboard and in what order. This is personal to you and saved to this browser.',
+                })}
+              />
+              <CardContent>
+                <DashboardLayoutManager />
+              </CardContent>
+            </Card>
           )}
 
           {/* ── ACCOUNT ──────────────────────────────────────────── */}

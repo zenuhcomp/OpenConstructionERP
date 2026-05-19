@@ -64,6 +64,44 @@ def default_model_for(provider: str) -> str:
     """Return the built-in default model id for a provider (or empty string)."""
     return DEFAULT_MODELS.get(provider, "")
 
+
+# Stable, provider-managed fallback model ids that are tried AUTOMATICALLY
+# when the configured/overridden model name is rejected (renamed, retired,
+# or — for aggregators like OpenRouter — simply not a currently valid slug).
+#
+# Issue #148: providers such as openrouter.ai continuously rename and retire
+# model slugs. The chat must keep working when that happens instead of
+# dead-ending the user with a "go fix Settings" error. OpenRouter exposes a
+# meta-model, ``openrouter/auto``, that always resolves to an available
+# model — using it as the fallback fully decouples the integration from any
+# specific OpenRouter naming convention (exactly the user's request).
+FALLBACK_MODELS: dict[str, str] = {
+    "openrouter": "openrouter/auto",
+}
+
+
+def fallback_models_for(provider: str, attempted: str) -> list[str]:
+    """Ordered, de-duplicated safe model ids to retry after a model-name
+    rejection.
+
+    Never includes ``attempted`` (the id that just failed). Combines the
+    provider-managed meta-model (e.g. ``openrouter/auto``) with the built-in
+    default — the latter helps when the failing id was a stale *user
+    override* and the shipped default is still valid.
+    """
+    candidates = [
+        FALLBACK_MODELS.get(provider, ""),
+        default_model_for(provider),
+    ]
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in candidates:
+        c = (raw or "").strip()
+        if c and c != (attempted or "").strip() and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
 # Timeout for AI API calls (2 minutes — large BOQ generation can be slow)
 AI_TIMEOUT = 120.0
 
@@ -495,34 +533,42 @@ async def call_ai(
         "gemini": call_gemini,
     }
 
-    # Determine the coroutine to call
+    # Build the provider coroutine for a given model id. Parameterising the
+    # model (rather than closing over the single configured one) lets the
+    # error path transparently retry with a fallback id — issue #148.
     if provider in _OPENAI_COMPAT_CONFIG:
 
-        async def _call() -> tuple[str, int]:
-            return await call_openai_compatible(
-                provider,
-                api_key,
-                system,
-                prompt,
-                image_base64,
-                image_media_type,
-                max_tokens=max_tokens,
-                model=model,
-            )
+        def _make_call(model_id: str | None):
+            async def _call() -> tuple[str, int]:
+                return await call_openai_compatible(
+                    provider,
+                    api_key,
+                    system,
+                    prompt,
+                    image_base64,
+                    image_media_type,
+                    max_tokens=max_tokens,
+                    model=model_id,
+                )
+
+            return _call
 
     elif provider in callers:
         caller = callers[provider]
 
-        async def _call() -> tuple[str, int]:
-            return await caller(
-                api_key,
-                system,
-                prompt,
-                image_base64,
-                image_media_type,
-                model=model,
-                max_tokens=max_tokens,
-            )
+        def _make_call(model_id: str | None):
+            async def _call() -> tuple[str, int]:
+                return await caller(
+                    api_key,
+                    system,
+                    prompt,
+                    image_base64,
+                    image_media_type,
+                    model=model_id,
+                    max_tokens=max_tokens,
+                )
+
+            return _call
 
     else:
         msg = f"Unknown AI provider: {provider}"
@@ -535,7 +581,7 @@ async def call_ai(
 
     # Unified error handling for all providers
     try:
-        return await _call()
+        return await _make_call(model)()
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code
         # Try to extract error detail from response body
@@ -570,11 +616,31 @@ async def call_ai(
         )
         is_model_error = status_code in (400, 404) and any(k in low for k in model_keywords)
         if is_model_error:
+            # ── Issue #148: self-heal instead of dead-ending the user ───────
+            # Providers (notably openrouter.ai) continuously rename/retire
+            # model slugs. Rather than failing the chat outright, transparently
+            # retry with provider-stable fallbacks — OpenRouter's auto-router
+            # (``openrouter/auto``) and the shipped default — so the
+            # integration is decoupled from any specific model naming.
+            for fb_model in fallback_models_for(provider, effective_model):
+                try:
+                    result = await _make_call(fb_model)()
+                except httpx.HTTPStatusError:
+                    continue
+                except (ValueError, KeyError, httpx.HTTPError):
+                    continue
+                logger.warning(
+                    "call_ai: model %r rejected by %s (HTTP %s); "
+                    "auto-recovered with fallback model %r",
+                    effective_model, provider, status_code, fb_model,
+                )
+                return result
             msg = (
                 f"The AI model \"{effective_model}\" was rejected by {provider} "
-                f"(HTTP {status_code}). Providers rename and retire models over "
-                f"time — open Settings > AI, set the model name to a currently "
-                f"valid {provider} model id, and save. Provider said: {detail[:200]}"
+                f"(HTTP {status_code}) and the automatic fallbacks did not "
+                f"succeed. Providers rename and retire models over time — open "
+                f"Settings > AI, set the model name to a currently valid "
+                f"{provider} model id, and save. Provider said: {detail[:200]}"
             )
             raise ValueError(msg) from exc
 

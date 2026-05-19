@@ -5,6 +5,20 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0] — 2026-05-19 · BOQ section-scoped add + AI model auto-recovery + toolbar polish
+
+### Fixed
+
+- BOQ (#149): a section's "Add position" now files the partida **inside that section** instead of after the last sub-section.
+- AI Chat (#148): auto-recovers from renamed/retired provider model slugs via `openrouter/auto` then provider default; final error stays actionable.
+- BOQ toolbar (#289): Quality & AI / warnings / Grand Total summary no longer cramped — wrapping pills + flex-wrap layout, professional at all widths.
+
+### Added
+
+- BOQ: per-section **always-visible** primary "Add Position" button (no longer hover-only).
+- Dashboard: **Customize mode** — reorder/show/hide widgets, persisted per user; Settings → Dashboard tab.
+- Markups: **PDF revision compare** (side-by-side / overlay diff of two document revisions).
+
 ## [3.8.0] — 2026-05-19 · Clash coordination depth + Match-Elements UX & lifecycle hardening
 
 ### Added

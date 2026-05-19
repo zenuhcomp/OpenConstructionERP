@@ -2496,6 +2496,44 @@ class BOQService:
                     data.boq_id, int(anchor.sort_order)
                 )
                 new_sort_order = int(anchor.sort_order) + 1
+        elif data.parent_id is not None:
+            # ── Issue #149: keep the partida INSIDE the clicked section ──────
+            # A position added via a specific section's "Add position" button
+            # (explicit ``parent_id``, no ``after_position_id``) must land
+            # inside *that* section — grouped with the section's own line
+            # items and ahead of any sub-sections. Without this it inherits
+            # the global-max ``sort_order`` and the grid (which walks
+            # ``parent_id`` then orders siblings by ``sort_order``) renders it
+            # after the last sub-section's entire subtree, so it looks as if
+            # it were filed under that sub-section. We slot it right after the
+            # section's existing direct line items but strictly before its
+            # first sub-section, which is unambiguous regardless of any
+            # legacy interleaving created before this fix.
+            parent_pos = await self.position_repo.get_by_id(data.parent_id)
+            if parent_pos is not None and parent_pos.boq_id == data.boq_id:
+                direct_children = await self.position_repo.list_children(
+                    data.parent_id
+                )
+                leaf_so = [
+                    int(c.sort_order)
+                    for c in direct_children
+                    if not _is_section(c)
+                ]
+                sub_so = [
+                    int(c.sort_order)
+                    for c in direct_children
+                    if _is_section(c)
+                ]
+                anchor_so = (
+                    max(leaf_so) if leaf_so else int(parent_pos.sort_order)
+                )
+                if sub_so:
+                    anchor_so = min(anchor_so, min(sub_so) - 1)
+                anchor_so = max(anchor_so, int(parent_pos.sort_order))
+                await self.position_repo.shift_sort_order_after(
+                    data.boq_id, anchor_so
+                )
+                new_sort_order = anchor_so + 1
 
         # BUG-B-014: non-blocking boq_quality duplicate-content check.
         _dup_ordinal = await self._find_content_duplicate(

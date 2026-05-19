@@ -100,6 +100,9 @@ const PhotoGalleryPage = lazy(() =>
 const MarkupsPage = lazy(() =>
   import('@/features/markups/MarkupsPage').then((m) => ({ default: m.MarkupsPage }))
 );
+const PdfComparePage = lazy(() =>
+  import('@/features/markups/PdfCompare').then((m) => ({ default: m.PdfComparePage }))
+);
 const PunchListPage = lazy(() =>
   import('@/features/punchlist/PunchListPage').then((m) => ({ default: m.PunchListPage }))
 );
@@ -538,6 +541,7 @@ export default function App() {
         <Route path="/requirements" element={<Navigate to="/bim/rules" replace />} />
 
         <Route path="/markups" element={<P title="Markups"><MarkupsPage /></P>} />
+        <Route path="/markups/compare" element={<P title="Compare Revisions"><PdfComparePage /></P>} />
         <Route path="/punchlist" element={<P title="Punch List"><PunchListPage /></P>} />
         <Route path="/field-reports" element={<P title="Field Reports"><FieldReportsPage /></P>} />
 

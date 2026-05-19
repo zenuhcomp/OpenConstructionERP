@@ -309,6 +309,80 @@ async def test_insert_partida_at_section_end_when_selected_is_last(
 
 
 @pytest.mark.asyncio
+async def test_issue_149_add_position_lands_inside_clicked_section(
+    client: AsyncClient, auth: dict[str, str]
+) -> None:
+    """Issue #149 — clicking a section's "Add position" button must put the
+    new partida INSIDE that section.
+
+    Repro shape: section ``A`` with two sub-sections ``A.1`` / ``A.2`` where
+    ``A.2`` itself has a priced leaf. Adding a partida to ``A`` (explicit
+    ``parent_id``, NO ``after_position_id`` — exactly what the per-section
+    button sends) must:
+
+      * keep ``parent_id == A`` (a direct child of the clicked section), and
+      * render *before* the sub-sections' subtrees — never after ``A.2``'s
+        leaf, which is what made it look "filed under the last sub-section".
+
+    A second add appends after the first (the section's own line items stay
+    grouped together, still ahead of the sub-sections).
+    """
+    project_id = await _create_project(client, auth)
+    boq_id = await _create_boq(client, auth, project_id)
+
+    secA = (await _add_section(client, auth, boq_id, ordinal="01")).json()
+    subA1 = (await _add_section(
+        client, auth, boq_id, ordinal="01.01", parent_id=secA["id"]
+    )).json()
+    subA2 = (await _add_section(
+        client, auth, boq_id, ordinal="01.02", parent_id=secA["id"]
+    )).json()
+    # A.2 gets a priced leaf so it is unmistakably "the last child section
+    # with content" — the place the bug used to dump the new partida.
+    deep_leaf = (await _add_position(
+        client, auth, boq_id, ordinal="01.02.0010",
+        description="DEEP", unit="m3", quantity=2, unit_rate=5,
+        parent_id=subA2["id"],
+    )).json()
+
+    # Click "Add position" on section A. The FE sends parent_id=A and the
+    # gap-of-10 ordinal it computes from A's children (no after_position_id).
+    first = (await _add_position(
+        client, auth, boq_id, ordinal="01.03",
+        description="ADDED-TO-A", unit="m2", quantity=0, unit_rate=0,
+        parent_id=secA["id"],
+    )).json()
+    assert first["parent_id"] == secA["id"], first
+
+    order = [p["id"] for p in _sorted(await _positions(client, auth, boq_id))]
+    # The new partida is a direct child of A AND renders ahead of both
+    # sub-sections and A.2's deep leaf — i.e. clearly inside A, not under A.2.
+    assert order.index(first["id"]) < order.index(subA1["id"]), order
+    assert order.index(first["id"]) < order.index(subA2["id"]), order
+    assert order.index(first["id"]) < order.index(deep_leaf["id"]), order
+
+    # A second click appends after the first, both still above the
+    # sub-sections (section's own line items stay grouped & ordered).
+    second = (await _add_position(
+        client, auth, boq_id, ordinal="01.04",
+        description="ADDED-TO-A-2", unit="m2", quantity=0, unit_rate=0,
+        parent_id=secA["id"],
+    )).json()
+    assert second["parent_id"] == secA["id"], second
+    order2 = [p["id"] for p in _sorted(await _positions(client, auth, boq_id))]
+    assert (
+        order2.index(first["id"])
+        < order2.index(second["id"])
+        < order2.index(subA1["id"])
+    ), order2
+    assert order2.index(second["id"]) < order2.index(deep_leaf["id"]), order2
+
+    # The deep leaf's price is undisturbed and still rolls up.
+    by_id = {p["id"]: p for p in await _positions(client, auth, boq_id)}
+    assert abs(float(by_id[deep_leaf["id"]]["total"]) - 10.0) < 0.01
+
+
+@pytest.mark.asyncio
 async def test_insert_falls_back_to_append_for_stale_anchor(
     client: AsyncClient, auth: dict[str, str]
 ) -> None:

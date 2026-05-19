@@ -357,21 +357,27 @@ export function SectionFullWidthRenderer(params: ICellRendererParams) {
         </button>
       )}
 
+      {/* Issue #149 — the per-section "Add position" affordance is the most
+          common action on a section and MUST be discoverable, so it stays
+          visible at all times (not hover-revealed). It targets this exact
+          section id, so the new partida lands in this section — never in the
+          last one. Rendered as the primary section action; "Sub" sits beside
+          it for the rarer nested-section case. */}
       <button
         onClick={(e) => {
           e.stopPropagation();
           ctx.onAddPosition?.(data.id);
         }}
-        className="shrink-0 h-5 flex items-center gap-0.5 px-1.5 rounded
-                   text-[10px] font-medium
-                   text-content-tertiary hover:text-oe-blue
-                   bg-transparent hover:bg-oe-blue-subtle
-                   opacity-0 group-hover/section:opacity-100
-                   transition-all"
+        className="shrink-0 h-5 flex items-center gap-1 px-2 rounded ring-1 ring-oe-blue
+                   text-[10px] font-semibold
+                   bg-oe-blue text-white
+                   hover:bg-oe-blue/90
+                   transition-colors"
         title={t('boq.add_position_to_section', { defaultValue: 'Add position to this section' })}
+        aria-label={t('boq.add_position_to_section', { defaultValue: 'Add position to this section' })}
       >
-        <Plus size={10} />
-        {t('boq.add_item', { defaultValue: 'Add' })}
+        <Plus size={11} />
+        {t('boq.add_position', { defaultValue: 'Add Position' })}
       </button>
 
       {(ctx as FullGridContext | undefined)?.onDeleteSection && (
