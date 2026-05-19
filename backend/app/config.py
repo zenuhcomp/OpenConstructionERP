@@ -250,6 +250,16 @@ class Settings(BaseSettings):
     # collections without a code change. Empty string strips the suffix
     # for legacy installs that vectorised before the v3 cutover.
     cwicr_collection_version: str = "v3"
+    # When True (production default), ``country_to_collection`` probes the
+    # live Qdrant for the set of present ``cwicr_*`` collections and, when
+    # a project's native-language collection is absent, falls back to the
+    # best populated one (BGE-M3 is multilingual, so an English catalogue
+    # still returns real cross-language candidates — far better than the
+    # hard ``catalog_not_vectorized`` empty result a dead collection name
+    # produces). Set False to keep region→collection routing PURE (no
+    # Qdrant I/O at call time) — required for deterministic bench runs and
+    # unit tests that pin the routing contract. Env: CWICR_COLLECTION_PROBE.
+    cwicr_collection_probe: bool = True
     # On startup, scan every multi-collection vector store and backfill
     # any rows that are not yet indexed.  Cheap on a fresh DB, useful when
     # upgrading from a pre-v1.4.0 install where existing BOQ / Document /

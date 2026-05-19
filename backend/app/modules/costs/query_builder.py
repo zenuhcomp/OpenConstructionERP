@@ -365,9 +365,43 @@ _SOFT_BOOST_NOMINAL_SIZE = 1.2
 # ── Public builders ──────────────────────────────────────────────────────
 
 
+def _collection_carries(catalog_id: str | None, field: str) -> bool:
+    """True when the bound CWICR collection actually has ``field``.
+
+    Thin wrapper around
+    :func:`qdrant_adapter.collection_has_payload_field` that fails
+    *open* (returns ``True``) when ``catalog_id`` is unknown — callers
+    use this only to *suppress* a hard filter, so an unknown catalogue
+    keeps the historical pin-everything behaviour. It fails *closed*
+    (returns ``False``) only when the probe positively determines the
+    field is absent from the bound collection's sampled schema, which is
+    the case that needs fixing (DDC v3 snapshots have no ``ifc_class``).
+    """
+
+    if not catalog_id:
+        return True
+    try:
+        from app.modules.costs.qdrant_adapter import (
+            collection_has_payload_field,
+            collection_payload_keys,
+            country_to_collection,
+        )
+
+        collection = country_to_collection(catalog_id)
+        sampled = collection_payload_keys(collection)
+        if not sampled:
+            # Schema indeterminate (Qdrant down / empty sample) — keep
+            # legacy behaviour rather than guessing.
+            return True
+        return collection_has_payload_field(catalog_id, field)
+    except Exception:  # noqa: BLE001 — never break planning on a probe
+        return True
+
+
 def build_search_plan(
     envelope: ElementEnvelope,
     *,
+    catalog_id: str | None = None,
     include_resources: bool = True,
     include_unit_filter: bool = True,
     include_department_filter: bool = True,
@@ -405,13 +439,15 @@ def build_search_plan(
     if drop_abstract:
         hard["is_abstract"] = False
 
-    if include_department_filter:
+    if include_department_filter and _collection_carries(
+        catalog_id, "department_code"
+    ):
         din = (envelope.classifier_hint or {}).get("din276")
         dept = department_code_for(din)
         if dept:
             hard["department_code"] = dept
 
-    if include_unit_filter:
+    if include_unit_filter and _collection_carries(catalog_id, "unit_type"):
         unit = envelope.unit_hint or _infer_unit_from_quantities(envelope.quantities or {})
         # DDC v3 snapshot uses ``unit_type`` (capitalised) — match the
         # snapshot vocabulary exactly so the filter actually narrows.
@@ -427,13 +463,35 @@ def build_search_plan(
     # validated to start with the ``Ifc`` prefix so synthetic source
     # labels (``"BoQ"`` / ``"Text"``) that some adapters write onto
     # the envelope can't poison the Qdrant filter and eliminate every
-    # candidate row. The catalogue payload's ``ifc_class`` is always a
-    # real IFC class name (``IfcWall``, ``IfcSlab``, etc.).
-    if envelope.ifc_class and str(envelope.ifc_class).startswith("Ifc"):
+    # candidate row.
+    #
+    # CRITICAL (the /match-elements "does nothing" fix): each of these
+    # fields is pinned ONLY when the bound CWICR collection actually
+    # carries it. The DDC v3 snapshots that ship today
+    # (``cwicr_en_v3`` / ``cwicr_mn_v3`` …) DO NOT have an ``ifc_class``
+    # (or ``ifc_predefined_type``) payload field — they classify rows by
+    # ``csi_division_2`` / ``category_type``. Pinning ``ifc_class`` as a
+    # Qdrant ``must`` predicate against such a collection matched ZERO
+    # points at every relax tier (``ifc_class`` is bedrock and never
+    # dropped by the relax ladder), so every BIM-vs-cost group came
+    # back with 0 candidates and the wizard rendered nothing. When the
+    # field is genuinely present (richer local catalogues) the hard
+    # filter is kept exactly as before. The IFC signal is not lost when
+    # suppressed: it still drives the dense/sparse query text and the
+    # post-search boosts.
+    if (
+        envelope.ifc_class
+        and str(envelope.ifc_class).startswith("Ifc")
+        and _collection_carries(catalog_id, "ifc_class")
+    ):
         hard["ifc_class"] = envelope.ifc_class
-    if envelope.ifc_predefined_type:
+    if envelope.ifc_predefined_type and _collection_carries(
+        catalog_id, "ifc_predefined_type"
+    ):
         hard["ifc_predefined_type"] = envelope.ifc_predefined_type
-    if envelope.construction_stage_hint:
+    if envelope.construction_stage_hint and _collection_carries(
+        catalog_id, "construction_stage"
+    ):
         hard["construction_stage"] = envelope.construction_stage_hint
     # Trinary booleans — only forward when the source explicitly said
     # ``True``. ``False`` is rarely useful as a hard filter (most rates

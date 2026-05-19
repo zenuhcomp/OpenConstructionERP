@@ -956,7 +956,11 @@ async def rank(
         cost_usd += float(translation_used.cost_usd or 0.0)
 
     # ── Build structured v3 SearchPlan ───────────────────────────────
-    plan = build_search_plan(translated_envelope)
+    # ``catalog_id`` lets the planner suppress hard filters the bound
+    # CWICR collection doesn't actually carry (e.g. ``ifc_class`` on the
+    # DDC v3 snapshots) instead of pinning a field that would zero out
+    # the result set at every relax tier.
+    plan = build_search_plan(translated_envelope, catalog_id=catalog_id)
     if not plan.dense_query:
         return MatchResponse(
             request=req,

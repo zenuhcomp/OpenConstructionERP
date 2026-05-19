@@ -16,6 +16,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -48,9 +49,25 @@ class ClashRun(Base):
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional free-text note so a run is identifiable in history
+    # (scope / intent / reviewer). NULL on legacy rows.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # JSON list[str] of bim_model UUIDs covered by this run.
     model_ids: Mapped[list] = mapped_column(  # type: ignore[assignment]
         JSON, nullable=False, default=list, server_default="[]"
+    )
+    # Which interference an engine pass reports (Navisworks-style Type
+    # selector): 'hard' (interpenetration only), 'clearance' (proximity
+    # only) or 'both' (hard, then clearance for the non-hard pairs — the
+    # historical behaviour and the back-compatible default).
+    clash_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="both", server_default="both"
+    )
+    # Federated noise filter: when true only cross-model pairs are
+    # reported (Navisworks 'ignore clashes within the same file'). No
+    # effect on a single-model run.
+    ignore_same_model: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
     )
     # Hard-clash penetration threshold (metres). A pair counts as a hard
     # clash when the bounding-box interpenetration on its tightest axis
@@ -124,6 +141,7 @@ class ClashResult(Base):
         Index("ix_clash_result_run", "run_id"),
         Index("ix_clash_result_run_status", "run_id", "status"),
         Index("ix_clash_result_run_disc", "run_id", "a_discipline", "b_discipline"),
+        Index("ix_clash_result_run_sig", "run_id", "signature"),
     )
 
     run_id: Mapped[uuid.UUID] = mapped_column(
@@ -181,7 +199,33 @@ class ClashResult(Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="new", server_default="new"
     )
+    # Triage urgency derived from the geometry the engine measured:
+    # ``critical | high | medium | low``. For a hard clash it is keyed off
+    # ``penetration_m`` (deeper = worse); for a clearance clash off the
+    # gap-to-threshold ratio (a clearance violation is never critical).
+    # Server default keeps every legacy row at a safe ``medium``.
+    severity: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="medium", server_default="medium"
+    )
+    # Stable, run-independent identity of the clashing element pair:
+    # ``sha1(min(a,b)|max(a,b)|clash_type)[:16]`` over the two stable ids.
+    # Lets triage (status / assignee / due date / comments) carry forward
+    # across re-runs and powers the run-to-run comparison. Empty on legacy
+    # rows; backfilled by the engine on every fresh result.
+    signature: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="", server_default=""
+    )
     assigned_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ISO-8601 date ("YYYY-MM-DD") the clash is due to be resolved by.
+    # Stored as a string to match this codebase's nullable-date column
+    # convention (e.g. finance.Invoice.due_date). NULL = no deadline.
+    due_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Threaded triage discussion. JSON list of
+    # ``{"author": str, "author_id": str|null, "ts": ISO8601, "text": str}``
+    # newest-prepended on carry-forward. Empty list on legacy rows.
+    comments: Mapped[list] = mapped_column(  # type: ignore[assignment]
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     bcf_topic_guid: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     run: Mapped[ClashRun] = relationship(back_populates="results")

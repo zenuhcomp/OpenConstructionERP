@@ -61,6 +61,14 @@ export function FilePreviewPane({ row, onClose, onEmail, onShare, onManageAccess
   const ctxProjectId = useProjectContextStore((s) => s.activeProjectId);
   const ctxProjectName = useProjectContextStore((s) => s.activeProjectName);
   const setActiveProject = useProjectContextStore((s) => s.setActiveProject);
+  // Shared cache (same key BIMPage uses) — lets us label the project
+  // context correctly when jumping to a file in a project that isn't the
+  // currently-active one (global /files view).
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => apiGet<Array<{ id: string; name: string }>>('/v1/projects/'),
+    staleTime: 5 * 60_000,
+  });
   const [pathCopied, setPathCopied] = useState(false);
   // Slide-over drawer with the full audit timeline. Opens on demand so
   // we don't fire the activity request for every previewed file —
@@ -97,10 +105,15 @@ export function FilePreviewPane({ row, onClose, onEmail, onShare, onManageAccess
     // global context store, not a path param — bind it to this file's
     // project first so the destination opens populated instead of on the
     // empty "no active project" state. Reuse the already-known context
-    // name when it's the same project; the id is what the pages key on.
+    // name when it's the same project; otherwise resolve the real name
+    // from the (cached) projects list so the global project selector
+    // never shows a blank label after the jump.
     if (target.setsActiveProject) {
-      const name = ctxProjectId === file.project_id ? ctxProjectName : '';
-      setActiveProject(file.project_id, name);
+      const resolved =
+        ctxProjectId === file.project_id
+          ? ctxProjectName
+          : projects.find((p) => p.id === file.project_id)?.name ?? ctxProjectName;
+      setActiveProject(file.project_id, resolved);
     }
     navigate(target.route(file.project_id, file.id));
   }

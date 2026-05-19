@@ -9,6 +9,8 @@ Endpoints
     DELETE /projects/{project_id}/runs/{run_id}
     GET    /projects/{project_id}/runs/{run_id}/results   → paginated results
     PATCH  /projects/{project_id}/runs/{run_id}/results/{result_id}
+    GET    /projects/{project_id}/runs/{run_id}/compare   → run-to-run diff
+    GET    /projects/{project_id}/runs/{run_id}/export-csv → results as CSV
     POST   /projects/{project_id}/runs/{run_id}/export-bcf
 
 Auth mirrors the ``bcf`` module exactly: a coarse ``RequirePermission``
@@ -18,18 +20,26 @@ project can never read another project's clashes.
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import CurrentUserId, RequirePermission, SessionDep
 from app.modules.clash.schemas import (
+    CLASH_GROUP_BY,
+    CLASH_PROPERTY_GROUP_PREFIX,
+    CLASH_SEVERITIES,
     ClashBCFExportRequest,
     ClashBCFExportResponse,
     ClashCategoriesResponse,
     ClashCategoryItem,
+    ClashCompareResponse,
+    ClashPropertyFacet,
     ClashResultPage,
     ClashResultResponse,
     ClashResultUpdate,
@@ -38,6 +48,8 @@ from app.modules.clash.schemas import (
     ClashRunResponse,
 )
 from app.modules.clash.service import ClashService
+
+_MAX_EXPORT_ROWS = 25_000
 
 logger = logging.getLogger(__name__)
 
@@ -109,14 +121,36 @@ async def list_categories(
     session: SessionDep,
     service: ClashService = Depends(_get_service),
     model_ids: list[uuid.UUID] = Query(default_factory=list),
+    group_by: str = Query(default="type"),
 ) -> ClashCategoriesResponse:
-    """Distinct element_type / discipline facets for the Set A/B pickers.
+    """Distinct grouping facets for the Set A / Set B pickers.
 
-    Scoped to the project (IDOR-guarded); ``model_ids`` are intersected
-    with the project's own models so a caller can never enumerate
-    another project's element taxonomy.
+    ``group_by`` selects the parameter the Set A/B lists are faceted by:
+    one of the built-ins ``discipline | type | category | ifc_entity``
+    *or* the open-ended ``property:<key>`` form (the literal
+    ``property:`` prefix + a raw element-property key — Starlette has
+    already URL-decoded it by the time it reaches here). All facets are
+    sourced from every clashable element's ``element_type`` /
+    ``discipline`` column and its source-native ``properties``. Scoped
+    to the project (IDOR-guarded); ``model_ids`` are intersected with
+    the project's own models so a caller can never enumerate another
+    project's element taxonomy. ``element_types`` / ``disciplines`` are
+    kept for backward compatibility; ``available_group_by`` lists only
+    the built-in parameters that have data; ``available_properties``
+    enumerates the open-ended property keys the UI may group by (always
+    populated, regardless of ``group_by``). An unknown built-in or a
+    ``property:`` with an empty key falls back to the ``type`` default
+    (matching the existing tolerant param-normalisation style).
     """
     await _require_project_access(session, project_id, user_id)
+    if group_by.startswith(CLASH_PROPERTY_GROUP_PREFIX):
+        # ``property:`` with an empty/blank key is meaningless — degrade
+        # to the safe default rather than 422 (same forgiving contract
+        # the unknown-built-in branch already uses).
+        if not group_by[len(CLASH_PROPERTY_GROUP_PREFIX):].strip():
+            group_by = "type"
+    elif group_by not in CLASH_GROUP_BY:
+        group_by = "type"
     project_models = {
         m.id for m in await service.repo.models_for_project(project_id)
     }
@@ -124,7 +158,20 @@ async def list_categories(
         project_models
     )
     etypes, discs = await service.repo.categories_for_models(wanted)
+    (
+        groups,
+        available,
+        available_props,
+    ) = await service.repo.grouping_facets_for_models(wanted, group_by)
+    # Stable, predictable order for the UI selector.
+    ordered_avail = [g for g in CLASH_GROUP_BY if g in available]
     return ClashCategoriesResponse(
+        group_by=group_by,
+        groups=[ClashCategoryItem(value=v, count=n) for v, n in groups],
+        available_group_by=ordered_avail,
+        available_properties=[
+            ClashPropertyFacet(key=k, count=n) for k, n in available_props
+        ],
         element_types=[
             ClashCategoryItem(value=v, count=n) for v, n in etypes
         ],
@@ -215,16 +262,25 @@ async def list_results(
     status_filter: str | None = Query(default=None, alias="status"),
     clash_type: str | None = Query(default=None),
     discipline: str | None = Query(default=None),
+    severity: str | None = Query(default=None),
+    order_by: str | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> ClashResultPage:
     await _require_project_access(session, project_id, user_id)
     await service.get_run(project_id, run_id)  # 404 if run not in project
+    if severity is not None and severity not in CLASH_SEVERITIES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid clash severity '{severity}'",
+        )
     rows, total = await service.list_results(
         run_id,
         status=status_filter,
         clash_type=clash_type,
         discipline=discipline,
+        severity=severity,
+        order_by=order_by,
         offset=offset,
         limit=limit,
     )
@@ -251,14 +307,138 @@ async def update_result(
     service: ClashService = Depends(_get_service),
 ) -> ClashResultResponse:
     await _require_project_access(session, project_id, user_id)
+    add_comment: dict | None = None
+    if data.add_comment is not None:
+        author = (data.add_comment.author or "").strip()
+        if not author:
+            author = await service.resolve_author(user_id)
+        add_comment = {
+            "text": data.add_comment.text,
+            "author": author,
+            "author_id": data.add_comment.author_id or str(user_id),
+        }
     result = await service.update_result(
         project_id,
         run_id,
         result_id,
         new_status=data.status,
         assigned_to=data.assigned_to,
+        due_date=data.due_date,
+        add_comment=add_comment,
     )
     return ClashResultResponse.model_validate(result)
+
+
+@router.get(
+    "/projects/{project_id}/runs/{run_id}/compare",
+    response_model=ClashCompareResponse,
+    dependencies=[Depends(RequirePermission("clash.read"))],
+)
+async def compare_runs(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    base_run_id: uuid.UUID = Query(...),
+    service: ClashService = Depends(_get_service),
+) -> ClashCompareResponse:
+    """Diff this run against ``base_run_id`` by clash signature.
+
+    Partitions every clash into ``new`` (only here), ``resolved`` (only
+    in the base run) and ``persistent`` (in both). Both runs are
+    404-guarded against the project so the comparison can never leak
+    another project's clashes.
+    """
+    await _require_project_access(session, project_id, user_id)
+    diff = await service.compare_runs(project_id, run_id, base_run_id)
+    return ClashCompareResponse.model_validate(diff)
+
+
+@router.get(
+    "/projects/{project_id}/runs/{run_id}/export-csv",
+    dependencies=[Depends(RequirePermission("clash.export"))],
+)
+async def export_csv(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    service: ClashService = Depends(_get_service),
+    status_filter: str | None = Query(default=None, alias="status"),
+    clash_type: str | None = Query(default=None),
+    severity: str | None = Query(default=None),
+) -> StreamingResponse:
+    """Stream the run's results as CSV (respects status/type/severity).
+
+    Reuses the same repository query the results list uses so the export
+    is always consistent with what the UI shows.
+    """
+    await _require_project_access(session, project_id, user_id)
+    run = await service.get_run(project_id, run_id)
+    if severity is not None and severity not in CLASH_SEVERITIES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid clash severity '{severity}'",
+        )
+    rows, _ = await service.list_results(
+        run_id,
+        status=status_filter,
+        clash_type=clash_type,
+        severity=severity,
+        order_by="severity",
+        offset=0,
+        limit=_MAX_EXPORT_ROWS,
+    )
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "#",
+            "Element A",
+            "Discipline A",
+            "Element B",
+            "Discipline B",
+            "Type",
+            "Severity",
+            "Penetration (m)",
+            "Distance (m)",
+            "Status",
+            "Assigned To",
+            "Due Date",
+        ]
+    )
+    for i, r in enumerate(rows, start=1):
+        writer.writerow(
+            [
+                i,
+                r.a_name,
+                r.a_discipline,
+                r.b_name,
+                r.b_discipline,
+                r.clash_type,
+                getattr(r, "severity", "medium") or "medium",
+                r.penetration_m,
+                r.distance_m,
+                r.status,
+                r.assigned_to or "",
+                getattr(r, "due_date", None) or "",
+            ]
+        )
+    csv_text = buf.getvalue()
+
+    safe_name = "".join(
+        c if c.isalnum() or c in (" ", "-", "_") else "_"
+        for c in (run.name or "clash")
+    ).strip() or "clash"
+    filename = f"clash_{safe_name}.csv"
+    return StreamingResponse(
+        iter([csv_text]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+    )
 
 
 @router.post(

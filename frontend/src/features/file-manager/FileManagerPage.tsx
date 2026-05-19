@@ -18,6 +18,7 @@ import {
   useFileTree,
   useFolderPermissionCounts,
   useIsProjectOwner,
+  useProjectsLite,
   useStorageLocations,
 } from './hooks';
 import { PathBar } from './components/PathBar';
@@ -107,6 +108,10 @@ export function FileManagerPage() {
   // Folder-permissions surface — gear + lock badge.
   const isOwner = useIsProjectOwner(projectId);
   const permissionCounts = useFolderPermissionCounts(projectId, isOwner);
+  // Resolve a file's project name when opening into a context-store
+  // destination (Clash / BI Explorer) — keeps the global project label
+  // correct even from the cross-project global /files view.
+  const { data: projectsLite = [] } = useProjectsLite();
 
   useEffect(() => {
     writeViewMode(view);
@@ -221,7 +226,10 @@ export function FileManagerPage() {
     // it's the same project.
     if (target.setsActiveProject) {
       const ctx = useProjectContextStore.getState();
-      const name = ctx.activeProjectId === row.project_id ? ctx.activeProjectName : '';
+      const name =
+        ctx.activeProjectId === row.project_id
+          ? ctx.activeProjectName
+          : projectsLite.find((p) => p.id === row.project_id)?.name ?? ctx.activeProjectName;
       ctx.setActiveProject(row.project_id, name);
     }
     navigate(target.route(row.project_id, row.id));

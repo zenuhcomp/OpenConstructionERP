@@ -113,29 +113,39 @@ export const KIND_MODULES: Record<FileKind, ModuleTarget[]> = {
     },
     {
       // CAD-BIM BI Explorer — spreadsheet/pivot/chart analytics over the
-      // model's element data. Route /data-explorer (App.tsx L475, sidebar
-      // label `nav.cad_bim_explorer`). Its landing page lets the user
-      // pick the model/session; setting the active project keeps the
-      // rest of the workspace bound to the same project.
+      // model's element data. Route /data-explorer (App.tsx L475). The
+      // page is *session*-based: with no `?session=` it lands on the
+      // empty picker. A seeded BIM model has no CAD session, so we pass
+      // the model id via `?bimModel=` — the page calls
+      // POST /cad-data/from-bim-model to materialise a session from the
+      // model's elements, then redirects to `?session=<id>`. The project
+      // is also pinned (store + `?project=`) so the workspace stays bound.
       label: 'CAD-BIM BI Explorer',
       i18nKey: 'files.module.cad_bim_explorer',
       description: 'Pivot, chart & analyse element quantities',
       descriptionI18nKey: 'files.module.cad_bim_explorer_desc',
       icon: BarChart3,
-      route: () => '/data-explorer',
+      route: (p, f) =>
+        f
+          ? `/data-explorer?bimModel=${encodeURIComponent(f)}&project=${encodeURIComponent(p)}`
+          : `/data-explorer?project=${encodeURIComponent(p)}`,
       setsActiveProject: true,
     },
     {
       // Clash Detection — geometric interference review. Route /clash
-      // (App.tsx L482); ClashDetectionPage.tsx L167 resolves the project
-      // from the global context store first, falling back to ?project=.
-      // We set the store AND pass ?project= so the page opens populated.
+      // (App.tsx L482); ClashDetectionPage.tsx resolves the project from
+      // the global context store first, falling back to ?project=. We set
+      // the store AND pass ?project= so the page opens populated, plus
+      // ?model= so this model is pre-selected in the run config.
       label: 'Clash Detection',
       i18nKey: 'files.module.clash_detection',
       description: 'Run geometric interference checks on this model',
       descriptionI18nKey: 'files.module.clash_detection_desc',
       icon: Radar,
-      route: (p) => `/clash?project=${encodeURIComponent(p)}`,
+      route: (p, f) =>
+        f
+          ? `/clash?project=${encodeURIComponent(p)}&model=${encodeURIComponent(f)}`
+          : `/clash?project=${encodeURIComponent(p)}`,
       setsActiveProject: true,
     },
   ],

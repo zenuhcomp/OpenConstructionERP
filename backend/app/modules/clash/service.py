@@ -36,6 +36,7 @@ the DDC pipeline, or the canonical bbox fallback (the architecture guide §3).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import uuid
@@ -51,7 +52,9 @@ from app.modules.bcf.service import BCFService
 from app.modules.clash.models import ClashResult, ClashRun
 from app.modules.clash.repository import ClashRepository
 from app.modules.clash.schemas import (
+    CLASH_SEVERITIES,
     CLASH_STATUSES,
+    CLASH_TYPES,
     OPEN_STATUSES,
     ClashBCFExportRequest,
     ClashRunCreate,
@@ -86,6 +89,55 @@ _UNSET: object = object()
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _signature(a_stable_id: str, b_stable_id: str, clash_type: str) -> str:
+    """Stable, run-independent identity of a clashing element pair.
+
+    ``sha1(min(a,b)|max(a,b)|clash_type)[:16]`` over the two stable ids.
+    Order-independent (the pair {A,B} hashes the same regardless of which
+    element the engine put first), so the same physical interference gets
+    the same signature across re-runs — that is the join key the
+    run-to-run comparison and triage carry-forward rely on.
+    """
+    a = a_stable_id or ""
+    b = b_stable_id or ""
+    lo, hi = (a, b) if a <= b else (b, a)
+    raw = f"{lo}|{hi}|{clash_type}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _severity_for(
+    clash_type: str, penetration_m: float, distance_m: float, clearance_m: float
+) -> str:
+    """Geometry-derived triage urgency.
+
+    Hard clash — keyed off interpenetration depth (deeper = worse):
+    ``>= 0.10 m`` critical, ``>= 0.03 m`` high, ``>= 0.005 m`` medium,
+    else low. Clearance clash — keyed off the gap-to-threshold ratio
+    ``g/c`` (a clearance violation is never *critical*): ``<= 0.25``
+    high, ``<= 0.50`` medium, else low. ``clearance_m <= 0`` is guarded
+    (degrades to ``medium``) so a bad config never raises here.
+    """
+    if clash_type == "hard":
+        p = penetration_m
+        if p >= 0.10:
+            return "critical"
+        if p >= 0.03:
+            return "high"
+        if p >= 0.005:
+            return "medium"
+        return "low"
+    # clearance — proximity violation, never critical.
+    c = clearance_m
+    if c <= 0:
+        return "medium"
+    ratio = distance_m / c
+    if ratio <= 0.25:
+        return "high"
+    if ratio <= 0.50:
+        return "medium"
+    return "low"
 
 
 def _norm_bbox(bb: object) -> tuple[float, float, float, float, float, float] | None:
@@ -141,20 +193,84 @@ def _type_of(element: object) -> str:
     return (getattr(element, "element_type", None) or "").strip()
 
 
-def _in_set(etype: str, disc: str, spec: dict | None) -> bool:
+def _category_of(element: object) -> str:
+    """Element's source-native category (Revit category / ``ifc_class``).
+
+    Mirrors :meth:`ClashRepository._category_of` so a selection set built
+    on the ``category`` grouping resolves to the very same elements the
+    Set A/B picker advertised. Falls back to ``element_type``.
+    """
+    props = getattr(element, "properties", None) or {}
+    for key in ("category", "rvt_category", "ifc_class", "revit_category"):
+        v = props.get(key)
+        if v:
+            return str(v).strip()
+    return _type_of(element)
+
+
+def _ifc_entity_of(element: object) -> str:
+    """Raw IFC entity (``IfcWall``…) — empty for non-IFC elements."""
+    props = getattr(element, "properties", None) or {}
+    for key in ("ifc_type", "ifc_entity", "IfcEntity"):
+        v = props.get(key)
+        if v:
+            return str(v).strip()
+    return ""
+
+
+def _property_value_of(element: object, key: str) -> str | None:
+    """An element's scalar ``properties[key]`` as a trimmed string.
+
+    Returns ``None`` when the element has no usable value for ``key`` —
+    missing/None ``properties``, key absent, or a non-scalar
+    (dict/list) value. Never raises.
+    """
+    props = getattr(element, "properties", None)
+    if not isinstance(props, dict):
+        return None
+    v = props.get(key)
+    if v is None or isinstance(v, (dict, list)):
+        return None
+    return str(v).strip()
+
+
+def _in_set(element: object, etype: str, disc: str, spec: dict | None) -> bool:
     """True iff an element belongs to a Navisworks-style selection set.
 
-    ``spec`` is ``{"element_types": [...], "disciplines": [...]}``. The
-    two lists are a *union*: every chip the user adds widens the set, so
-    an element matches when its ``element_type`` is listed **or** its
-    discipline is listed. An empty / missing spec matches nothing (the
-    run-create guard already rejects empty sets for this mode).
+    ``spec`` is ``{"element_types": [...], "disciplines": [...],
+    "categories": [...], "ifc_entities": [...], "properties":
+    {key: [...]}}``. Every list (and every per-property value list) is a
+    *union*: every chip the user adds widens the set, so an element
+    matches when its ``element_type``, ``discipline``, source-native
+    category, IFC entity **or** — for ANY key in ``properties`` — its
+    string-coerced/trimmed ``properties[key]`` is listed. The extra
+    lists/maps let the picker facet by any grouping parameter while the
+    engine still resolves membership to real elements. An empty /
+    missing spec matches nothing (the run-create guard already rejects
+    empty sets for this mode). Defensive: a missing/None properties
+    dict or non-scalar value simply never matches, never crashes.
     """
     if not spec:
         return False
-    ets = spec.get("element_types") or []
-    discs = spec.get("disciplines") or []
-    return (etype in ets) or (disc in discs)
+    if etype in (spec.get("element_types") or []):
+        return True
+    if disc in (spec.get("disciplines") or []):
+        return True
+    cats = spec.get("categories") or []
+    if cats and _category_of(element) in cats:
+        return True
+    ents = spec.get("ifc_entities") or []
+    if ents and _ifc_entity_of(element) in ents:
+        return True
+    props = spec.get("properties")
+    if isinstance(props, dict):
+        for key, allowed in props.items():
+            if not allowed:
+                continue
+            val = _property_value_of(element, key)
+            if val is not None and val in allowed:
+                return True
+    return False
 
 
 # ── Mesh helpers ───────────────────────────────────────────────────────────
@@ -694,6 +810,12 @@ class ClashService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Unknown clash mode '{data.mode}'",
             )
+        if data.clash_type not in CLASH_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown clash type '{data.clash_type}' "
+                f"(expected one of {', '.join(CLASH_TYPES)})",
+            )
         set_a = set_b = None
         if data.mode == "selection_sets":
             if (
@@ -717,7 +839,10 @@ class ClashService:
         run = ClashRun(
             project_id=project_id,
             name=name,
+            description=(data.description or "").strip() or None,
             model_ids=[str(m) for m in requested],
+            clash_type=data.clash_type,
+            ignore_same_model=bool(data.ignore_same_model),
             tolerance_m=data.tolerance_m,
             clearance_m=data.clearance_m,
             mode=data.mode,
@@ -736,6 +861,8 @@ class ClashService:
             elements = await self.repo.elements_with_geometry(requested)
             results = self._detect(run, elements, geoms)
             self.repo.add_results(results)
+            if data.carry_forward:
+                await self._carry_forward(run, results)
             run.element_count = len(elements)
             run.total_clashes = len(results)
             run.summary = _build_summary(results)
@@ -772,6 +899,137 @@ class ClashService:
             if part:
                 merged.update(part)
         return merged
+
+    async def _carry_forward(
+        self, run: ClashRun, results: list[ClashResult]
+    ) -> None:
+        """Persist triage across re-runs by matching clash signatures.
+
+        Find the most recent *completed* run of this project that shares
+        a model with the new run; for every new result whose
+        ``signature`` matches a prior result's, copy forward the human
+        triage state — ``status`` (unless the prior was still ``new``),
+        ``assigned_to``, ``due_date`` and ``comments`` (prior comments
+        are *prepended*, oldest-context-first). Fully defensive: any
+        missing prior run / result / malformed payload simply skips
+        carry-forward for that row — it never breaks the new run.
+        """
+        try:
+            prior_run = await self.repo.latest_prior_completed_run(
+                run.project_id,
+                list(run.model_ids or []),
+                exclude_run_id=run.id,
+            )
+            if prior_run is None:
+                return
+            prior_rows = await self.repo.all_results(prior_run.id)
+        except Exception:  # noqa: BLE001 — carry-forward is best-effort
+            logger.exception(
+                "Clash carry-forward lookup failed for run %s", run.id
+            )
+            return
+
+        # Index prior rows by signature. On the (rare) signature collision
+        # within one run keep the first — deterministic, order is the
+        # repository's stable query order.
+        by_sig: dict[str, ClashResult] = {}
+        for pr in prior_rows:
+            sig = getattr(pr, "signature", "") or ""
+            if sig and sig not in by_sig:
+                by_sig[sig] = pr
+
+        for r in results:
+            sig = getattr(r, "signature", "") or ""
+            if not sig:
+                continue
+            prior = by_sig.get(sig)
+            if prior is None:
+                continue
+            try:
+                prior_status = getattr(prior, "status", "new") or "new"
+                if prior_status not in ("new",):
+                    r.status = prior_status
+                if getattr(prior, "assigned_to", None):
+                    r.assigned_to = prior.assigned_to
+                if getattr(prior, "due_date", None):
+                    r.due_date = prior.due_date
+                prior_comments = list(getattr(prior, "comments", None) or [])
+                if prior_comments:
+                    r.comments = prior_comments + list(r.comments or [])
+            except Exception:  # noqa: BLE001 — skip just this row
+                logger.exception(
+                    "Clash carry-forward failed for signature %s", sig
+                )
+                continue
+
+    async def compare_runs(
+        self,
+        project_id: uuid.UUID,
+        run_id: uuid.UUID,
+        base_run_id: uuid.UUID,
+    ) -> dict:
+        """Diff ``run_id`` against ``base_run_id`` by clash signature.
+
+        ``new`` = signatures only in the current run; ``resolved`` =
+        signatures only in the base run; ``persistent`` = signatures in
+        both, paired current↔base. Both runs are 404-guarded against the
+        project so this can never leak another project's clashes.
+        """
+        await self.get_run(project_id, run_id)  # 404 if not in project
+        await self.get_run(project_id, base_run_id)
+        current = await self.repo.all_results(run_id)
+        base = await self.repo.all_results(base_run_id)
+
+        cur_by_sig: dict[str, ClashResult] = {}
+        for r in current:
+            sig = getattr(r, "signature", "") or ""
+            if sig:
+                cur_by_sig.setdefault(sig, r)
+        base_by_sig: dict[str, ClashResult] = {}
+        for r in base:
+            sig = getattr(r, "signature", "") or ""
+            if sig:
+                base_by_sig.setdefault(sig, r)
+
+        cur_sigs = set(cur_by_sig)
+        base_sigs = set(base_by_sig)
+
+        def _summary(r: ClashResult) -> dict:
+            return {
+                "id": r.id,
+                "a_name": r.a_name,
+                "b_name": r.b_name,
+                "clash_type": r.clash_type,
+                "severity": getattr(r, "severity", "medium") or "medium",
+                "penetration_m": r.penetration_m,
+                "distance_m": r.distance_m,
+                "status": r.status,
+                "assigned_to": r.assigned_to,
+            }
+
+        new = [_summary(cur_by_sig[s]) for s in sorted(cur_sigs - base_sigs)]
+        resolved = [
+            _summary(base_by_sig[s]) for s in sorted(base_sigs - cur_sigs)
+        ]
+        persistent = [
+            {
+                "current": _summary(cur_by_sig[s]),
+                "base": _summary(base_by_sig[s]),
+            }
+            for s in sorted(cur_sigs & base_sigs)
+        ]
+        return {
+            "new": new,
+            "resolved": resolved,
+            "persistent": persistent,
+            "stats": {
+                "new": len(new),
+                "resolved": len(resolved),
+                "persistent": len(persistent),
+                "base_total": len(base),
+                "current_total": len(current),
+            },
+        }
 
     async def list_runs(self, project_id: uuid.UUID) -> list[ClashRun]:
         return await self.repo.list_runs(project_id)
@@ -883,11 +1141,33 @@ class ClashService:
         sel_a = run.set_a if run.mode == "selection_sets" else None
         sel_b = run.set_b if run.mode == "selection_sets" else None
 
+        # Navisworks-style "Type" selector. ``getattr`` default keeps the
+        # legacy semantics for callers (and the test fakes) that never
+        # set the field: ``both`` = hard, then clearance for the non-hard
+        # pairs — exactly the historical behaviour.
+        ctype = str(getattr(run, "clash_type", "both") or "both")
+        if ctype not in CLASH_TYPES:
+            ctype = "both"
+        # Federated noise filter ("ignore clashes within the same file").
+        # Meaningless on a single-model run, so only honoured when the run
+        # actually spans more than one model.
+        ignore_same_model = bool(
+            getattr(run, "ignore_same_model", False)
+        ) and len({str(getattr(e, "model_id", "")) for e, _, _, _ in boxes}) > 1
+
         seen: set[tuple[int, int]] = set()
         results: list[ClashResult] = []
         pairs_tested = 0
         tol = float(run.tolerance_m)
         clr = float(run.clearance_m)
+        # ``hard`` → never run the soft proximity pass (clr forced to 0).
+        # ``clearance`` → suppress the hard classification; only proximity
+        # within ``clearance_m`` is reported (so clearance MUST be > 0 to
+        # find anything — same contract the UI enforces).
+        # ``both`` → unchanged legacy pipeline.
+        hard_enabled = ctype != "clearance"
+        if ctype == "hard":
+            clr = 0.0
 
         for bucket in grid.values():
             if len(bucket) < 2:
@@ -907,6 +1187,14 @@ class ClashService:
                 eb, bb_, db, gb = boxes[key[1]]
                 if ea.id == eb.id:  # type: ignore[attr-defined]
                     continue
+                # Federated noise filter: drop intra-model pairs so a
+                # model is never clashed against itself when the user
+                # only wants cross-discipline/cross-trade coordination.
+                if ignore_same_model and (
+                    getattr(ea, "model_id", None)
+                    == getattr(eb, "model_id", None)
+                ):
+                    continue
                 # Discipline gating.
                 if run.mode == "cross_discipline" and da == db:
                     continue
@@ -919,8 +1207,14 @@ class ClashService:
                     ta_ = _type_of(ea)
                     tb_ = _type_of(eb)
                     if not (
-                        (_in_set(ta_, da, sel_a) and _in_set(tb_, db, sel_b))
-                        or (_in_set(ta_, da, sel_b) and _in_set(tb_, db, sel_a))
+                        (
+                            _in_set(ea, ta_, da, sel_a)
+                            and _in_set(eb, tb_, db, sel_b)
+                        )
+                        or (
+                            _in_set(ea, ta_, da, sel_b)
+                            and _in_set(eb, tb_, db, sel_a)
+                        )
                     ):
                         continue
 
@@ -928,6 +1222,7 @@ class ClashService:
                     run, ea, ba, da, ga, eb, bb_, db, gb, tol, clr,
                     triA=tri_by_idx[key[0]], triB=tri_by_idx[key[1]],
                     oa=obb_by_idx[key[0]], ob=obb_by_idx[key[1]],
+                    hard_enabled=hard_enabled,
                 )
                 if row is not None:
                     results.append(row)
@@ -971,6 +1266,7 @@ class ClashService:
         triB: object = _UNSET,
         oa: object = _UNSET,
         ob: object = _UNSET,
+        hard_enabled: bool = True,
     ) -> ClashResult | None:
         """Mid + narrow phase: classify one element pair, or ``None``.
 
@@ -978,6 +1274,12 @@ class ClashService:
         element lacks a real mesh (bbox-only model) — preserving the old
         behaviour for un-tessellated data while giving mesh-grade
         precision wherever GLB geometry exists.
+
+        ``hard_enabled`` reflects the run's Navisworks-style "Type"
+        selector: ``False`` for a ``clash_type='clearance'`` run, where
+        the hard interpenetration classification is suppressed and only
+        proximity within ``clr`` is reported. It defaults to ``True`` so
+        every existing direct caller / test keeps the legacy behaviour.
 
         ``triA``/``triB``/``oa``/``ob`` may be passed pre-extracted by the
         caller. :func:`_triangles` / :func:`_obb` are pure deterministic
@@ -995,7 +1297,8 @@ class ClashService:
 
         if triA is None or triB is None:
             return cls._test_pair_bbox(
-                run, ea, ba, da, eb, bb, db, tol, clr, ga, gb
+                run, ea, ba, da, eb, bb, db, tol, clr, ga, gb,
+                hard_enabled=hard_enabled,
             )
 
         # Broad AABB re-check (grid buckets are conservative).
@@ -1018,7 +1321,7 @@ class ClashService:
         distance = 0.0
         cx = cy = cz = 0.0
 
-        if not sat_separated:
+        if hard_enabled and not sat_separated:
             mask = _tri_tri_intersect_mask(triA, triB)
             if mask.any():
                 pen, centroid = _penetration_depth(triA, triB, mask)
@@ -1061,8 +1364,16 @@ class ClashService:
         clr: float,
         ga: object = None,
         gb: object = None,
+        hard_enabled: bool = True,
     ) -> ClashResult | None:
-        """Legacy exact-AABB classification (no-GLB fallback path)."""
+        """Legacy exact-AABB classification (no-GLB fallback path).
+
+        ``hard_enabled`` mirrors :meth:`_test_pair`: when ``False``
+        (a ``clash_type='clearance'`` run) an interpenetrating box pair
+        is dropped — only a true non-overlapping proximity within ``clr``
+        is reported. Defaults ``True`` so direct callers keep the legacy
+        behaviour.
+        """
         ox = min(ba[3], bb[3]) - max(ba[0], bb[0])
         oy = min(ba[4], bb[4]) - max(ba[1], bb[1])
         oz = min(ba[5], bb[5]) - max(ba[2], bb[2])
@@ -1071,6 +1382,11 @@ class ClashService:
         penetration = 0.0
         distance = 0.0
         if ox > 0 and oy > 0 and oz > 0:
+            # Overlapping boxes: a hard candidate. With the hard pass
+            # suppressed (clearance-only run) this pair is simply not
+            # reported — an interpenetration is never a clearance hit.
+            if not hard_enabled:
+                return None
             penetration = min(ox, oy, oz)
             if penetration <= tol:
                 return None
@@ -1134,12 +1450,15 @@ class ClashService:
         gb: object = None,
     ) -> ClashResult:
         """Build a :class:`ClashResult` row (single construction point)."""
+        a_sid = str(getattr(ea, "stable_id", "") or "")
+        b_sid = str(getattr(eb, "stable_id", "") or "")
+        clr = float(getattr(run, "clearance_m", 0.0) or 0.0)
         return ClashResult(
             run_id=run.id,
             a_element_id=ea.id,  # type: ignore[attr-defined]
             b_element_id=eb.id,  # type: ignore[attr-defined]
-            a_stable_id=str(getattr(ea, "stable_id", "") or ""),
-            b_stable_id=str(getattr(eb, "stable_id", "") or ""),
+            a_stable_id=a_sid,
+            b_stable_id=b_sid,
             a_name=(getattr(ea, "name", None) or getattr(ea, "element_type", "") or "")[:500],
             b_name=(getattr(eb, "name", None) or getattr(eb, "element_type", "") or "")[:500],
             a_discipline=da[:64] or "Unassigned",
@@ -1157,6 +1476,9 @@ class ClashService:
             cy=round(cy, 4),
             cz=round(cz, 4),
             status="new",
+            severity=_severity_for(clash_type, penetration, distance, clr),
+            signature=_signature(a_sid, b_sid, clash_type),
+            comments=[],
         )
 
     # ── Result triage ──────────────────────────────────────────────────
@@ -1169,6 +1491,8 @@ class ClashService:
         *,
         new_status: str | None,
         assigned_to: str | None,
+        due_date: str | None = None,
+        add_comment: dict | None = None,
     ) -> ClashResult:
         run = await self.get_run(project_id, run_id)
         result = await self.repo.get_result(run_id, result_id)
@@ -1185,12 +1509,50 @@ class ClashService:
             result.status = new_status
         if assigned_to is not None:
             result.assigned_to = assigned_to or None
+        if due_date is not None:
+            result.due_date = due_date or None
+        if add_comment is not None:
+            text = str(add_comment.get("text") or "").strip()
+            if text:
+                item = {
+                    "author": str(add_comment.get("author") or "system"),
+                    "author_id": add_comment.get("author_id"),
+                    "ts": _now().isoformat(),
+                    "text": text,
+                }
+                # Reassign (not in-place append) so the plain-JSON column
+                # is detected dirty and persisted on every backend.
+                result.comments = list(result.comments or []) + [item]
         await self.session.flush()
         # Refresh the cached status counts so the dashboard KPI stays true.
         rows, _ = await self.repo.list_results(run_id, limit=_MAX_RESULTS)
         run.summary = _build_summary(list(rows))
         await self.session.flush()
         return result
+
+    async def resolve_author(self, user_id: str) -> str:
+        """Best-effort human label for a comment author.
+
+        Prefer the user's ``full_name``, fall back to ``email``, then to
+        the raw id, and finally ``"system"`` — never raises (mirrors the
+        best-effort user lookup in the IDOR guard).
+        """
+        try:
+            from app.modules.users.repository import UserRepository
+
+            user = await UserRepository(self.session).get_by_id(
+                uuid.UUID(str(user_id))
+            )
+            if user is not None:
+                name = (getattr(user, "full_name", "") or "").strip()
+                if name:
+                    return name
+                email = (getattr(user, "email", "") or "").strip()
+                if email:
+                    return email
+        except Exception:  # noqa: BLE001 — author label is best-effort
+            logger.exception("Comment author lookup failed for %s", user_id)
+        return str(user_id) or "system"
 
     async def list_results(self, run_id: uuid.UUID, **kw: object):
         return await self.repo.list_results(run_id, **kw)  # type: ignore[arg-type]
@@ -1286,6 +1648,7 @@ def _build_summary(results: list[ClashResult]) -> dict:
     level_cell: dict[tuple[int, int], dict[str, int]] = {}
     by_status: dict[str, int] = {}
     by_type: dict[str, int] = {}
+    by_severity: dict[str, int] = dict.fromkeys(CLASH_SEVERITIES, 0)
     for r in results:
         a, b = sorted((r.a_discipline or "Unassigned", r.b_discipline or "Unassigned"))
         disciplines.add(a)
@@ -1297,6 +1660,8 @@ def _build_summary(results: list[ClashResult]) -> dict:
             c["open_count"] += 1
         by_status[r.status] = by_status.get(r.status, 0) + 1
         by_type[r.clash_type] = by_type.get(r.clash_type, 0) + 1
+        sev = getattr(r, "severity", None) or "medium"
+        by_severity[sev] = by_severity.get(sev, 0) + 1
 
         # Level matrix: only when both storeys resolved (NULL = unknown).
         sa_ = getattr(r, "a_storey", None)
@@ -1327,4 +1692,5 @@ def _build_summary(results: list[ClashResult]) -> dict:
         "level_matrix": level_matrix,
         "by_status": by_status,
         "by_type": by_type,
+        "by_severity": by_severity,
     }

@@ -5,6 +5,29 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] — 2026-05-19 · Clash coordination depth + Match-Elements UX & lifecycle hardening
+
+### Added
+
+- Clash: per-clash **severity** (critical/high/medium/low) — colored badges, severity filter, KPI tile, derived from penetration / clearance ratio.
+- Clash: **run-to-run comparison** (new / resolved / persistent) with carry-forward of status, assignee, comments and due-date across re-runs by a stable clash signature.
+- Clash: per-clash **collaboration** — assignee, due date, and a comments thread.
+- Clash: **CSV export** of the clash list (filters honoured).
+- Clash: group / build selection sets by **any element property** (beyond discipline/type/category/IfcEntity) — backend-enumerated property facets.
+- Clash: **embedded quick 3D preview** of the two clashing elements in the detail panel + "Open in full 3D viewer".
+- Clash & Match Elements: "Beta — new module / may have rough edges" banner with a one-click "Open an issue" path.
+- Match Elements: up-front **vector-DB readiness** check (one-click native Qdrant installer when down) and a collapsible plain-language "How matching works" 8-stage overview; page widened for the data-heavy stages.
+
+### Fixed
+
+- Match Elements: switching project no longer keeps a **stale session** (could write a BOQ to the wrong project); rail jumps are blocked when a prerequisite is missing; the empty-grouping dead-end now shows guidance + a recovery path; scope edits re-sync to the session; added project/model/groups query error states and an actionable "0 confirmed" toast; detail-panel focus trap (a11y).
+- Match backend: region→catalogue routing is **deterministic again** — the live-Qdrant availability probe is gated behind `CWICR_COLLECTION_PROBE` (was silently re-routing non-English regions to English and breaking 97 unit tests).
+
+### Changed
+
+- Clash migration `v3047_clash_severity_delta` — additive, idempotent, single linear head.
+- Sidebar: tighter logo↔search spacing.
+
 ## [3.7.0] — 2026-05-19 · Clash Detection module + GitHub issue sweep + file-manager polish
 
 ### Added

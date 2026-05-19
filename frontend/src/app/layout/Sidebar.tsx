@@ -746,7 +746,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           users who don't know the ⌘K shortcut, while still surfacing
           it for those who do. When iconified, collapses to a single
           icon button — the ⌘K shortcut still works regardless. */}
-      <div className={clsx('pt-3 pb-1', iconified ? 'px-2 flex justify-center' : 'px-3')}>
+      <div className={clsx('pt-1 pb-1', iconified ? 'px-2 flex justify-center' : 'px-3')}>
         <button
           type="button"
           onClick={() => openSearch()}
