@@ -272,18 +272,37 @@ function disciplineHash(d: string): number {
 /** The seeded BIM models carry the project name baked into their label
  *  (e.g. "Edifício Comercial Faria Lima — São Paulo — Modelo Estrutural
  *  Revit"). Clash is intra-project and the project is already chosen
- *  globally, so the prefix is pure noise here — strip it down to the
- *  discipline/type part. Falls back to the full name if stripping empties
- *  it. */
-function shortModelName(full: string, projectName?: string | null): string {
+ *  globally, so the project/location prefix is pure noise here — and
+ *  worse, two such models read like "two projects", which confuses users
+ *  (clash is always single-project). Strip it down to the discipline/type
+ *  tail. We do NOT rely on the global project name being hydrated (it is
+ *  often empty on a direct nav / ``?project=`` deep-link, which is exactly
+ *  when the full prefixed name leaked through before): the seeded labels
+ *  use a spaced dash ( — / – / - ) between "Project — City — Discipline",
+ *  so the last dash-delimited segment is the model's real identity. Falls
+ *  back to the full name if stripping would empty it. */
+export function shortModelName(
+  full: string,
+  projectName?: string | null,
+): string {
   let s = (full ?? '').trim();
   const pn = (projectName ?? '').trim();
+  // Precise strip first when the project name is known.
   if (pn && s.toLowerCase().startsWith(pn.toLowerCase())) {
     s = s
       .slice(pn.length)
       .replace(/^[\s—–\-:/·|]+/, '')
       .trim();
   }
+  // Generic strip: if a "Prefix — … — Discipline" structure remains,
+  // keep only the final segment (the discipline/type). This makes the
+  // two model cards read as two *models*, not two projects, regardless
+  // of whether the global project name was available.
+  const parts = s
+    .split(/\s+[—–|]\s+|\s+-\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) s = parts[parts.length - 1] ?? s;
   return s || (full ?? '').trim();
 }
 

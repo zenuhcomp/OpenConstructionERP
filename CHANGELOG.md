@@ -5,6 +5,12 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.1] — 2026-05-19 · Clash model labels read as models, not projects
+
+### Fixed
+
+- Clash: BIM model cards no longer show the project/location prefix baked into seeded model names — the label collapses to the discipline/type tail, so two models of one project no longer read as "two projects". Robust without the global project name being hydrated (direct nav / `?project=` deep-link).
+
 ## [3.9.0] — 2026-05-19 · BOQ section-scoped add + AI model auto-recovery + toolbar polish
 
 ### Fixed
