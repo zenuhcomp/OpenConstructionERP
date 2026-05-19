@@ -112,6 +112,17 @@ class ClashRun(Base):
     summary: Mapped[dict] = mapped_column(  # type: ignore[assignment]
         JSON, nullable=False, default=dict, server_default="{}"
     )
+    # Wave A4 — per-discipline-pair tolerance overrides. Each entry is
+    # ``{id, discipline_a, discipline_b, tolerance_m, severity_override,
+    # enabled}`` (see :class:`ClashRule` in ``schemas.py``). The engine
+    # consults this list during the broad phase: the first matching
+    # enabled rule swaps in its ``tolerance_m`` for the run-wide value
+    # (and stamps its ``severity_override`` onto the result). Order
+    # matters — the first match wins. Defaults to ``[]`` so legacy
+    # runs / fresh runs without rules behave exactly as before.
+    rules: Mapped[list] = mapped_column(  # type: ignore[assignment]
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     created_by: Mapped[str] = mapped_column(String(64), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -226,9 +237,81 @@ class ClashResult(Base):
     comments: Mapped[list] = mapped_column(  # type: ignore[assignment]
         JSON, nullable=False, default=list, server_default="[]"
     )
+    # Wave A3 — collaboration. Watcher user-ids (strings) subscribed to
+    # this clash; powers the fan-out on triage / comment events.
+    # ``history`` is an additive audit trail of
+    # ``{ts, actor, field, before, after}`` entries appended every time
+    # a triage field changes (status / severity / assignee / due_date)
+    # or a comment is added. Chronological order, never truncated.
+    # Both default to an empty list so legacy rows + response shapes
+    # stay safe across re-deploys.
+    watchers: Mapped[list] = mapped_column(  # type: ignore[assignment]
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+    history: Mapped[list] = mapped_column(  # type: ignore[assignment]
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+    # Wave A2 — open-ended JSON envelope for engine-derived annotations
+    # that are NOT authoritative state (the user-confirmed ``severity`` /
+    # ``status`` / ``assigned_to`` columns remain the source of truth).
+    # Currently carries ``severity_suggestion`` — a one-step-up advisory
+    # bump on deep hard clashes (``penetration_m > 0.10``) that the UI
+    # surfaces as a "Suggested: …" chip next to the badge. SQLAlchemy
+    # reserves ``metadata`` on Base; the column is mapped as ``meta``.
+    meta: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    # Wave A4 — run-scoped spatial cluster id assigned by the
+    # post-detection DBSCAN over (cx, cy, cz). NULL marks DBSCAN noise
+    # (a lone clash with no neighbours within ``eps_m``) or rows from
+    # runs that pre-date clustering. Looked up against
+    # :class:`ClashCluster` for the AI-derived label.
+    cluster_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bcf_topic_guid: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     run: Mapped[ClashRun] = relationship(back_populates="results")
 
     def __repr__(self) -> str:
         return f"<ClashResult {self.a_name} x {self.b_name} ({self.clash_type})>"
+
+
+class ClashCluster(Base):
+    """‌⁠‍AI-derived label for a run-scoped spatial cluster of clashes.
+
+    The DBSCAN pass groups clash centroids that sit within ``eps_m`` of
+    each other into ``cluster_id`` buckets (per :class:`ClashRun`); this
+    table caches a short human-style label for each non-noise bucket
+    (e.g. "MEP × Structural — Level 3") plus its member count, so the
+    review-table chip group renders without a per-render heuristic
+    re-derivation. Noise rows (``cluster_id IS NULL``) have no row here.
+    """
+
+    __tablename__ = "oe_clash_cluster"
+    __table_args__ = (
+        Index("ix_clash_cluster_run", "run_id"),
+        Index("ix_clash_cluster_run_cluster", "run_id", "cluster_id"),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("oe_clash_run.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Run-scoped integer cluster index produced by ``_cluster_results``.
+    # Unique per run (the index above is non-unique deliberately — a
+    # cluster can be re-labelled, and SQLite + alembic round-trips are
+    # easier without a unique constraint we don't strictly need).
+    cluster_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Short, human-style heuristic label (no LLM call) — derived from the
+    # dominant discipline pair + storey of the cluster's members.
+    label: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="", server_default=""
+    )
+    # Member count — number of clash results assigned to this cluster.
+    # Stored so the chip count never requires a join against results.
+    size: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
+    def __repr__(self) -> str:
+        return f"<ClashCluster {self.cluster_id} '{self.label}' n={self.size}>"

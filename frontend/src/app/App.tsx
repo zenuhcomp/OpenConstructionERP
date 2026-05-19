@@ -178,6 +178,15 @@ const ProjectIntelligencePage = lazy(() =>
 const FileManagerPage = lazy(() =>
   import('@/features/file-manager/FileManagerPage').then((m) => ({ default: m.FileManagerPage }))
 );
+const TrashPage = lazy(() =>
+  import('@/features/file-trash/TrashPage').then((m) => ({ default: m.TrashPage }))
+);
+const GlobalSearchPage = lazy(() =>
+  import('@/features/file-distribution').then((m) => ({ default: m.GlobalSearchPage }))
+);
+const TransmittalLogPage = lazy(() =>
+  import('@/features/file-transmittals/TransmittalLogPage').then((m) => ({ default: m.TransmittalLogPage }))
+);
 const SharePage = lazy(() =>
   import('@/features/file-manager/SharePage').then((m) => ({ default: m.SharePage }))
 );
@@ -532,6 +541,9 @@ export default function App() {
         <Route path="/changeorders" element={<P title="Change Orders"><ChangeOrdersPage /></P>} />
         <Route path="/documents" element={<Navigate to="/files" replace />} />
         <Route path="/photos" element={<P title="Project Photos"><PhotoGalleryPage /></P>} />
+        <Route path="/files/trash" element={<P title="Recycle Bin"><TrashPage /></P>} />
+        <Route path="/files/search" element={<P title="Search across projects"><GlobalSearchPage /></P>} />
+        <Route path="/files/transmittals" element={<P title="Transmittals"><TransmittalLogPage /></P>} />
         <Route path="/files" element={<P title="Project Files"><FileManagerPage /></P>} />
         <Route path="/projects/:projectId/files" element={<P title="Project Files"><FileManagerPage /></P>} />
 

@@ -18,7 +18,7 @@
  *     is no camera/point param, so we isolate both clash elements by id.
  */
 
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -55,6 +55,16 @@ import {
   GitCompareArrows,
   Keyboard,
   Sparkles,
+  Eye,
+  EyeOff,
+  History,
+  Reply,
+  AtSign,
+  FileUp,
+  ChevronDown,
+  Filter,
+  Link2,
+  ArrowRightCircle,
 } from 'lucide-react';
 import { Card } from '@/shared/ui/Card';
 import { Button } from '@/shared/ui/Button';
@@ -62,6 +72,7 @@ import { Badge } from '@/shared/ui/Badge';
 import { EmptyState } from '@/shared/ui/EmptyState';
 import { MiniGeometryPreview } from '@/shared/ui/MiniGeometryPreview';
 import { useToastStore } from '@/stores/useToastStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import {
   clashApi,
@@ -74,6 +85,8 @@ import {
   type ClashGroupBy,
   type ClashType,
   type ClashSeverity,
+  type ClashComment,
+  type ClashHistoryEntry,
 } from './api';
 import { buildClashBimLink } from './clashBimLink';
 
@@ -184,6 +197,19 @@ const STATUS_OPTIONS = [
 ] as const;
 type StatusOpt = (typeof STATUS_OPTIONS)[number];
 
+/** Linear three-step workflow that 95% of clashes follow:
+ *  ``new → active → reviewed``. After ``reviewed`` the coordinator
+ *  picks one of the terminal states (approved / resolved / ignored)
+ *  explicitly from the dropdown. */
+const STATUS_FLOW: readonly StatusOpt[] = ['new', 'active', 'reviewed'] as const;
+/** Next state for one-click advance; ``null`` at the flow tail / terminal. */
+function nextStatusOf(s: string): StatusOpt | null {
+  const i = STATUS_FLOW.indexOf(s as StatusOpt);
+  if (i < 0) return null;
+  if (i >= STATUS_FLOW.length - 1) return null;
+  return STATUS_FLOW[i + 1] ?? null;
+}
+
 /** Coordination priority — high → low. The order doubles as the sort
  *  ranking (critical sorts first). */
 const SEVERITY_OPTIONS: ClashSeverity[] = [
@@ -214,6 +240,37 @@ function severityOf(r: { severity?: ClashSeverity }): ClashSeverity {
   return r.severity ?? 'medium';
 }
 
+/** Engine-suggested severity bump (Wave A2). Surfaces only when a
+ *  meaningful upgrade is on offer (suggestion is strictly more urgent
+ *  than the current severity). */
+function suggestionOf(r: ClashResult): ClashSeverity | undefined {
+  const s = r.meta?.severity_suggestion;
+  if (!s) return undefined;
+  const cur = severityOf(r);
+  if (SEVERITY_RANK[s] >= SEVERITY_RANK[cur]) return undefined;
+  return s;
+}
+
+/** Order-independent two-value key — discipline, storey or model pair.
+ *  ``null``/``undefined`` normalises to "—" so the facet picks up
+ *  "(no level)" as a real bucket instead of silently dropping rows. */
+function orderedPairKey(
+  a: string | number | null | undefined,
+  b: string | number | null | undefined,
+): string {
+  const sa = a == null || a === '' ? '—' : String(a);
+  const sb = b == null || b === '' ? '—' : String(b);
+  const [lo, hi] = sa < sb ? [sa, sb] : [sb, sa];
+  return `${lo}|${hi}`;
+}
+
+/** Pair-cluster signature — unordered ``a_stable_id|b_stable_id``,
+ *  independent of ``clash_type`` so sub-clashes between the same two
+ *  elements collapse into one master row. */
+function pairClusterKey(r: ClashResult): string {
+  return orderedPairKey(r.a_stable_id || r.a_name, r.b_stable_id || r.b_name);
+}
+
 /** True when an ISO "YYYY-MM-DD" due date is strictly before today (local
  *  date). Used for the overdue chip styling. */
 function isOverdue(due: string | null | undefined): boolean {
@@ -228,9 +285,15 @@ function isOverdue(due: string | null | undefined): boolean {
 /** How many result rows we page into the browser for client-side
  *  filter/sort. Multiple of the backend's 500-row max. KPI tiles come from
  *  the authoritative run `summary`, NOT this capped set, so the tiles stay
- *  correct even when the row set is capped. */
-const CLIENT_CAP = 2000;
+ *  correct even when the row set is capped. Wave A2 raised this from
+ *  2000 to 10000 — the table now uses IntersectionObserver-windowed
+ *  chunks so very large runs stay smooth. */
+const CLIENT_CAP = 10000;
 const PAGE_SIZE = 100;
+/** Chunk size for the IntersectionObserver-windowed body. Renders in
+ *  batches of N — only chunks intersecting the viewport (or its 600 px
+ *  lookahead) mount their rows. */
+const WINDOW_CHUNK = 50;
 
 type SortKey =
   | 'idx'
@@ -335,6 +398,13 @@ function resultGroupKey(
 /** A flat render list entry: either a group header or a clash row. */
 type RenderItem =
   | { kind: 'group'; key: string; label: string; count: number }
+  | {
+      kind: 'pair';
+      key: string;
+      label: string;
+      members: ClashResult[];
+      head: ClashResult;
+    }
   | { kind: 'row'; row: ClashResult };
 
 /** Coloured priority badge. critical=red, high=orange, medium=amber,
@@ -447,6 +517,17 @@ export function ClashDetectionPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(),
   );
+  // Wave A2 — pair clustering. When ON, every row sharing the same
+  // unordered element-pair signature collapses into one master row with
+  // a count×N badge, expandable in place. Independent of `resultGroupBy`.
+  const [pairCluster, setPairCluster] = useState(false);
+  const [expandedPairs, setExpandedPairs] = useState<Set<string>>(new Set());
+  // Wave A2 — collapsible faceted filter rail. Default OFF so the pill
+  // bar stays the lightweight quick filter; the rail is the power view.
+  const [showFacets, setShowFacets] = useState(false);
+  const [fDiscPair, setFDiscPair] = useState<Set<string>>(new Set());
+  const [fLevelPair, setFLevelPair] = useState<Set<string>>(new Set());
+  const [fModelPair, setFModelPair] = useState<Set<string>>(new Set());
 
   const modelsQ = useQuery({
     queryKey: ['clash-models', projectId],
@@ -579,6 +660,11 @@ export function ClashDetectionPage() {
     setSelResults(new Set());
     setResultGroupBy('none');
     setCollapsedGroups(new Set());
+    setPairCluster(false);
+    setExpandedPairs(new Set());
+    setFDiscPair(new Set());
+    setFLevelPair(new Set());
+    setFModelPair(new Set());
     setDetailId(null);
     setKbRow(-1);
     setCompareBaseId(null);
@@ -696,6 +782,102 @@ export function ClashDetectionPage() {
     },
   });
 
+  // Wave A2 — bulk severity reclassification. Same optimistic+invalidate
+  // pattern as `statusMut`; kept as a sibling mutation so the bulk
+  // toolbar can fan out one mutate per selected row without touching
+  // existing single-row triage paths.
+  const severityMut = useMutation({
+    mutationFn: (v: { id: string; severity: ClashSeverity }) =>
+      clashApi.updateResult(projectId, runId, v.id, { severity: v.severity }),
+    onMutate: async (v) => {
+      await qc.cancelQueries({
+        queryKey: ['clash-results', projectId, runId],
+      });
+      const prev = qc.getQueryData<{ items: ClashResult[] }>([
+        'clash-results',
+        projectId,
+        runId,
+      ]);
+      qc.setQueryData<{ items: ClashResult[] }>(
+        ['clash-results', projectId, runId],
+        (old) =>
+          old
+            ? {
+                ...old,
+                items: old.items.map((r) =>
+                  r.id === v.id ? { ...r, severity: v.severity } : r,
+                ),
+              }
+            : old,
+      );
+      return { prev };
+    },
+    onError: (e: Error, _v, ctx) => {
+      if (ctx?.prev)
+        qc.setQueryData(['clash-results', projectId, runId], ctx.prev);
+      addToast({
+        type: 'error',
+        title: t('clash.severity_failed', {
+          defaultValue: 'Could not update severity‌⁠‍',
+        }),
+        message: e.message,
+      });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({
+        queryKey: ['clash-results', projectId, runId],
+      });
+      qc.invalidateQueries({ queryKey: ['clash-run', projectId, runId] });
+    },
+  });
+
+  // Wave A2 — bulk assignee set (sibling mutation; same optimistic contract).
+  const assignMut = useMutation({
+    mutationFn: (v: { id: string; assigned_to: string | null }) =>
+      clashApi.updateResult(projectId, runId, v.id, {
+        assigned_to: v.assigned_to,
+      }),
+    onMutate: async (v) => {
+      await qc.cancelQueries({
+        queryKey: ['clash-results', projectId, runId],
+      });
+      const prev = qc.getQueryData<{ items: ClashResult[] }>([
+        'clash-results',
+        projectId,
+        runId,
+      ]);
+      qc.setQueryData<{ items: ClashResult[] }>(
+        ['clash-results', projectId, runId],
+        (old) =>
+          old
+            ? {
+                ...old,
+                items: old.items.map((r) =>
+                  r.id === v.id ? { ...r, assigned_to: v.assigned_to } : r,
+                ),
+              }
+            : old,
+      );
+      return { prev };
+    },
+    onError: (e: Error, _v, ctx) => {
+      if (ctx?.prev)
+        qc.setQueryData(['clash-results', projectId, runId], ctx.prev);
+      addToast({
+        type: 'error',
+        title: t('clash.assign_failed', {
+          defaultValue: 'Could not update assignee‌⁠‍',
+        }),
+        message: e.message,
+      });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({
+        queryKey: ['clash-results', projectId, runId],
+      });
+    },
+  });
+
   // Per-clash collaboration: assignee / due date / add-comment. Optimistic
   // for the scalar fields; the comment text is appended optimistically with
   // a provisional author/ts, then the server's authoritative result (which
@@ -705,7 +887,7 @@ export function ClashDetectionPage() {
       id: string;
       assigned_to?: string | null;
       due_date?: string | null;
-      add_comment?: { text: string };
+      add_comment?: { text: string; reply_to?: string | null };
     }) => {
       const { id, ...body } = v;
       return clashApi.updateResult(projectId, runId, id, body);
@@ -742,6 +924,7 @@ export function ClashDetectionPage() {
                         author_id: null,
                         ts: new Date().toISOString(),
                         text: v.add_comment.text,
+                        reply_to: v.add_comment.reply_to ?? null,
                       },
                     ];
                   }
@@ -803,6 +986,38 @@ export function ClashDetectionPage() {
     },
     onError: (e: Error) => addToast({ type: 'error', title: e.message }),
   });
+
+  // BCF round-trip import (Wave A3). Topics are matched by signature
+  // (or topic guid as fallback) against the run's existing rows; the
+  // toast surfaces matched / unmatched / parse-error counts so the
+  // user sees exactly what the round-trip touched.
+  const importBcfMut = useMutation({
+    mutationFn: (file: File) =>
+      clashApi.importBcf(projectId, runId, file),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['clash-results', projectId, runId] });
+      qc.invalidateQueries({ queryKey: ['clash-run', projectId, runId] });
+      addToast({
+        type: 'success',
+        title: t('clash.bcf_import_done', {
+          defaultValue:
+            'BCF import: {{m}} matched, {{u}} unmatched, {{e}} errors‌⁠‍',
+          m: r.matched,
+          u: r.unmatched,
+          e: r.errors,
+        }),
+      });
+    },
+    onError: (e: Error) =>
+      addToast({
+        type: 'error',
+        title: t('clash.bcf_import_failed', {
+          defaultValue: 'BCF import failed‌⁠‍',
+        }),
+        message: e.message,
+      }),
+  });
+  const bcfFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const delMut = useMutation({
     mutationFn: (id: string) => clashApi.deleteRun(projectId, id),
@@ -932,6 +1147,21 @@ export function ClashDetectionPage() {
             : [r.b_discipline, r.a_discipline];
         if (`${pa}|${pb}` !== fPair) return false;
       }
+      if (
+        fDiscPair.size > 0 &&
+        !fDiscPair.has(orderedPairKey(r.a_discipline, r.b_discipline))
+      )
+        return false;
+      if (
+        fLevelPair.size > 0 &&
+        !fLevelPair.has(orderedPairKey(r.a_storey, r.b_storey))
+      )
+        return false;
+      if (
+        fModelPair.size > 0 &&
+        !fModelPair.has(orderedPairKey(r.a_model_id, r.b_model_id))
+      )
+        return false;
       if (r.clash_type === 'hard' && r.penetration_m < minPenM) return false;
       if (q) {
         const hay = `${r.a_name} ${r.b_name} ${r.a_stable_id} ${r.b_stable_id} ${r.a_discipline} ${r.b_discipline}`.toLowerCase();
@@ -947,6 +1177,9 @@ export function ClashDetectionPage() {
     fSeverity,
     fStatus,
     fPair,
+    fDiscPair,
+    fLevelPair,
+    fModelPair,
     kpiFilter,
   ]);
 
@@ -996,14 +1229,50 @@ export function ClashDetectionPage() {
     return arr;
   }, [filtered, sortKey, sortDir]);
 
-  // Flat render list: when a grouping axis is active, `sorted` is
-  // reordered by group (groups in first-appearance order, rows within a
-  // group keep the active sort) and group-header markers are injected;
-  // collapsed groups contribute only their header. Pagination then runs
-  // over this flat list so the sticky table / paging stay unchanged.
+  // Flat render list. Stacked transforms (applied in order):
+  //   1. Group axis — if active, reorder rows by bucket + inject headers.
+  //   2. Pair cluster (Wave A2) — if ON, collapse same-pair rows within
+  //      each bucket into a master row with N×members, expandable.
+  // Pagination runs over this flat list so the sticky table / paging
+  // stay unchanged.
   const renderItems = useMemo<RenderItem[]>(() => {
+    const cluster = (rows: ClashResult[]): RenderItem[] => {
+      if (!pairCluster) {
+        return rows.map((row) => ({ kind: 'row', row }) as RenderItem);
+      }
+      const order: string[] = [];
+      const groups = new Map<string, ClashResult[]>();
+      for (const r of rows) {
+        const k = pairClusterKey(r);
+        let g = groups.get(k);
+        if (!g) {
+          g = [];
+          groups.set(k, g);
+          order.push(k);
+        }
+        g.push(r);
+      }
+      const out: RenderItem[] = [];
+      for (const key of order) {
+        const members = groups.get(key)!;
+        const head = members[0]!;
+        if (members.length === 1) {
+          out.push({ kind: 'row', row: head });
+          continue;
+        }
+        const label = `${head.a_name || head.a_stable_id} ↔ ${
+          head.b_name || head.b_stable_id
+        }`;
+        out.push({ kind: 'pair', key, label, members, head });
+        if (expandedPairs.has(key)) {
+          for (const m of members) out.push({ kind: 'row', row: m });
+        }
+      }
+      return out;
+    };
+
     if (resultGroupBy === 'none') {
-      return sorted.map((row) => ({ kind: 'row', row }) as RenderItem);
+      return cluster(sorted);
     }
     const order: string[] = [];
     const buckets = new Map<
@@ -1030,11 +1299,11 @@ export function ClashDetectionPage() {
         count: b.rows.length,
       });
       if (!collapsedGroups.has(key)) {
-        for (const row of b.rows) out.push({ kind: 'row', row });
+        out.push(...cluster(b.rows));
       }
     }
     return out;
-  }, [sorted, resultGroupBy, collapsedGroups]);
+  }, [sorted, resultGroupBy, collapsedGroups, pairCluster, expandedPairs]);
 
   const pageCount = Math.max(
     1,
@@ -1080,10 +1349,14 @@ export function ClashDetectionPage() {
     fSeverity,
     fStatus,
     fPair,
+    fDiscPair,
+    fLevelPair,
+    fModelPair,
     kpiFilter,
     sortKey,
     sortDir,
     resultGroupBy,
+    pairCluster,
   ]);
 
   const toggleSort = useCallback(
@@ -1138,6 +1411,22 @@ export function ClashDetectionPage() {
     setFMinPen(0);
     setFSearch('');
     setKpiFilter('all');
+    setFDiscPair(new Set());
+    setFLevelPair(new Set());
+    setFModelPair(new Set());
+  }
+
+  /** Toggle a key in a Set state (the facet-rail chip contract). */
+  function toggleSetKey<T>(
+    s: React.Dispatch<React.SetStateAction<Set<T>>>,
+    k: T,
+  ) {
+    s((cur) => {
+      const n = new Set(cur);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
   }
 
   const hasActiveFilters =
@@ -1147,7 +1436,59 @@ export function ClashDetectionPage() {
     !!fPair ||
     fMinPen > 0 ||
     !!fSearch.trim() ||
-    kpiFilter !== 'all';
+    kpiFilter !== 'all' ||
+    fDiscPair.size > 0 ||
+    fLevelPair.size > 0 ||
+    fModelPair.size > 0;
+
+  // Faceted filter rail counts — derived from the FULL row set so a
+  // narrow active filter never makes the other facets read as empty.
+  const facets = useMemo(() => {
+    const disc = new Map<string, number>();
+    const lvl = new Map<string, number>();
+    const mdl = new Map<string, number>();
+    const sev = new Map<ClashSeverity, number>();
+    const sta = new Map<string, number>();
+    const typ = new Map<string, number>();
+    const modelName = new Map<string, string>();
+    for (const m of modelsQ.data ?? []) modelName.set(m.id, m.name);
+    for (const r of allResults) {
+      disc.set(
+        orderedPairKey(r.a_discipline, r.b_discipline),
+        (disc.get(orderedPairKey(r.a_discipline, r.b_discipline)) ?? 0) + 1,
+      );
+      lvl.set(
+        orderedPairKey(r.a_storey, r.b_storey),
+        (lvl.get(orderedPairKey(r.a_storey, r.b_storey)) ?? 0) + 1,
+      );
+      mdl.set(
+        orderedPairKey(r.a_model_id, r.b_model_id),
+        (mdl.get(orderedPairKey(r.a_model_id, r.b_model_id)) ?? 0) + 1,
+      );
+      const sv = severityOf(r);
+      sev.set(sv, (sev.get(sv) ?? 0) + 1);
+      sta.set(r.status, (sta.get(r.status) ?? 0) + 1);
+      typ.set(r.clash_type, (typ.get(r.clash_type) ?? 0) + 1);
+    }
+    const modelPairLabel = (key: string) =>
+      key
+        .split('|')
+        .map((id) =>
+          id === '—' ? '—' : (modelName.get(id) ?? id.slice(0, 8)),
+        )
+        .join(' ↔ ');
+    const sortDesc = <K,>(m: Map<K, number>) =>
+      [...m.entries()].sort((a, b) => b[1] - a[1]);
+    return {
+      disc: sortDesc(disc),
+      level: sortDesc(lvl),
+      model: sortDesc(mdl),
+      severity: sortDesc(sev),
+      status: sortDesc(sta),
+      type: sortDesc(typ),
+      modelPairLabel,
+    };
+  }, [allResults, modelsQ.data]);
 
   /** Build the verified BIM-viewer deep-link for a clash result.
    *
@@ -2242,6 +2583,72 @@ export function ClashDetectionPage() {
                       </select>
                     </label>
 
+                    {/* Wave A2 — pair clustering. Independent of the group
+                        axis: collapses every row sharing the same unordered
+                        element pair into one master row with N×members. */}
+                    <button
+                      type="button"
+                      onClick={() => setPairCluster((v) => !v)}
+                      className={clsx(
+                        'inline-flex h-8 items-center gap-1 rounded-md border px-2 text-2xs font-medium transition-colors',
+                        pairCluster
+                          ? 'border-oe-blue bg-oe-blue/10 text-oe-blue'
+                          : 'border-border bg-surface-primary text-content-secondary hover:bg-surface-tertiary',
+                      )}
+                      title={t('clash.pair_cluster_hint', {
+                        defaultValue:
+                          'Collapse rows that share the same element pair into one master row.‌⁠‍',
+                      })}
+                    >
+                      <Link2 className="h-3.5 w-3.5" />
+                      {t('clash.pair_cluster_toggle', {
+                        defaultValue: 'Group by element pair‌⁠‍',
+                      })}
+                    </button>
+
+                    {/* Wave A2 — Advanced (faceted) filter rail toggle. */}
+                    <button
+                      type="button"
+                      onClick={() => setShowFacets((v) => !v)}
+                      className={clsx(
+                        'inline-flex h-8 items-center gap-1 rounded-md border px-2 text-2xs font-medium transition-colors',
+                        showFacets
+                          ? 'border-oe-blue bg-oe-blue/10 text-oe-blue'
+                          : 'border-border bg-surface-primary text-content-secondary hover:bg-surface-tertiary',
+                      )}
+                    >
+                      <Filter className="h-3.5 w-3.5" />
+                      {t('clash.advanced_filters', {
+                        defaultValue: 'Advanced filters‌⁠‍',
+                      })}
+                    </button>
+
+                    {/* Wave A3 — BCF round-trip import. Hidden file input
+                        driven by a regular Button so the action sits in
+                        the same toolbar row as the Export BCF button. */}
+                    <input
+                      ref={bcfFileInputRef}
+                      type="file"
+                      accept=".bcfzip,.bcf,application/zip"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) importBcfMut.mutate(f);
+                        if (e.target) e.target.value = '';
+                      }}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={importBcfMut.isPending}
+                      icon={<FileUp className="h-4 w-4" />}
+                      onClick={() => bcfFileInputRef.current?.click()}
+                    >
+                      {t('clash.import_bcf', {
+                        defaultValue: 'Import BCF‌⁠‍',
+                      })}
+                    </Button>
+
                     <Button
                       variant={
                         selResults.size ? 'primary' : 'secondary'
@@ -2294,7 +2701,10 @@ export function ClashDetectionPage() {
                     </Button>
                   </div>
 
-                  {/* Status filter pills + min-penetration slider */}
+                  {/* Status filter pills + min-penetration slider.
+                      Wave A2 — hidden when the facet rail is open
+                      (the rail covers status / severity / type natively). */}
+                  {!showFacets && (
                   <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-3">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="flex items-center gap-1 text-2xs font-medium uppercase tracking-wide text-content-tertiary">
@@ -2395,6 +2805,28 @@ export function ClashDetectionPage() {
                       </span>
                     </span>
                   </div>
+                  )}
+
+                  {/* Wave A2 — Faceted filter rail (advanced view). */}
+                  {showFacets && (
+                    <FacetRail
+                      facets={facets}
+                      fStatus={fStatus}
+                      fSeverity={fSeverity}
+                      fType={fType}
+                      fDiscPair={fDiscPair}
+                      fLevelPair={fLevelPair}
+                      fModelPair={fModelPair}
+                      onToggleStatus={(s) => toggleStatusFilter(s)}
+                      onToggleSeverity={(s) => toggleSeverityFilter(s)}
+                      onSetType={setFType}
+                      onToggleDiscPair={(k) => toggleSetKey(setFDiscPair, k)}
+                      onToggleLevelPair={(k) => toggleSetKey(setFLevelPair, k)}
+                      onToggleModelPair={(k) => toggleSetKey(setFModelPair, k)}
+                      onClear={clearAllFilters}
+                      t={t}
+                    />
+                  )}
 
                   {/* Active-filter chips */}
                   {hasActiveFilters && (
@@ -2651,8 +3083,11 @@ export function ClashDetectionPage() {
                           </th>
                         </tr>
                       </thead>
-                      <tbody>
-                        {pageItems.map((it) => {
+                      {/* Wave A2 — windowed body. Chunks of 50 mount via
+                          IntersectionObserver so very large pages stay
+                          interactive. */}
+                      <ChunkedBody chunkSize={WINDOW_CHUNK} items={pageItems}>
+                        {(it: RenderItem) => {
                           if (it.kind === 'group') {
                             const collapsed = collapsedGroups.has(
                               it.key,
@@ -2680,6 +3115,67 @@ export function ClashDetectionPage() {
                                       {it.count}
                                     </span>
                                   </button>
+                                </td>
+                              </tr>
+                            );
+                          }
+                          if (it.kind === 'pair') {
+                            // Pair-cluster master — applies status changes
+                            // to every member (bulk mutate via statusMut).
+                            const expanded = expandedPairs.has(it.key);
+                            const head = it.head;
+                            return (
+                              <tr
+                                key={`p-${it.key}`}
+                                className="border-b border-border-light bg-oe-blue/[0.04]"
+                              >
+                                <td colSpan={10} className="px-3 py-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        toggleSetKey(setExpandedPairs, it.key)
+                                      }
+                                      className="inline-flex items-center gap-1 text-left text-xs font-semibold text-content-primary"
+                                      aria-expanded={expanded}
+                                    >
+                                      {expanded ? (
+                                        <ChevronDown className="h-3.5 w-3.5 text-content-tertiary" />
+                                      ) : (
+                                        <ChevronRight className="h-3.5 w-3.5 text-content-tertiary" />
+                                      )}
+                                      <Link2 className="h-3.5 w-3.5 text-oe-blue" />
+                                      <span className="truncate">
+                                        {it.label}
+                                      </span>
+                                    </button>
+                                    <Badge variant="blue" size="sm">
+                                      {t('clash.pair_count', {
+                                        defaultValue: '{{n}}× clashes‌⁠‍',
+                                        n: it.members.length,
+                                      })}
+                                    </Badge>
+                                    <span className="ml-auto inline-flex items-center gap-1">
+                                      <StatusWorkflow
+                                        status={head.status}
+                                        onChange={(s) => {
+                                          for (const m of it.members) {
+                                            statusMut.mutate({
+                                              id: m.id,
+                                              status: s,
+                                            });
+                                          }
+                                        }}
+                                        t={t}
+                                      />
+                                      <span className="text-2xs text-content-tertiary">
+                                        {t('clash.pair_bulk_hint', {
+                                          defaultValue:
+                                            'applies to all members',
+                                        })}
+                                      </span>
+                                    </span>
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -2786,7 +3282,38 @@ export function ClashDetectionPage() {
                                 </Badge>
                               </td>
                               <td className="px-3 py-2">
-                                <SeverityBadge severity={sev} t={t} />
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <SeverityBadge severity={sev} t={t} />
+                                  {(() => {
+                                    const sug = suggestionOf(r);
+                                    if (!sug) return null;
+                                    return (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          severityMut.mutate({
+                                            id: r.id,
+                                            severity: sug,
+                                          })
+                                        }
+                                        title={t('clash.severity_suggested_hint', {
+                                          defaultValue:
+                                            'Engine-suggested severity from geometry. Click to accept.‌⁠‍',
+                                        })}
+                                        className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-oe-blue/60 px-1.5 py-0.5 text-[10px] font-medium text-oe-blue hover:bg-oe-blue/10"
+                                      >
+                                        <Sparkles className="h-2.5 w-2.5" />
+                                        {t('clash.severity_suggested', {
+                                          defaultValue:
+                                            'Suggested: {{s}}‌⁠‍',
+                                          s: t(`clash.severity.${sug}`, {
+                                            defaultValue: sug,
+                                          }),
+                                        })}
+                                      </button>
+                                    );
+                                  })()}
+                                </div>
                               </td>
                               <td className="px-3 py-2 text-right tabular-nums text-content-secondary">
                                 {r.clash_type === 'hard'
@@ -2799,27 +3326,16 @@ export function ClashDetectionPage() {
                                   : '—'}
                               </td>
                               <td className="px-3 py-2">
-                                <select
-                                  value={r.status}
-                                  onChange={(e) =>
+                                <StatusWorkflow
+                                  status={r.status}
+                                  onChange={(s) =>
                                     statusMut.mutate({
                                       id: r.id,
-                                      status: e.target.value,
+                                      status: s,
                                     })
                                   }
-                                  className={clsx(
-                                    'rounded-md border px-1.5 py-1 text-2xs font-medium',
-                                    'border-border bg-surface-primary',
-                                  )}
-                                >
-                                  {STATUS_OPTIONS.map((s) => (
-                                    <option key={s} value={s}>
-                                      {t(`clash.status.${s}`, {
-                                        defaultValue: s,
-                                      })}
-                                    </option>
-                                  ))}
-                                </select>
+                                  t={t}
+                                />
                                 {/* Coordination state at a glance —
                                     assignee chip, comment count, due date
                                     (overdue = red). Click opens the detail
@@ -2921,11 +3437,54 @@ export function ClashDetectionPage() {
                               </td>
                             </tr>
                           );
-                        })}
-                      </tbody>
+                        }}
+                      </ChunkedBody>
                     </table>
                     </div>
                   </div>
+                )}
+
+                {/* Wave A2 — Bulk-actions toolbar. Fans severity / status
+                    / assignee mutations across the current selection.
+                    Severity gated by a confirm in the caller (the most
+                    disruptive of the three). */}
+                {selResults.size > 0 && sorted.length > 0 && (
+                  <BulkActionsBar
+                    count={selResults.size}
+                    busy={
+                      severityMut.isPending ||
+                      assignMut.isPending ||
+                      statusMut.isPending
+                    }
+                    onSetSeverity={(sv) => {
+                      const msg = t('clash.bulk_severity_confirm', {
+                        defaultValue:
+                          'Set severity to "{{s}}" for {{n}} selected clash(es)?‌⁠‍',
+                        s: sv,
+                        n: selResults.size,
+                      });
+                      if (!window.confirm(msg)) return;
+                      for (const id of selResults) {
+                        severityMut.mutate({ id, severity: sv });
+                      }
+                    }}
+                    onSetStatus={(s) => {
+                      for (const id of selResults) {
+                        statusMut.mutate({ id, status: s });
+                      }
+                    }}
+                    onSetAssignee={(v) => {
+                      const trimmed = v.trim();
+                      for (const id of selResults) {
+                        assignMut.mutate({
+                          id,
+                          assigned_to: trimmed || null,
+                        });
+                      }
+                    }}
+                    onClear={() => setSelResults(new Set())}
+                    t={t}
+                  />
                 )}
 
                 {/* Footer: selection summary + pagination */}
@@ -3006,6 +3565,8 @@ export function ClashDetectionPage() {
       {detailRow && (
         <ClashDetailPanel
           row={detailRow}
+          projectId={projectId}
+          runId={runId}
           onClose={() => setDetailId(null)}
           onSaveAssignee={(v) =>
             detailMut.mutate({ id: detailRow.id, assigned_to: v })
@@ -3013,10 +3574,10 @@ export function ClashDetectionPage() {
           onSaveDueDate={(v) =>
             detailMut.mutate({ id: detailRow.id, due_date: v })
           }
-          onAddComment={(text) =>
+          onAddComment={(text, replyTo) =>
             detailMut.mutate({
               id: detailRow.id,
-              add_comment: { text },
+              add_comment: { text, reply_to: replyTo ?? null },
             })
           }
           saving={detailMut.isPending}
@@ -3196,6 +3757,481 @@ function TableSkeleton() {
       ))}
     </div>
   );
+}
+
+/**
+ * Three-step status workflow control (Wave A2). Replaces the per-row
+ * ``<select>``: one chip per stage of the linear ``new → active →
+ * reviewed`` path (the 95% case), an arrow that advances to the next
+ * stage, and a small dropdown for the terminal states
+ * (approved / resolved / ignored). One-click "advance" is disabled at
+ * the end of the flow — the user picks a terminal state explicitly.
+ */
+function StatusWorkflow({
+  status,
+  onChange,
+  t,
+}: {
+  status: string;
+  onChange: (s: string) => void;
+  t: TFn;
+}) {
+  const idx = STATUS_FLOW.indexOf(status as StatusOpt);
+  const inFlow = idx >= 0;
+  const terminal = !inFlow;
+  const next = nextStatusOf(status);
+  return (
+    <div className="flex items-center gap-1">
+      {STATUS_FLOW.map((s, i) => {
+        const isActive = inFlow && i === idx;
+        const isPast = inFlow && i < idx;
+        return (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onChange(s)}
+            title={t(`clash.status.${s}`, { defaultValue: s })}
+            className={clsx(
+              'h-6 rounded-full px-2 text-[10px] font-medium capitalize transition-colors',
+              isActive &&
+                'bg-oe-blue text-content-inverse shadow-sm',
+              isPast &&
+                'bg-oe-blue/15 text-oe-blue hover:bg-oe-blue/25',
+              !isActive &&
+                !isPast &&
+                'bg-surface-secondary text-content-tertiary hover:bg-surface-tertiary',
+            )}
+          >
+            {t(`clash.status.${s}`, { defaultValue: s })}
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        disabled={!next}
+        onClick={() => next && onChange(next)}
+        title={
+          next
+            ? t('clash.status_advance', {
+                defaultValue: 'Advance to {{s}}‌⁠‍',
+                s: t(`clash.status.${next}`, { defaultValue: next }),
+              })
+            : t('clash.status_terminal', {
+                defaultValue: 'At terminal status — pick from menu‌⁠‍',
+              })
+        }
+        className={clsx(
+          'inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors',
+          next
+            ? 'bg-oe-blue/10 text-oe-blue hover:bg-oe-blue/20'
+            : 'cursor-not-allowed bg-surface-secondary text-content-tertiary opacity-50',
+        )}
+      >
+        <ArrowRightCircle className="h-3.5 w-3.5" />
+      </button>
+      <select
+        value={terminal ? status : ''}
+        onChange={(e) => {
+          if (e.target.value) onChange(e.target.value);
+        }}
+        className={clsx(
+          'h-6 rounded-md border border-border bg-surface-primary px-1 text-[10px] font-medium',
+          terminal ? 'text-content-primary' : 'text-content-tertiary',
+        )}
+        title={t('clash.status_terminal_picker', {
+          defaultValue: 'Pick a terminal status‌⁠‍',
+        })}
+      >
+        <option value="">
+          {terminal
+            ? t(`clash.status.${status}`, { defaultValue: status })
+            : t('clash.status_more', { defaultValue: '…‌⁠‍' })}
+        </option>
+        {STATUS_OPTIONS.filter(
+          (s) => !STATUS_FLOW.includes(s) || (terminal && s !== status),
+        ).map((s) => (
+          <option key={s} value={s}>
+            {t(`clash.status.${s}`, { defaultValue: s })}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/**
+ * Bulk-actions toolbar (Wave A2). Fans severity / status / assignee
+ * mutations across the current selection. Pure controlled component —
+ * the parent gates severity behind a confirm before calling
+ * ``onSetSeverity`` (the destructive change of the three).
+ */
+function BulkActionsBar({
+  count,
+  busy,
+  onSetSeverity,
+  onSetStatus,
+  onSetAssignee,
+  onClear,
+  t,
+}: {
+  count: number;
+  busy: boolean;
+  onSetSeverity: (s: ClashSeverity) => void;
+  onSetStatus: (s: string) => void;
+  onSetAssignee: (v: string) => void;
+  onClear: () => void;
+  t: TFn;
+}) {
+  const [assignee, setAssignee] = useState('');
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-oe-blue/30 bg-oe-blue/[0.05] p-3 text-xs">
+      <span className="font-semibold text-oe-blue">
+        {t('clash.bulk_selected', {
+          defaultValue: '{{n}} selected — apply to all:‌⁠‍',
+          n: count,
+        })}
+      </span>
+      <label className="flex items-center gap-1">
+        <span className="text-content-tertiary">
+          {t('clash.bulk_severity', { defaultValue: 'Severity‌⁠‍' })}
+        </span>
+        <select
+          disabled={busy}
+          defaultValue=""
+          onChange={(e) => {
+            const v = e.target.value as ClashSeverity | '';
+            if (v) onSetSeverity(v);
+            e.target.value = '';
+          }}
+          className="h-7 rounded-md border border-border bg-surface-primary px-2 text-2xs"
+        >
+          <option value="">
+            {t('clash.bulk_pick', { defaultValue: 'Pick…‌⁠‍' })}
+          </option>
+          {SEVERITY_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {t(`clash.severity.${s}`, { defaultValue: s })}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1">
+        <span className="text-content-tertiary">
+          {t('clash.bulk_status', { defaultValue: 'Status‌⁠‍' })}
+        </span>
+        <select
+          disabled={busy}
+          defaultValue=""
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v) onSetStatus(v);
+            e.target.value = '';
+          }}
+          className="h-7 rounded-md border border-border bg-surface-primary px-2 text-2xs"
+        >
+          <option value="">
+            {t('clash.bulk_pick', { defaultValue: 'Pick…‌⁠‍' })}
+          </option>
+          {STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {t(`clash.status.${s}`, { defaultValue: s })}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1">
+        <span className="text-content-tertiary">
+          {t('clash.bulk_assignee', { defaultValue: 'Assignee‌⁠‍' })}
+        </span>
+        <input
+          value={assignee}
+          onChange={(e) => setAssignee(e.target.value)}
+          placeholder={t('clash.bulk_assignee_ph', {
+            defaultValue: 'name or e-mail‌⁠‍',
+          })}
+          className="h-7 w-40 rounded-md border border-border bg-surface-primary px-2 text-2xs"
+        />
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => onSetAssignee(assignee)}
+        >
+          {t('clash.bulk_assign_apply', { defaultValue: 'Apply‌⁠‍' })}
+        </Button>
+      </label>
+      <button
+        onClick={onClear}
+        className="ml-auto text-2xs font-medium text-content-tertiary hover:text-content-primary"
+      >
+        {t('clash.clear_selection', { defaultValue: 'Clear‌⁠‍' })}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Faceted filter rail (Wave A2). Multi-facet AND across categories, OR
+ * within each category. Counts derive from the FULL row set so a narrow
+ * active filter never makes other facets read as empty (standard
+ * faceted-search contract).
+ */
+function FacetRail({
+  facets,
+  fStatus,
+  fSeverity,
+  fType,
+  fDiscPair,
+  fLevelPair,
+  fModelPair,
+  onToggleStatus,
+  onToggleSeverity,
+  onSetType,
+  onToggleDiscPair,
+  onToggleLevelPair,
+  onToggleModelPair,
+  onClear,
+  t,
+}: {
+  facets: {
+    disc: [string, number][];
+    level: [string, number][];
+    model: [string, number][];
+    severity: [ClashSeverity, number][];
+    status: [string, number][];
+    type: [string, number][];
+    modelPairLabel: (key: string) => string;
+  };
+  fStatus: Set<string>;
+  fSeverity: Set<ClashSeverity>;
+  fType: 'all' | 'hard' | 'clearance';
+  fDiscPair: Set<string>;
+  fLevelPair: Set<string>;
+  fModelPair: Set<string>;
+  onToggleStatus: (s: string) => void;
+  onToggleSeverity: (s: ClashSeverity) => void;
+  onSetType: (v: 'all' | 'hard' | 'clearance') => void;
+  onToggleDiscPair: (k: string) => void;
+  onToggleLevelPair: (k: string) => void;
+  onToggleModelPair: (k: string) => void;
+  onClear: () => void;
+  t: TFn;
+}) {
+  return (
+    <div className="mt-3 grid gap-3 rounded-lg border border-border-light bg-surface-elevated p-3 md:grid-cols-2 lg:grid-cols-3">
+      <FacetGroup
+        title={t('clash.facet_status', { defaultValue: 'Status‌⁠‍' })}
+        rows={facets.status.map(([k, c]) => ({
+          key: k,
+          label: t(`clash.status.${k}`, { defaultValue: k }),
+          count: c,
+          on: fStatus.has(k),
+          onToggle: () => onToggleStatus(k),
+        }))}
+      />
+      <FacetGroup
+        title={t('clash.facet_severity', { defaultValue: 'Severity‌⁠‍' })}
+        rows={facets.severity.map(([k, c]) => ({
+          key: k,
+          label: t(`clash.severity.${k}`, { defaultValue: k }),
+          count: c,
+          on: fSeverity.has(k),
+          onToggle: () => onToggleSeverity(k),
+        }))}
+      />
+      <FacetGroup
+        title={t('clash.facet_type', { defaultValue: 'Clash type‌⁠‍' })}
+        rows={facets.type.map(([k, c]) => ({
+          key: k,
+          label: t(`clash.type_${k}`, { defaultValue: k }),
+          count: c,
+          on: fType === k,
+          onToggle: () =>
+            onSetType(
+              (fType === k ? 'all' : (k as 'hard' | 'clearance')) as
+                | 'all'
+                | 'hard'
+                | 'clearance',
+            ),
+        }))}
+      />
+      <FacetGroup
+        title={t('clash.facet_disc_pair', {
+          defaultValue: 'Discipline pair‌⁠‍',
+        })}
+        rows={facets.disc.map(([k, c]) => ({
+          key: k,
+          label: k.replace('|', ' ↔ '),
+          count: c,
+          on: fDiscPair.has(k),
+          onToggle: () => onToggleDiscPair(k),
+        }))}
+      />
+      <FacetGroup
+        title={t('clash.facet_level_pair', {
+          defaultValue: 'Level pair‌⁠‍',
+        })}
+        rows={facets.level.map(([k, c]) => ({
+          key: k,
+          label: k.replace('|', ' ↔ '),
+          count: c,
+          on: fLevelPair.has(k),
+          onToggle: () => onToggleLevelPair(k),
+        }))}
+      />
+      <FacetGroup
+        title={t('clash.facet_model_pair', {
+          defaultValue: 'Model pair‌⁠‍',
+        })}
+        rows={facets.model.map(([k, c]) => ({
+          key: k,
+          label: facets.modelPairLabel(k),
+          count: c,
+          on: fModelPair.has(k),
+          onToggle: () => onToggleModelPair(k),
+        }))}
+      />
+      <div className="md:col-span-2 lg:col-span-3">
+        <button
+          onClick={onClear}
+          className="text-2xs font-medium text-oe-blue hover:underline"
+        >
+          {t('clash.clear_all', { defaultValue: 'Clear all‌⁠‍' })}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FacetGroup({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: {
+    key: string;
+    label: string;
+    count: number;
+    on: boolean;
+    onToggle: () => void;
+  }[];
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-1.5 text-2xs font-semibold uppercase tracking-wide text-content-tertiary">
+        {title}
+      </div>
+      <div className="max-h-40 space-y-0.5 overflow-y-auto pr-1">
+        {rows.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            onClick={r.onToggle}
+            className={clsx(
+              'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-2xs transition-colors',
+              r.on
+                ? 'bg-oe-blue/10 text-oe-blue ring-1 ring-oe-blue/30'
+                : 'hover:bg-surface-secondary text-content-secondary',
+            )}
+          >
+            <span className="min-w-0 flex-1 truncate" title={r.label}>
+              {r.label || '—'}
+            </span>
+            <span
+              className={clsx(
+                'shrink-0 rounded-full px-1.5 text-[10px] font-medium tabular-nums',
+                r.on
+                  ? 'bg-oe-blue/20 text-oe-blue'
+                  : 'bg-surface-secondary text-content-tertiary',
+              )}
+            >
+              {r.count}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * IntersectionObserver-windowed tbody (Wave A2). Renders rows in chunks
+ * of N; off-screen chunks mount a height-preserving placeholder so the
+ * scrollbar geometry stays correct.
+ */
+function ChunkedBody({
+  items,
+  chunkSize,
+  children,
+}: {
+  items: RenderItem[];
+  chunkSize: number;
+  children: (it: RenderItem) => React.ReactNode;
+}) {
+  const chunks = useMemo(() => {
+    const out: RenderItem[][] = [];
+    for (let i = 0; i < items.length; i += chunkSize) {
+      out.push(items.slice(i, i + chunkSize));
+    }
+    return out;
+  }, [items, chunkSize]);
+  return (
+    <tbody>
+      {chunks.map((chunk, i) => (
+        <ChunkRow key={i} chunk={chunk} index={i} renderItem={children} />
+      ))}
+    </tbody>
+  );
+}
+
+function ChunkRow({
+  chunk,
+  index,
+  renderItem,
+}: {
+  chunk: RenderItem[];
+  index: number;
+  renderItem: (it: RenderItem) => React.ReactNode;
+}) {
+  // Keep the first two chunks always-mounted so the initial paint never
+  // shows a placeholder gap at the top.
+  const [visible, setVisible] = useState(index < 2);
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    if (visible) return;
+    const el = sentinelRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    // 600 px lookahead so we mount before the chunk enters the viewport.
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          obs.disconnect();
+        }
+      },
+      { rootMargin: '600px 0px 600px 0px' },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [visible]);
+  if (!visible) {
+    return (
+      <tr
+        ref={sentinelRef}
+        style={{ height: chunk.length * 36 }}
+        aria-hidden
+      >
+        <td colSpan={10} />
+      </tr>
+    );
+  }
+  // ``children`` can be a multi-row group (no Fragment wrapper) — fine
+  // because tbody accepts adjacent <tr> nodes natively.
+  return <>{chunk.map((it) => renderItem(it))}</>;
 }
 
 /**
@@ -3583,12 +4619,14 @@ function ModelCardPicker({
  * Per-clash collaboration slide-over. A right-hand panel (not a modal) so
  * the reviewer keeps the results table visible while triaging. Holds the
  * assignee editor (free-text — no user-picker dependency), a native
- * due-date input and the comments thread + add-comment textarea.
- * Keyboard-accessible: Esc closes, every control is natively focusable,
- * the backdrop is click-to-close.
+ * due-date input, a tabbed "Comments / Activity" pane and the watchers
+ * chip. Keyboard-accessible: Esc closes, every control is natively
+ * focusable, the backdrop is click-to-close.
  */
 function ClashDetailPanel({
   row,
+  projectId,
+  runId,
   onClose,
   onSaveAssignee,
   onSaveDueDate,
@@ -3598,21 +4636,95 @@ function ClashDetailPanel({
   t,
 }: {
   row: ClashResult;
+  projectId: string;
+  runId: string;
   onClose: () => void;
   onSaveAssignee: (v: string | null) => void;
   onSaveDueDate: (v: string | null) => void;
-  onAddComment: (text: string) => void;
+  onAddComment: (text: string, replyTo: string | null) => void;
   saving: boolean;
   bimLink: string;
   t: TFn;
 }) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const addToast = useToastStore((s) => s.addToast);
+  const userEmail = useAuthStore((s) => s.userEmail);
   const [assignee, setAssignee] = useState(row.assigned_to ?? '');
   const [due, setDue] = useState(row.due_date ?? '');
   const [draft, setDraft] = useState('');
-  // Quick-preview GLB load state — mirrors the BOQ grid `glbOk` pattern:
+  const [tab, setTab] = useState<'comments' | 'activity'>('comments');
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  // @mention autocomplete state. ``mentionOpen`` is the cursor-relative
+  // dropdown anchor; ``mentionQuery`` is the substring after the last
+  // unmatched ``@`` token used to filter the project-members list.
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  // Pre-existing GLB load state — mirrors the BOQ grid `glbOk` pattern:
   // flips false on a load error so we swap the canvas for a hint.
   const [glbOk, setGlbOk] = useState(true);
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Fetch project members for @mention autocomplete + author resolution.
+  // Falls back to an empty list when the caller isn't a project owner /
+  // admin (the endpoint 403s for plain viewers, which is the policy).
+  const membersQ = useQuery({
+    queryKey: ['clash-project-members', projectId],
+    queryFn: () => clashApi.projectMembers(projectId),
+    enabled: !!projectId,
+    staleTime: 60_000,
+  });
+  const members = membersQ.data ?? [];
+
+  // Resolve the caller's own ``user_id`` from the members list by email
+  // (the JWT in the auth store carries an email, not a UUID). Lets the
+  // watchers chip / mention chip render the caller's display name.
+  const currentUserId = useMemo(() => {
+    if (!userEmail) return null;
+    const m = members.find(
+      (mm) => mm.email?.toLowerCase() === userEmail.toLowerCase(),
+    );
+    return m?.user_id ?? null;
+  }, [members, userEmail]);
+
+  function getUserName(id: string): string {
+    const m = members.find((mm) => mm.user_id === id);
+    if (!m) return id;
+    return (m.full_name && m.full_name.trim()) || m.email || id;
+  }
+
+  // Watch / unwatch — optimistic; the server returns the authoritative
+  // watcher list which the cache merge picks up on settle.
+  const watchMut = useMutation({
+    mutationFn: (watching: boolean) =>
+      watching
+        ? clashApi.watch(projectId, runId, row.id)
+        : clashApi.unwatch(projectId, runId, row.id),
+    onSuccess: (resp) => {
+      qc.setQueryData<{ items: ClashResult[] }>(
+        ['clash-results', projectId, runId],
+        (old) =>
+          old
+            ? {
+                ...old,
+                items: old.items.map((r) =>
+                  r.id === row.id
+                    ? { ...r, watchers: resp.watchers }
+                    : r,
+                ),
+              }
+            : old,
+      );
+    },
+    onError: (e: Error) =>
+      addToast({
+        type: 'error',
+        title: t('clash.watch_failed', {
+          defaultValue: 'Could not update watch state‌⁠‍',
+        }),
+        message: e.message,
+      }),
+  });
 
   // Keep the local editors in sync if the underlying row updates (e.g. the
   // optimistic cache swap after a save).
@@ -3648,8 +4760,100 @@ function ClashDetailPanel({
   }, [onClose]);
 
   const comments = row.comments ?? [];
+  const history = row.history ?? [];
+  const watchers = row.watchers ?? [];
+  const isWatching = !!currentUserId && watchers.includes(currentUserId);
   const assigneeDirty = (row.assigned_to ?? '') !== assignee.trim();
   const dueDirty = (row.due_date ?? '') !== due;
+
+  // Build the threaded comment tree: top-level comments (no reply_to or
+  // dangling reply_to) plus children keyed by parent ts. A dangling
+  // reply (parent no longer present) gracefully degrades to top-level
+  // rather than disappearing.
+  const tsSet = new Set(comments.map((c) => c.ts));
+  const topLevel: ClashComment[] = [];
+  const childrenByParent = new Map<string, ClashComment[]>();
+  for (const c of comments) {
+    if (c.reply_to && tsSet.has(c.reply_to)) {
+      const arr = childrenByParent.get(c.reply_to) ?? [];
+      arr.push(c);
+      childrenByParent.set(c.reply_to, arr);
+    } else {
+      topLevel.push(c);
+    }
+  }
+
+  // Activity entries — reverse-chronological so the latest event is on
+  // top. Mutates a copy (never the cached array). Falls back to an
+  // empty list when the backend is older / never wrote one.
+  const activity: ClashHistoryEntry[] = [...history].sort((a, b) =>
+    b.ts.localeCompare(a.ts),
+  );
+
+  // Mention-autocomplete candidates — case-insensitive substring match
+  // against email + full_name, capped at the visual budget.
+  const mentionCandidates = useMemo(() => {
+    const q = mentionQuery.trim().toLowerCase();
+    const base = members.filter((m) => !!m.user_id);
+    if (!q) return base.slice(0, 8);
+    return base
+      .filter((m) => {
+        const name = (m.full_name || '').toLowerCase();
+        const email = (m.email || '').toLowerCase();
+        return name.includes(q) || email.includes(q);
+      })
+      .slice(0, 8);
+  }, [members, mentionQuery]);
+
+  function handleDraftChange(value: string) {
+    setDraft(value);
+    // Track the unmatched ``@`` at-or-before the caret; if there is one
+    // (and no whitespace between it and the caret) → open the popover.
+    const ta = draftRef.current;
+    const caret = ta ? ta.selectionStart ?? value.length : value.length;
+    const before = value.slice(0, caret);
+    const at = before.lastIndexOf('@');
+    if (at < 0) {
+      setMentionOpen(false);
+      return;
+    }
+    const tail = before.slice(at + 1);
+    if (/\s/.test(tail)) {
+      setMentionOpen(false);
+      return;
+    }
+    setMentionQuery(tail);
+    setMentionOpen(true);
+  }
+
+  function insertMention(uid: string) {
+    const ta = draftRef.current;
+    if (!ta) return;
+    const caret = ta.selectionStart ?? draft.length;
+    const before = draft.slice(0, caret);
+    const at = before.lastIndexOf('@');
+    if (at < 0) return;
+    const tag = `<at>${uid}</at>`;
+    const next = draft.slice(0, at) + tag + ' ' + draft.slice(caret);
+    setDraft(next);
+    setMentionOpen(false);
+    // Restore caret position one space after the inserted mention tag.
+    setTimeout(() => {
+      if (!draftRef.current) return;
+      const pos = at + tag.length + 1;
+      draftRef.current.focus();
+      draftRef.current.setSelectionRange(pos, pos);
+    }, 0);
+  }
+
+  function submitDraft() {
+    const text = draft.trim();
+    if (!text) return;
+    onAddComment(text, replyTo);
+    setDraft('');
+    setReplyTo(null);
+    setMentionOpen(false);
+  }
 
   return (
     <div
@@ -3798,74 +5002,281 @@ function ClashDetailPanel({
             )}
           </div>
 
-          {/* Comments thread. */}
+          {/* Watchers chip (Wave A3). Click toggles the caller's own
+              subscription. ``getUserName`` falls back to the raw id
+              when the watcher isn't in the project members list — a
+              graceful degradation for cross-team coordination. */}
           <div>
-            <h3 className="flex items-center gap-1.5 text-xs font-medium text-content-secondary">
-              <MessageSquare className="h-3.5 w-3.5" />
-              {t('clash.comments', { defaultValue: 'Comments‌⁠‍' })}
+            <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-content-secondary">
+              <Eye className="h-3.5 w-3.5" />
+              {t('clash.watchers', { defaultValue: 'Watchers‌⁠‍' })}
               <span className="rounded-full bg-surface-secondary px-1.5 text-[10px] font-medium text-content-tertiary">
-                {comments.length}
+                {watchers.length}
               </span>
             </h3>
-            <div className="mt-2 space-y-2">
-              {comments.length === 0 && (
-                <p className="text-2xs text-content-tertiary">
-                  {t('clash.no_comments', {
-                    defaultValue: 'No comments yet.‌⁠‍',
-                  })}
-                </p>
-              )}
-              {comments.map((c, i) => (
-                <div
-                  key={`${c.ts}-${i}`}
-                  className="rounded-lg border border-border-light bg-surface-secondary/40 p-2"
+            <div className="flex flex-wrap items-center gap-1.5">
+              {watchers.map((w) => (
+                <span
+                  key={w}
+                  className="inline-flex items-center gap-1 rounded-full bg-surface-secondary px-2 py-0.5 text-[10px] font-medium text-content-secondary"
+                  title={w}
                 >
-                  <div className="flex items-center justify-between gap-2 text-[10px] text-content-tertiary">
-                    <span className="truncate font-medium text-content-secondary">
-                      {c.author}
-                    </span>
-                    <span className="shrink-0 tabular-nums">
-                      {new Date(c.ts).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="mt-1 whitespace-pre-wrap break-words text-xs text-content-primary">
-                    {c.text}
-                  </p>
-                </div>
+                  {getUserName(w)}
+                </span>
               ))}
+              {watchers.length === 0 && (
+                <span className="text-2xs text-content-tertiary">
+                  {t('clash.no_watchers', {
+                    defaultValue: 'No watchers yet.‌⁠‍',
+                  })}
+                </span>
+              )}
+              <Button
+                variant={isWatching ? 'primary' : 'secondary'}
+                size="sm"
+                disabled={!currentUserId || watchMut.isPending}
+                icon={
+                  isWatching ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )
+                }
+                onClick={() => watchMut.mutate(!isWatching)}
+              >
+                {isWatching
+                  ? t('clash.unwatch', { defaultValue: 'Unwatch‌⁠‍' })
+                  : t('clash.watch', { defaultValue: 'Watch‌⁠‍' })}
+              </Button>
+            </div>
+          </div>
+
+          {/* Tabbed pane: Comments thread (with threading + @mentions)
+              and Activity audit log. */}
+          <div>
+            <div
+              role="tablist"
+              aria-label={t('clash.collaboration_tabs', {
+                defaultValue: 'Collaboration tabs‌⁠‍',
+              })}
+              className="flex items-center gap-1 border-b border-border-light"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'comments'}
+                onClick={() => setTab('comments')}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs font-medium',
+                  tab === 'comments'
+                    ? 'border-oe-blue text-content-primary'
+                    : 'border-transparent text-content-tertiary hover:text-content-secondary',
+                )}
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                {t('clash.comments', { defaultValue: 'Comments‌⁠‍' })}
+                <span className="rounded-full bg-surface-secondary px-1.5 text-[10px] font-medium text-content-tertiary">
+                  {comments.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'activity'}
+                onClick={() => setTab('activity')}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs font-medium',
+                  tab === 'activity'
+                    ? 'border-oe-blue text-content-primary'
+                    : 'border-transparent text-content-tertiary hover:text-content-secondary',
+                )}
+              >
+                <History className="h-3.5 w-3.5" />
+                {t('clash.activity', { defaultValue: 'Activity‌⁠‍' })}
+                <span className="rounded-full bg-surface-secondary px-1.5 text-[10px] font-medium text-content-tertiary">
+                  {activity.length}
+                </span>
+              </button>
             </div>
 
-            <div className="mt-3">
-              <textarea
-                value={draft}
-                rows={3}
-                maxLength={4000}
-                placeholder={t('clash.comment_ph', {
-                  defaultValue: 'Add a coordination note…‌⁠‍',
+            {tab === 'comments' && (
+              <div className="mt-2 space-y-2">
+                {comments.length === 0 && (
+                  <p className="text-2xs text-content-tertiary">
+                    {t('clash.no_comments', {
+                      defaultValue: 'No comments yet.‌⁠‍',
+                    })}
+                  </p>
+                )}
+                {topLevel.flatMap((c) => {
+                  const replies = childrenByParent.get(c.ts) ?? [];
+                  const bubbles: React.ReactNode[] = [
+                    <ClashCommentBubble
+                      key={`tl-${c.ts}`}
+                      comment={c}
+                      indent={0}
+                      onReply={() => {
+                        setReplyTo(c.ts);
+                        draftRef.current?.focus();
+                      }}
+                      getUserName={getUserName}
+                      t={t}
+                    />,
+                  ];
+                  for (const child of replies) {
+                    bubbles.push(
+                      <ClashCommentBubble
+                        key={`rep-${child.ts}`}
+                        comment={child}
+                        indent={1}
+                        onReply={() => {
+                          setReplyTo(c.ts);
+                          draftRef.current?.focus();
+                        }}
+                        getUserName={getUserName}
+                        t={t}
+                      />,
+                    );
+                  }
+                  return bubbles;
                 })}
-                onChange={(e) => setDraft(e.target.value)}
-                className="w-full resize-y rounded-md border border-border bg-surface-primary px-2 py-1.5 text-sm"
-              />
-              <div className="mt-2 flex justify-end">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  loading={saving}
-                  disabled={!draft.trim()}
-                  icon={<MessageSquare className="h-4 w-4" />}
-                  onClick={() => {
-                    const text = draft.trim();
-                    if (!text) return;
-                    onAddComment(text);
-                    setDraft('');
-                  }}
-                >
-                  {t('clash.add_comment', {
-                    defaultValue: 'Add comment‌⁠‍',
-                  })}
-                </Button>
               </div>
-            </div>
+            )}
+
+            {tab === 'activity' && (
+              <div className="mt-2 space-y-1.5">
+                {activity.length === 0 && (
+                  <p className="text-2xs text-content-tertiary">
+                    {t('clash.no_activity', {
+                      defaultValue: 'No activity yet.‌⁠‍',
+                    })}
+                  </p>
+                )}
+                {activity.map((h, i) => (
+                  <div
+                    key={`act-${h.ts}-${i}`}
+                    className="flex items-start gap-2 rounded-md border border-border-light bg-surface-secondary/30 px-2 py-1.5"
+                  >
+                    <History className="mt-0.5 h-3 w-3 shrink-0 text-content-tertiary" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1 text-[10px] text-content-tertiary">
+                        <span className="font-medium text-content-secondary">
+                          {getUserName(h.actor)}
+                        </span>
+                        <span>·</span>
+                        <span className="tabular-nums">
+                          {new Date(h.ts).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 break-words text-2xs text-content-primary">
+                        <span className="font-medium">{h.field}</span>
+                        {h.before !== null && h.after !== null && (
+                          <>
+                            : <span className="line-through opacity-60">{h.before}</span>{' '}
+                            → <span>{h.after}</span>
+                          </>
+                        )}
+                        {h.before === null && h.after !== null && (
+                          <>: {h.after}</>
+                        )}
+                        {h.before !== null && h.after === null && (
+                          <>: <span className="line-through opacity-60">{h.before}</span></>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Add-comment composer. Stays visible on either tab so the
+                user can drop a note without flipping back. */}
+            {tab === 'comments' && (
+              <div className="relative mt-3">
+                {replyTo && (
+                  <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-border-light bg-surface-secondary/60 px-2 py-1 text-2xs text-content-secondary">
+                    <Reply className="h-3 w-3" />
+                    <span className="truncate">
+                      {t('clash.replying_to', {
+                        defaultValue: 'Replying to {{author}}‌⁠‍',
+                        author:
+                          comments.find((c) => c.ts === replyTo)?.author ?? '',
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      className="ml-auto rounded p-0.5 text-content-tertiary hover:bg-surface-primary"
+                      onClick={() => setReplyTo(null)}
+                      aria-label={t('clash.cancel_reply', {
+                        defaultValue: 'Cancel reply‌⁠‍',
+                      })}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+                <textarea
+                  ref={draftRef}
+                  value={draft}
+                  rows={3}
+                  maxLength={4000}
+                  placeholder={t('clash.comment_ph_mention', {
+                    defaultValue: 'Add a coordination note… (@ to mention)‌⁠‍',
+                  })}
+                  onChange={(e) => handleDraftChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape' && mentionOpen) {
+                      e.stopPropagation();
+                      setMentionOpen(false);
+                    }
+                  }}
+                  className="w-full resize-y rounded-md border border-border bg-surface-primary px-2 py-1.5 text-sm"
+                />
+                {mentionOpen && mentionCandidates.length > 0 && (
+                  <div
+                    role="listbox"
+                    className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-border bg-surface-elevated shadow-lg"
+                  >
+                    {mentionCandidates.map((m) => (
+                      <button
+                        key={m.user_id}
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        onClick={() => insertMention(m.user_id)}
+                        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-surface-secondary"
+                      >
+                        <AtSign className="h-3 w-3 text-content-tertiary" />
+                        <span className="truncate font-medium text-content-primary">
+                          {(m.full_name && m.full_name.trim()) || m.email}
+                        </span>
+                        {m.full_name && (
+                          <span className="ml-auto truncate text-2xs text-content-tertiary">
+                            {m.email}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2 flex justify-end">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={saving}
+                    disabled={!draft.trim()}
+                    icon={<MessageSquare className="h-4 w-4" />}
+                    onClick={submitDraft}
+                  >
+                    {replyTo
+                      ? t('clash.reply', { defaultValue: 'Reply‌⁠‍' })
+                      : t('clash.add_comment', {
+                          defaultValue: 'Add comment‌⁠‍',
+                        })}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -3880,6 +5291,97 @@ function ClashDetailPanel({
             })}
           </Link>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Render a comment text body with ``<at>userId</at>`` mention tokens
+ * resolved to user-name chips (Wave A3). Plain text segments survive
+ * verbatim; the parser is the matching client-side counterpart of the
+ * backend ``_extract_mentions`` extractor.
+ */
+function renderCommentText(
+  text: string,
+  getUserName: (id: string) => string,
+): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+  while (i < text.length) {
+    const start = text.indexOf('<at>', i);
+    if (start < 0) {
+      parts.push(text.slice(i));
+      break;
+    }
+    if (start > i) parts.push(text.slice(i, start));
+    const end = text.indexOf('</at>', start + 4);
+    if (end < 0) {
+      parts.push(text.slice(start));
+      break;
+    }
+    const uid = text.slice(start + 4, end).trim();
+    parts.push(
+      <span
+        key={`mention-${key++}`}
+        className="inline-flex items-center gap-0.5 rounded bg-oe-blue/10 px-1 py-px text-[11px] font-medium text-oe-blue"
+        title={uid}
+      >
+        <AtSign className="h-2.5 w-2.5" />
+        {getUserName(uid)}
+      </span>,
+    );
+    i = end + 5;
+  }
+  return parts;
+}
+
+/**
+ * One comment row inside the threaded comments list (Wave A3). Indented
+ * one level when ``indent > 0`` (replies), otherwise rendered at the
+ * top level. Mentions are resolved to user-name chips.
+ */
+function ClashCommentBubble({
+  comment,
+  indent,
+  onReply,
+  getUserName,
+  t,
+}: {
+  comment: ClashComment;
+  indent: number;
+  onReply: () => void;
+  getUserName: (id: string) => string;
+  t: TFn;
+}) {
+  return (
+    <div
+      className={clsx(
+        'rounded-lg border border-border-light bg-surface-secondary/40 p-2',
+        indent > 0 && 'ml-6 border-l-2 border-l-oe-blue/40',
+      )}
+    >
+      <div className="flex items-center justify-between gap-2 text-[10px] text-content-tertiary">
+        <span className="truncate font-medium text-content-secondary">
+          {comment.author}
+        </span>
+        <span className="shrink-0 tabular-nums">
+          {new Date(comment.ts).toLocaleString()}
+        </span>
+      </div>
+      <p className="mt-1 whitespace-pre-wrap break-words text-xs text-content-primary">
+        {renderCommentText(comment.text, getUserName)}
+      </p>
+      <div className="mt-1 flex justify-end">
+        <button
+          type="button"
+          onClick={onReply}
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-content-tertiary hover:bg-surface-primary hover:text-content-secondary"
+        >
+          <Reply className="h-3 w-3" />
+          {t('clash.reply', { defaultValue: 'Reply‌⁠‍' })}
+        </button>
       </div>
     </div>
   );

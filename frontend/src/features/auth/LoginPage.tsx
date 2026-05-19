@@ -502,18 +502,6 @@ export function LoginPage() {
             <span className="opacity-30">&middot;</span>
             <a href="https://OpenConstructionERP.com" target="_blank" rel="noopener noreferrer" className="hover:text-content-tertiary transition-colors">OpenConstructionERP.com</a>
           </div>
-          <p className="text-[10px] text-content-quaternary/40">
-            Created by{' '}
-            <a
-              href="https://www.linkedin.com/in/boikoartem/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-content-tertiary underline-offset-2 hover:underline"
-            >
-              Artem Boiko
-            </a>
-            &middot; <a href="mailto:info@datadrivenconstruction.io" className="hover:text-content-tertiary">info@datadrivenconstruction.io</a>
-          </p>
         </div>
       </div>
 

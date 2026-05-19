@@ -136,7 +136,7 @@ const navGroups: NavGroup[] = [
     items: [
       { labelKey: 'boq.title', to: '/boq', icon: Table2, tourId: 'boq' },
       { labelKey: 'costs.title', to: '/costs', icon: Database, tourId: 'costs' },
-      { labelKey: 'nav.match_elements', to: '/match-elements', icon: Link2, badge: 'NEW' },
+      { labelKey: 'nav.match_elements', to: '/match-elements', icon: Link2, badge: 'BETA' },
       { labelKey: 'nav.assemblies', to: '/assemblies', icon: Layers },
       { labelKey: 'catalog.title', to: '/catalog', icon: Boxes },
       { labelKey: 'nav.quantity_rules', to: '/bim/rules', icon: ClipboardCheck, badge: 'BETA' },
@@ -151,7 +151,7 @@ const navGroups: NavGroup[] = [
       { labelKey: 'nav.dwg_takeoff', to: '/dwg-takeoff', icon: PencilRuler },
       { labelKey: 'nav.cad_bim_explorer', to: '/data-explorer', icon: TableProperties },
       { labelKey: 'nav.bim_viewer', to: '/bim', icon: Box },
-      { labelKey: 'nav.clash_detection', to: '/clash', icon: Radar, badge: 'NEW' },
+      { labelKey: 'nav.clash_detection', to: '/clash', icon: Radar, badge: 'BETA' },
       { labelKey: 'nav.bim_rules', to: '/bim/rules?mode=requirements', icon: SlidersHorizontal, badge: 'BETA' },
     ],
   },
@@ -258,7 +258,7 @@ const navGroups: NavGroup[] = [
     defaultOpen: false,
     hideInSimple: true,
     items: [
-      { labelKey: 'nav.assets', to: '/assets', icon: Package, badge: 'NEW' },
+      { labelKey: 'nav.assets', to: '/assets', icon: Package, badge: 'BETA' },
       { labelKey: 'cde.title', to: '/cde', icon: Database },
       { labelKey: 'nav.photos', to: '/photos', icon: Camera },
       { labelKey: 'nav.markups', to: '/markups', icon: PenTool },

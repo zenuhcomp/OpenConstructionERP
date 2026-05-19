@@ -55,13 +55,35 @@ export interface ClashRunSummary {
 export type ClashSeverity = 'critical' | 'high' | 'medium' | 'low';
 
 /** One collaboration note on a clash. The server stamps `author` + `ts`
- *  (and resolves `author_id`); the client only ever sends the text. */
+ *  (and resolves `author_id`); the client only ever sends the text.
+ *
+ *  `reply_to` carries the `ts` of a parent comment when this one is a
+ *  reply (Wave A3 threading). Legacy flat comments simply omit it. */
 export interface ClashComment {
   author: string;
   author_id: string | null;
   /** ISO-8601 timestamp. */
   ts: string;
   text: string;
+  /** Parent comment's `ts` when this is a reply; `null`/absent for top-level. */
+  reply_to?: string | null;
+}
+
+/** One audit-log entry on a clash. Appended every time a triage field
+ *  changes (status / severity / assignee / due_date) or a comment is
+ *  added. Drives the DetailPanel Activity tab (Wave A3). */
+export interface ClashHistoryEntry {
+  /** ISO-8601 timestamp. */
+  ts: string;
+  /** User id of the actor (may be `"system"` for engine events). */
+  actor: string;
+  /** Field that changed — `status` / `severity` / `assigned_to` /
+   *  `due_date` / `comment_add` / `bcf_import` / `bcf_topic_guid`. */
+  field: string;
+  /** Previous value (string-coerced) or `null` when none. */
+  before: string | null;
+  /** New value (string-coerced) or `null` when no natural pair (e.g. comment add). */
+  after: string | null;
 }
 
 /** Which interference an engine pass reports — the Navisworks-style
@@ -118,6 +140,11 @@ export interface ClashResult {
   b_element_type?: string;
   a_model_id: string;
   b_model_id: string;
+  /** Storey index each element sits on (level clustering by the geometry
+   *  loader). Null on legacy rows / pre-GLB models — facet rows treat
+   *  null as a discrete "(no level)" bucket. */
+  a_storey?: number | null;
+  b_storey?: number | null;
   clash_type: string;
   penetration_m: number;
   distance_m: number;
@@ -136,6 +163,18 @@ export interface ClashResult {
   /** Stable engine signature — used by run-to-run comparison to match the
    *  same physical clash across runs. */
   signature?: string;
+  /** Wave A3 — collaboration. User-id list subscribed to this clash;
+   *  the DetailPanel "Watching" chip toggles the caller's membership. */
+  watchers?: string[];
+  /** Wave A3 — audit trail. Every status/severity/assignee/due-date
+   *  change + comment add appends one entry; the DetailPanel Activity
+   *  tab renders the list in reverse-chronological order. */
+  history?: ClashHistoryEntry[];
+  /** Wave A2 — engine-derived advisory annotations (non-authoritative).
+   *  Currently `{ severity_suggestion?: 'critical' | 'high' | 'medium' }`
+   *  on deep hard clashes; the UI shows a "Suggested" chip. Absent on
+   *  older backends — callers default to `{}`. */
+  meta?: { severity_suggestion?: ClashSeverity } & Record<string, unknown>;
   bcf_topic_guid: string | null;
   /** Client-only: original ordinal within the loaded result set, assigned
    *  during the review-table filter pass for the # column / idx sort. */
@@ -357,11 +396,17 @@ export const clashApi = {
     resultId: string,
     body: {
       status?: string;
+      /** Wave A2 — reclassify the coordination urgency. The engine
+       *  seeds a value from geometry; the user has final say. */
+      severity?: ClashSeverity;
       assigned_to?: string | null;
       due_date?: string | null;
       /** Append a comment — the server stamps author + ts and returns the
-       *  updated result (incl. the new `comments` array). */
-      add_comment?: { text: string };
+       *  updated result (incl. the new `comments` array). `reply_to`
+       *  is the parent comment's `ts` when this one threads under it
+       *  (Wave A3); omit for a top-level comment. The text may embed
+       *  `<at>userId</at>` tokens to fan a mention notification out. */
+      add_comment?: { text: string; reply_to?: string | null };
     },
   ) =>
     apiPatch<ClashResult>(
@@ -442,4 +487,83 @@ export const clashApi = {
       URL.revokeObjectURL(url);
     }, 203);
   },
+
+  /**
+   * Round-trip a `.bcfzip` back into clash triage state. Topics are
+   * matched to existing :class:`ClashResult` rows by recomputed
+   * signature (or `bcf_topic_guid`); unmatched topics are logged
+   * server-side and counted. Mirrors the BCF module's own POST
+   * /import shape — multipart/form-data with a single `file` field —
+   * because that's the FastAPI form the backend exposes.
+   */
+  importBcf: async (
+    projectId: string,
+    runId: string,
+    file: File,
+  ): Promise<{ matched: number; unmatched: number; errors: number }> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const token = useAuthStore.getState().accessToken;
+    const res = await fetch(
+      `/api/v1/clash/projects/${projectId}/runs/${runId}/import-bcf`,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: fd,
+      },
+    );
+    if (!res.ok) {
+      const body = await res
+        .json()
+        .catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || 'BCF import failed');
+    }
+    return (await res.json()) as {
+      matched: number;
+      unmatched: number;
+      errors: number;
+    };
+  },
+
+  /** Subscribe the calling user to a clash (idempotent). */
+  watch: (projectId: string, runId: string, resultId: string) =>
+    apiPost<{ watchers: string[]; watching: boolean }>(
+      `/v1/clash/projects/${projectId}/runs/${runId}/results/${resultId}/watch`,
+      undefined,
+    ),
+
+  /** Unsubscribe the calling user from a clash (idempotent). */
+  unwatch: (projectId: string, runId: string, resultId: string) =>
+    apiDelete<{ watchers: string[]; watching: boolean }>(
+      `/v1/clash/projects/${projectId}/runs/${runId}/results/${resultId}/watch`,
+    ),
+
+  /**
+   * List project members for the @mention autocomplete. Falls back to
+   * an empty list when the caller isn't owner/admin (the endpoint
+   * 403s for project viewers — that's the intentional access policy,
+   * so we degrade silently rather than spam the console).
+   */
+  projectMembers: (projectId: string) =>
+    apiGet<
+      Array<{
+        user_id: string;
+        email: string;
+        full_name?: string;
+        role?: string;
+        is_owner?: boolean;
+      }>
+    >(`/v1/projects/${projectId}/members/`).catch(
+      () =>
+        [] as Array<{
+          user_id: string;
+          email: string;
+          full_name?: string;
+          role?: string;
+          is_owner?: boolean;
+        }>,
+    ),
 };

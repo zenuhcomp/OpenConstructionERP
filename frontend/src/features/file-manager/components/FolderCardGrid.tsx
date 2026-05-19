@@ -36,6 +36,20 @@ const KIND_ICON: Record<FileKind, LucideIcon> = {
   markup: PenTool,
 };
 
+/* Per-kind empty-state copy. Reads more useful than the generic
+   "No documents yet" — each line names the format and the action so
+   the user knows what to drop into this folder. */
+const KIND_EMPTY_HINT: Record<FileKind, string> = {
+  document: 'Upload specs, contracts, RFIs or reports (PDF, DOCX)',
+  photo: 'Capture or upload site photos (JPG, PNG, HEIC)',
+  sheet: 'Upload drawing sheets (PDF, DWF) with revision tracking',
+  bim_model: 'Upload IFC, RVT or NWD models for 3D coordination',
+  dwg_drawing: 'Upload AutoCAD DWG drawings for 2D takeoff',
+  takeoff: 'Generate quantity takeoffs from sheets and models',
+  report: 'Generate analysis, validation or cost reports',
+  markup: 'Create PDF markups and review sessions',
+};
+
 // One tone per kind. The square sits behind the icon and gives each
 // folder an at-a-glance identity. Same colour family as FileGrid tiles
 // so the card → grid transition feels continuous.
@@ -260,10 +274,9 @@ function FolderCard({
             {label}
           </h3>
         </div>
-        <p className="mt-2 text-xs text-content-tertiary">
-          {t('files.empty_category', {
-            defaultValue: 'No {{category}} yet‌⁠‍',
-            category: label.toLowerCase(),
+        <p className="mt-2 text-xs text-content-tertiary line-clamp-2">
+          {t(`files.empty_hint.${kind}`, {
+            defaultValue: KIND_EMPTY_HINT[kind] ?? `No ${label.toLowerCase()} yet`,
           })}
         </p>
         <span className="mt-auto pt-2.5 inline-flex items-center gap-1.5 text-xs font-medium text-oe-blue opacity-80 group-hover:opacity-100">

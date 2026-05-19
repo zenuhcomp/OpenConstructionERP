@@ -34,7 +34,6 @@ import {
   Database,
   ExternalLink,
   FileSpreadsheet,
-  FolderOpen,
   Info,
   Layers,
   Loader2,
@@ -64,13 +63,13 @@ import {
 import { QdrantHealthCard } from './QdrantHealthCard';
 import { MatchProgressCard, type MatchProgressStatus } from './MatchProgressCard';
 import { MatchDetailPanel } from './MatchDetailPanel';
+import { GroupingPanel } from './GroupingPanel';
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Stage model — the single source of truth for the one-and-only rail
 // ─────────────────────────────────────────────────────────────────────────
 
 type StageId =
-  | 'project'
   | 'model'
   | 'catalogue'
   | 'scope'
@@ -91,57 +90,50 @@ interface StageDef {
 
 const STAGES: readonly StageDef[] = [
   {
-    id: 'project',
-    index: 1,
-    title: 'Project',
-    blurb: 'Choose which project you are estimating.',
-    Icon: FolderOpen,
-  },
-  {
     id: 'model',
-    index: 2,
+    index: 1,
     title: 'Source model',
     blurb: 'Pick the BIM/CAD model whose elements get priced.',
     Icon: Boxes,
   },
   {
     id: 'catalogue',
-    index: 3,
+    index: 2,
     title: 'Cost catalogue',
     blurb: 'Confirm the rate catalogue and vector search are ready.',
     Icon: Database,
   },
   {
     id: 'scope',
-    index: 4,
+    index: 3,
     title: 'Scope & rules',
     blurb: 'Set construction stage, quantities and auto-confirm.',
     Icon: SlidersHorizontal,
   },
   {
     id: 'grouping',
-    index: 5,
+    index: 4,
     title: 'Grouping',
     blurb: 'See how elements roll up into estimable groups.',
     Icon: Layers,
   },
   {
     id: 'run',
-    index: 6,
+    index: 5,
     title: 'Run match',
     blurb: 'Embed every group and rank cost candidates.',
     Icon: PlayCircle,
   },
   {
     id: 'review',
-    index: 7,
+    index: 6,
     title: 'Review',
     blurb: 'Inspect candidates, adjust and confirm matches.',
     Icon: Search,
   },
   {
     id: 'apply',
-    index: 8,
+    index: 7,
     title: 'Apply & finish',
     blurb: 'Preview the BOQ rollup and write it to the project.',
     Icon: Rocket,
@@ -291,15 +283,14 @@ export function MatchWizardFlow() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
 
   const activeProjectId = useProjectContextStore((s) => s.activeProjectId);
-  const setActiveProject = useProjectContextStore((s) => s.setActiveProject);
 
   const urlProject = searchParams.get('project');
 
   // ── Wizard navigation ───────────────────────────────────────────────
-  const [stage, setStage] = useState<StageId>('project');
+  const [stage, setStage] = useState<StageId>('model');
   const [furthest, setFurthest] = useState(1);
 
   const goto = useCallback((id: StageId) => {
@@ -343,7 +334,7 @@ export function MatchWizardFlow() {
     setMatchError(null);
     setDetailGroup(null);
     setApplyResult(null);
-    setStage('project');
+    setStage('model');
     setFurthest(1);
   }, []);
 
@@ -514,26 +505,35 @@ export function MatchWizardFlow() {
   });
 
   // ── Stage transitions ───────────────────────────────────────────────
+  // Non-blocking: fire-and-forget the create / update mutation so the
+  // user moves to the next stage immediately. The GroupingPanel reads
+  // the session id off the `sessionId` state which onSuccess populates,
+  // and renders its own loader while the request is in flight. If
+  // creation fails the mutation's onError toasts — the user is on the
+  // grouping stage with the loader still spinning and can retry.
   const ensureSessionThen = useCallback(
-    async (next: StageId) => {
+    (next: StageId) => {
       if (!sessionId) {
-        // createSessionM.onSuccess already sets the id — calling
-        // setSessionId here too would double-render and (worse) race
-        // the onSuccess invalidation. Just await and let onSuccess own
-        // the state transition. Creation must succeed before we move
-        // on (no session → no groups → dead Grouping panel), so this
-        // one is intentionally awaited and throws on failure.
-        await createSessionM.mutateAsync();
+        if (!createSessionM.isPending) {
+          createSessionM.mutate();
+        }
       } else {
-        // A settings re-sync failing must NOT trap the user on Scope —
-        // surface it (the mutation's onError toasts) but let them
-        // proceed; the previous valid config still drives the run.
         updateSessionM.mutate(sessionId);
       }
       goto(next);
     },
     [sessionId, createSessionM, updateSessionM, goto],
   );
+
+  // ── Eager prep — warm the session + grouping cache when the model
+  // is picked, so the user lands on the Grouping stage with data
+  // already in hand instead of staring at a spinner.
+  useEffect(() => {
+    if (!projectId || !modelId || sessionId) return;
+    if (createSessionM.isPending) return;
+    createSessionM.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, modelId, sessionId]);
 
   const startMatch = useCallback(async () => {
     if (!sessionId) return;
@@ -568,8 +568,6 @@ export function MatchWizardFlow() {
   // ── Per-stage navigation guards ─────────────────────────────────────
   const canAdvance = useMemo(() => {
     switch (stage) {
-      case 'project':
-        return !!projectId;
       case 'model':
         return !!modelId;
       case 'catalogue':
@@ -589,9 +587,6 @@ export function MatchWizardFlow() {
 
   const goNext = useCallback(async () => {
     switch (stage) {
-      case 'project':
-        goto('model');
-        break;
       case 'model':
         goto('catalogue');
         break;
@@ -599,7 +594,7 @@ export function MatchWizardFlow() {
         goto('scope');
         break;
       case 'scope':
-        await ensureSessionThen('grouping');
+        ensureSessionThen('grouping');
         break;
       case 'grouping':
         goto('run');
@@ -634,8 +629,6 @@ export function MatchWizardFlow() {
   const stagePrereqMet = useCallback(
     (id: StageId): boolean => {
       switch (id) {
-        case 'project':
-          return true;
         case 'model':
           return !!projectId;
         case 'catalogue':
@@ -793,97 +786,7 @@ export function MatchWizardFlow() {
             <PanelHeader stage={currentStageDef} />
 
             <div className="flex-1 py-6">
-              {/* ── 1. Project ──────────────────────────────────────── */}
-              {stage === 'project' && (
-                <div>
-                  <p className="mb-4 text-sm text-content-secondary">
-                    {t('match.wizard.projectHelp', {
-                      defaultValue:
-                        'Pick the project you want to estimate. Its region and currency drive which cost catalogue is used.',
-                    })}
-                  </p>
-                  {projectsQ.isLoading ? (
-                    <div className="flex items-center gap-2 text-content-secondary">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      {t('common.loading', { defaultValue: 'Loading…' })}
-                    </div>
-                  ) : projectsQ.isError ? (
-                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900/50 dark:bg-rose-900/20 dark:text-rose-200">
-                      <div className="font-medium">
-                        {t('match.wizard.projectsError', {
-                          defaultValue: 'Could not load projects',
-                        })}
-                      </div>
-                      <p className="mt-1 text-xs opacity-90 break-words">
-                        {String(
-                          (projectsQ.error as Error | null)?.message ??
-                            projectsQ.error ??
-                            '',
-                        )}
-                      </p>
-                      <Button
-                        className="mt-3"
-                        variant="secondary"
-                        size="sm"
-                        icon={<RefreshCw className="h-4 w-4" />}
-                        onClick={() => projectsQ.refetch()}
-                      >
-                        {t('common.retry', { defaultValue: 'Retry' })}
-                      </Button>
-                    </div>
-                  ) : (projectsQ.data ?? []).length === 0 ? (
-                    <div className="rounded-lg border border-border-light bg-surface-muted p-4 text-sm text-content-secondary">
-                      {t('match.wizard.noProjects', {
-                        defaultValue:
-                          'No projects yet. Create a project first, then come back to estimate it.',
-                      })}{' '}
-                      <Link className="font-medium underline" to="/projects">
-                        {t('match.wizard.goToProjects', {
-                          defaultValue: 'Go to Projects',
-                        })}
-                      </Link>
-                    </div>
-                  ) : (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {(projectsQ.data ?? []).map((p) => {
-                        const sel = p.id === projectId;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              if (p.id !== projectId) resetForProject();
-                              setProjectId(p.id);
-                              setActiveProject(p.id, p.name);
-                              const sp = new URLSearchParams(searchParams);
-                              sp.set('project', p.id);
-                              setSearchParams(sp, { replace: true });
-                            }}
-                            className={clsx(
-                              'rounded-lg border px-4 py-3 text-left transition-colors',
-                              sel
-                                ? 'border-oe-blue bg-oe-blue/5 ring-1 ring-oe-blue/30'
-                                : 'border-border-light hover:border-border hover:bg-surface-muted',
-                            )}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-medium text-content-primary truncate">
-                                {p.name}
-                              </span>
-                              {sel && <CheckCircle2 className="h-4 w-4 shrink-0 text-oe-blue" />}
-                            </div>
-                            <div className="mt-1 text-xs text-content-secondary">
-                              {p.region || '—'} · {p.currency || '—'}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ── 2. Source model ─────────────────────────────────── */}
+              {/* ── 1. Source model ─────────────────────────────────── */}
               {stage === 'model' && (
                 <div>
                   <p className="mb-4 text-sm text-content-secondary">
@@ -1075,134 +978,19 @@ export function MatchWizardFlow() {
               )}
 
               {/* ── 5. Grouping ─────────────────────────────────────── */}
-              {stage === 'grouping' && (
-                <div className="space-y-4">
-                  <p className="text-sm text-content-secondary">
-                    {t('match.wizard.groupingHelp', {
-                      defaultValue:
-                        'Elements are rolled up into estimable groups (by IFC class and type) so identical things are priced once. Review the breakdown before running the match.',
-                    })}
-                  </p>
-                  {groupsQ.isLoading || createSessionM.isPending ? (
-                    <div className="flex items-center gap-2 text-content-secondary">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      {t('match.wizard.buildingGroups', {
-                        defaultValue: 'Building groups…',
-                      })}
-                    </div>
-                  ) : groupsQ.isError ? (
-                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900/50 dark:bg-rose-900/20 dark:text-rose-200">
-                      <div className="font-medium">
-                        {t('match.wizard.groupsError', {
-                          defaultValue: 'Could not build groups',
-                        })}
-                      </div>
-                      <p className="mt-1 text-xs opacity-90 break-words">
-                        {String(
-                          (groupsQ.error as Error | null)?.message ??
-                            groupsQ.error ??
-                            '',
-                        )}
-                      </p>
-                      <Button
-                        className="mt-3"
-                        variant="secondary"
-                        size="sm"
-                        icon={<RefreshCw className="h-4 w-4" />}
-                        onClick={() => groupsQ.refetch()}
-                      >
-                        {t('common.retry', { defaultValue: 'Retry' })}
-                      </Button>
-                    </div>
-                  ) : groups.length === 0 ? (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
-                      <div className="font-medium">
-                        {t('match.wizard.noGroups', {
-                          defaultValue: 'No estimable groups in this model',
-                        })}
-                      </div>
-                      <p className="mt-1 text-xs opacity-90">
-                        {t('match.wizard.noGroupsHelp', {
-                          defaultValue:
-                            'Every element was excluded or the model has no priceable geometry. Pick a different source model, or relax the construction-stage filter in Scope & rules.',
-                        })}
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon={<ArrowLeft className="h-4 w-4" />}
-                          onClick={() => setStage('scope')}
-                        >
-                          {t('match.wizard.backToScope', {
-                            defaultValue: 'Adjust scope',
-                          })}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={<Boxes className="h-4 w-4" />}
-                          onClick={() => setStage('model')}
-                        >
-                          {t('match.wizard.pickAnotherModel', {
-                            defaultValue: 'Pick another model',
-                          })}
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <StatTile
-                          label={t('match.wizard.groups', { defaultValue: 'Groups' })}
-                          value={groups.length}
-                        />
-                        <StatTile
-                          label={t('match.wizard.elements', { defaultValue: 'Elements' })}
-                          value={groups.reduce((a, g) => a + g.element_count, 0)}
-                        />
-                        <StatTile
-                          label={t('match.wizard.trades', { defaultValue: 'Trades' })}
-                          value={new Set(groups.map((g) => g.trade)).size}
-                        />
-                      </div>
-                      <div className="max-h-72 overflow-auto rounded-lg border border-border-light">
-                        <table className="w-full text-sm">
-                          <thead className="sticky top-0 bg-surface-muted text-content-secondary">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">
-                                {t('match.wizard.group', { defaultValue: 'Group' })}
-                              </th>
-                              <th className="px-3 py-2 text-left font-medium">
-                                {t('match.wizard.trade', { defaultValue: 'Trade' })}
-                              </th>
-                              <th className="px-3 py-2 text-right font-medium">
-                                {t('match.wizard.count', { defaultValue: 'Count' })}
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {groups.map((g) => (
-                              <tr
-                                key={g.id}
-                                className="border-t border-border-light/60"
-                              >
-                                <td className="px-3 py-2 text-content-primary">
-                                  {g.display_label}
-                                </td>
-                                <td className="px-3 py-2 text-content-secondary">
-                                  {g.trade}
-                                </td>
-                                <td className="px-3 py-2 text-right tabular-nums">
-                                  {g.element_count}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </>
-                  )}
+              {stage === 'grouping' && sessionId && (
+                <GroupingPanel
+                  sessionId={sessionId}
+                  groupsQ={groupsQ}
+                  updateSessionM={updateSessionM}
+                />
+              )}
+              {stage === 'grouping' && !sessionId && (
+                <div className="flex items-center gap-2 text-sm text-content-secondary">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t('match.wizard.buildingGroups', {
+                    defaultValue: 'Building groups…',
+                  })}
                 </div>
               )}
 

@@ -2,7 +2,7 @@
 
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Download, Mail, FolderOpen, Copy, X, FileText, Image as ImageIcon, Layout, Box, Pencil, File, PenTool, FileBarChart, Tag, ExternalLink, Activity, Share2, Lock } from 'lucide-react';
+import { Download, Mail, FolderOpen, Copy, X, FileText, Image as ImageIcon, Layout, Box, Pencil, File, PenTool, FileBarChart, Tag, ExternalLink, Activity, Share2, Lock, Send, ClipboardCheck, CheckCircle2, Link as LinkIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -14,6 +14,15 @@ import type { FileRow, FileKind } from '../types';
 import { isTauri, openInOSFinder, copyToClipboard } from '../lib/tauri';
 import { modulesForKind, primaryModule } from '../kindModule';
 import { ActivityDrawer } from './ActivityDrawer';
+import { VersionDropdown } from '@/features/file-versions/VersionDropdown';
+import { CommentThread } from '@/features/file-comments/CommentThread';
+import { NamingViolationBanner } from '@/features/file-references/NamingViolationBanner';
+import { ReferencedInPanel } from '@/features/file-references/ReferencedInPanel';
+import { LinkToEntityModal } from '@/features/file-references/LinkToEntityModal';
+import { NewTransmittalWizard } from '@/features/file-transmittals/NewTransmittalWizard';
+import { SubmitForApprovalModal } from '@/features/file-approvals/SubmitForApprovalModal';
+import { ApprovalDrawer } from '@/features/file-approvals/ApprovalDrawer';
+import { useApprovals } from '@/features/file-approvals/hooks';
 
 const KIND_ICON: Record<FileKind, typeof FileText> = {
   document: FileText,
@@ -75,6 +84,22 @@ export function FilePreviewPane({ row, onClose, onEmail, onShare, onManageAccess
   // unlike the inline ``ActivityLogSection`` below which renders a
   // compact "last few events" strip eagerly.
   const [activityOpen, setActivityOpen] = useState(false);
+  const [transmittalOpen, setTransmittalOpen] = useState(false);
+  const [submitApprovalOpen, setSubmitApprovalOpen] = useState(false);
+  const [approvalDrawerOpen, setApprovalDrawerOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+
+  // Find any active approval workflow for the current file so the
+  // "Approval status" entry shows up only when relevant.
+  const { data: projectWorkflows = [] } = useApprovals(row?.project_id);
+  const activeWorkflow = row
+    ? projectWorkflows.find(
+        (w) =>
+          w.file_kind === row.kind &&
+          w.file_id === row.id &&
+          w.status === 'in_review',
+      )
+    : undefined;
 
   if (!row) {
     return (
@@ -153,6 +178,14 @@ export function FilePreviewPane({ row, onClose, onEmail, onShare, onManageAccess
       </div>
 
       <div className="p-4 space-y-4">
+        {/* W9 — ISO 19650 naming-violation banner. Renders null when the
+            file's canonical name is compliant, so it stays out of the way. */}
+        <NamingViolationBanner
+          projectId={row.project_id}
+          fileKind={row.kind}
+          fileId={row.id}
+          className="mb-1"
+        />
         <div className="flex items-center justify-center overflow-hidden bg-surface-secondary/60 rounded-lg aspect-[4/3]">
           {isPdf(row) && row.download_url ? (
             <iframe
@@ -241,6 +274,14 @@ export function FilePreviewPane({ row, onClose, onEmail, onShare, onManageAccess
               {t('files.actions.download', { defaultValue: 'Download‌⁠‍' })}
             </a>
           )}
+          {/* W1 — version history. Renders <V## · Current> chip + dropdown
+              with a "Make current" action for every superseded row. */}
+          <div className="flex items-center justify-between gap-2 px-1 py-1 border-y border-border-light/60">
+            <span className="text-[10px] uppercase tracking-wider text-content-tertiary font-medium">
+              {t('files.versions.section_label', { defaultValue: 'Versions' })}
+            </span>
+            <VersionDropdown fileId={row.id} kind={row.kind} />
+          </div>
           <button
             type="button"
             onClick={() => onEmail(row)}
@@ -248,6 +289,43 @@ export function FilePreviewPane({ row, onClose, onEmail, onShare, onManageAccess
           >
             <Mail size={13} />
             {t('files.actions.email', { defaultValue: 'Email link' })}
+          </button>
+          {/* W7 — Send transmittal (formal AEC issue record). */}
+          <button
+            type="button"
+            onClick={() => setTransmittalOpen(true)}
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border border-border-light text-content-primary hover:bg-surface-secondary transition-colors"
+          >
+            <Send size={13} />
+            {t('files.transmittals.send_action', { defaultValue: 'Send transmittal' })}
+          </button>
+          {/* W8 — Submit for approval / View approval status. */}
+          <button
+            type="button"
+            onClick={() => setSubmitApprovalOpen(true)}
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border border-border-light text-content-primary hover:bg-surface-secondary transition-colors"
+          >
+            <ClipboardCheck size={13} />
+            {t('files.approvals.submit_action', { defaultValue: 'Submit for approval' })}
+          </button>
+          {activeWorkflow && (
+            <button
+              type="button"
+              onClick={() => setApprovalDrawerOpen(true)}
+              className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border border-oe-blue/30 bg-oe-blue/5 text-oe-blue hover:bg-oe-blue/10 transition-colors"
+            >
+              <CheckCircle2 size={13} />
+              {t('files.approvals.view_status', { defaultValue: 'Approval status' })}
+            </button>
+          )}
+          {/* W9 — Link this file to an RFI / task / change-order etc. */}
+          <button
+            type="button"
+            onClick={() => setLinkOpen(true)}
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border border-border-light text-content-primary hover:bg-surface-secondary transition-colors"
+          >
+            <LinkIcon size={13} />
+            {t('files.references.link_action', { defaultValue: 'Link to entity' })}
           </button>
           {onShare && row.kind === 'document' && (
             <button
@@ -357,6 +435,38 @@ export function FilePreviewPane({ row, onClose, onEmail, onShare, onManageAccess
             The compact in-pane strip stays for at-a-glance scanning;
             the full timeline lives in the slide-over drawer below. */}
         <ActivityLogSection documentId={row.id} />
+
+        {/* W9 — "Referenced in" panel. Lists all RFIs / tasks / change
+            orders / etc. that link to this file. */}
+        <ReferencedInPanel
+          projectId={row.project_id}
+          fileKind={row.kind}
+          fileId={row.id}
+          onChipClick={(ref) => {
+            const targetRoute: Record<string, string> = {
+              rfi: '/rfi',
+              task: '/tasks',
+              change_order: '/changeorders',
+              punch_item: '/punchlist',
+              field_report: '/field-reports',
+              submittal: '/submittals',
+              meeting: '/meetings',
+            };
+            const base = targetRoute[ref.target_type] ?? `/${ref.target_type}`;
+            navigate(`${base}/${ref.target_id}`);
+          }}
+          className="mt-3"
+        />
+
+        {/* W6 — Threaded comments on this file. Lazily fires its own
+            query so the strip stays cheap until the pane is open. */}
+        <CommentThread
+          projectId={row.project_id}
+          fileKind={row.kind}
+          fileId={row.id}
+          currentUserId={null}
+          className="mt-3"
+        />
       </div>
 
       {/* Full audit timeline as a right-edge slide-over. Mounted at the
@@ -368,6 +478,44 @@ export function FilePreviewPane({ row, onClose, onEmail, onShare, onManageAccess
         documentName={row.name}
         open={activityOpen}
         onClose={() => setActivityOpen(false)}
+      />
+
+      {/* W7 — Transmittal wizard (preselected with this single file). */}
+      <NewTransmittalWizard
+        open={transmittalOpen}
+        onClose={() => setTransmittalOpen(false)}
+        projectId={row.project_id}
+        preselectedItems={[
+          {
+            file_kind: row.kind,
+            file_id: row.id,
+            canonical_name_snapshot: row.name,
+          },
+        ]}
+      />
+
+      {/* W8 — Submit-for-approval modal + workflow drawer. */}
+      <SubmitForApprovalModal
+        open={submitApprovalOpen}
+        onClose={() => setSubmitApprovalOpen(false)}
+        projectId={row.project_id}
+        fileKind={row.kind}
+        fileId={row.id}
+        fileLabel={row.name}
+      />
+      <ApprovalDrawer
+        open={approvalDrawerOpen}
+        workflowId={activeWorkflow?.id ?? null}
+        onClose={() => setApprovalDrawerOpen(false)}
+      />
+
+      {/* W9 — Link-to-entity modal. */}
+      <LinkToEntityModal
+        open={linkOpen}
+        projectId={row.project_id}
+        fileKind={row.kind}
+        fileId={row.id}
+        onClose={() => setLinkOpen(false)}
       />
     </aside>
   );

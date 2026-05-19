@@ -5,6 +5,27 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.0] — 2026-05-19 · /files ACC-grade wave + Clash collab/metadata + match-elements polish
+
+### Added
+
+- /files: 10 new sub-modules bringing the document hub to ACC/Aconex parity — `file_versions` (rollback + diff metadata), `file_trash` (30-day soft-delete + recycle bin route), `file_search` (cross-project + content search, /files/search), `file_tags` (polymorphic tags + bulk tag drawer), `file_saved_views` (per-project filter snapshots), `file_distribution` (named distribution lists + bulk recipients), `file_comments` (threaded comments anchored to file_kind+file_id), `file_references` (referenced-in panel from BOQ/Punch/RFI/etc.), `file_transmittals` (formal transmittal wizard + PDF cover, /files/transmittals), `file_approvals` (multi-step approval drawer with stamp burn + sidecar JSON fallback).
+- /files page: ISO 19650 naming-violation banner, Save-view button, extension overflow popover (RVT/RFA/NWD/DWF/DOCX/MPP/PPTX/ZIP), Recently Viewed strip, keyboard-shortcut sheet, bulk soft-delete & bulk-tag bar, drag-drop into folder cards, FileTree with SavedViews rail and Trash node.
+- Clash A2/A3: per-result collaboration locks (`a1b2c3d4e5f6_add_collab_lock_table`) and result-level metadata (`v3048_clash_a2_metadata`, `v3049_clash_collab`) — assignment, status, severity ladder.
+- Sidebar: subdued "beta" badges on recently shipped modules.
+
+### Changed
+
+- Match-elements: removed the redundant "project" stage; wizard starts on model and warms the matching session in the background (no blocking spinner on first navigation). Editable n8n-derived prompts retained.
+- Project detail: dashboard Open-Items panel rows are now click-through to the underlying entity.
+- Equipment: page now hydrates from real backend service; modal lifecycle hardened.
+
+### Notes
+
+- Alembic chain consolidated through `v3071_merge_clash_and_files` (single head).
+- Clash A4 intelligence-layer schema landed (rules JSON, cluster_id, ClashCluster table via `v3049_clash_a4_intelligence`); intelligence engine, FP feedback and rule suggestions follow in v3.10.x.
+- SQLite-only dev smoke trips on the pre-existing `v2918_risk_owner_user_id` batch_alter (FK to oe_users_user not present in fresh-install order); Postgres prod path unaffected.
+
 ## [3.9.1] — 2026-05-19 · Clash model labels read as models, not projects
 
 ### Fixed

@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { FileText, Image as ImageIcon, Layout, Box, Pencil, Folder, Tag, FileBarChart, PenTool, HardDrive } from 'lucide-react';
 import clsx from 'clsx';
 import type { FileTreeNode, FileKind } from '../types';
+import { TrashNode } from '@/features/file-trash/TrashNode';
+import { SavedViewsRail } from '@/features/file-saved-views';
 
 const KIND_ICONS: Record<FileKind, typeof FileText> = {
   document: FileText,
@@ -21,6 +23,9 @@ interface FileTreeProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   isLoading?: boolean;
+  /** Active project — when set, mounts saved-views rail and routes the
+   *  per-project Recycle Bin link to `/files/trash`. */
+  projectId?: string | null;
 }
 
 function fmtBytes(bytes: number): string {
@@ -31,7 +36,7 @@ function fmtBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-export function FileTree({ nodes, selectedId, onSelect, isLoading }: FileTreeProps) {
+export function FileTree({ nodes, selectedId, onSelect, isLoading, projectId }: FileTreeProps) {
   const { t } = useTranslation();
 
   const totalCount = nodes.reduce((acc, n) => acc + n.file_count, 0);
@@ -160,6 +165,15 @@ export function FileTree({ nodes, selectedId, onSelect, isLoading }: FileTreePro
         )}
       </ul>
 
+      {projectId && (
+        <div className="border-t border-border-light pt-2 mt-2">
+          <SavedViewsRail projectId={projectId} />
+        </div>
+      )}
+
+      <div className="mt-2 px-3 pb-3 border-t border-border-light pt-2">
+        <TrashNode projectId={projectId ?? null} active={selectedId === 'trash'} />
+      </div>
     </aside>
   );
 }

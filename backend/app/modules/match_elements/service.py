@@ -1656,6 +1656,32 @@ class MatchElementsService:
             for row in (await db.execute(summary_stmt)).all()
         }
 
+        # Bulk-load element names for the up-to-3 sample-name preview per
+        # group. One IN-query for the whole page beats N queries; the
+        # mapping below picks the first three available names per group.
+        # BIM is the only source that has element rows; for boq/text/etc.
+        # adapters the lookup yields no hits and ``sample_names`` falls
+        # through as []. Any failure is swallowed — the count-table is
+        # the load-bearing piece, not the names.
+        names_by_id: dict[str, str] = {}
+        try:
+            sample_ids: list[str] = []
+            for r in rows:
+                for eid in (r.element_ids or [])[:3]:
+                    if eid:
+                        sample_ids.append(str(eid))
+            if sample_ids:
+                from app.modules.bim_hub.models import BIMElement
+
+                name_stmt = select(BIMElement.id, BIMElement.name).where(
+                    BIMElement.id.in_(sample_ids),
+                )
+                for elem_id, elem_name in (await db.execute(name_stmt)).all():
+                    if elem_name:
+                        names_by_id[str(elem_id)] = elem_name
+        except Exception:  # noqa: BLE001
+            names_by_id = {}
+
         groups: list[schemas.GroupSummary] = []
         for r in rows:
             ifc_class = _ifc_class_from_group_key(r.group_key)
@@ -1718,7 +1744,11 @@ class MatchElementsService:
                     suggested_description=top.description if top else None,
                     suggested_unit_rate=top.unit_rate if top else None,
                     suggested_currency=top.currency if top else None,
-                    sample_names=[],  # populated lazily in detail view
+                    sample_names=[
+                        names_by_id[str(eid)]
+                        for eid in (r.element_ids or [])[:3]
+                        if str(eid) in names_by_id
+                    ],
                 )
             )
         return schemas.GroupListResponse(

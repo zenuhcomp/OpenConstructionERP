@@ -20,5 +20,16 @@ def register_clash_permissions() -> None:
             "clash.update": Role.EDITOR,
             "clash.delete": Role.MANAGER,
             "clash.export": Role.VIEWER,
+            # BCF round-trip import — same EDITOR gate as ``clash.update``
+            # because it patches existing rows' triage state in bulk.
+            "clash.import_bcf": Role.EDITOR,
+            # Wave A4 — rules administration is a coordination-policy
+            # decision (changes how the engine classifies every run),
+            # so it sits behind the MANAGER gate even though triage
+            # itself stays EDITOR.
+            "clash.manage_rules": Role.MANAGER,
+            # Flagging a clash as a false positive is part of the
+            # day-to-day triage workflow; mirrors ``clash.update``.
+            "clash.flag_fp": Role.EDITOR,
         },
     )

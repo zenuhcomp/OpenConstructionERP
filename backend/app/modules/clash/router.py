@@ -25,7 +25,8 @@ import io
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi import File as FileParam
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,7 @@ from app.modules.clash.schemas import (
     CLASH_SEVERITIES,
     ClashBCFExportRequest,
     ClashBCFExportResponse,
+    ClashBCFImportResponse,
     ClashCategoriesResponse,
     ClashCategoryItem,
     ClashCompareResponse,
@@ -46,10 +48,15 @@ from app.modules.clash.schemas import (
     ClashRunCreate,
     ClashRunListItem,
     ClashRunResponse,
+    ClashWatchResponse,
 )
 from app.modules.clash.service import ClashService
 
 _MAX_EXPORT_ROWS = 25_000
+# Upper bound on the BCF import payload. 25 MiB mirrors the BCF
+# module's own gate — a coordination round-trip is comments + metadata,
+# not megabytes of mesh data.
+_MAX_BCF_UPLOAD_BYTES = 25 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +323,7 @@ async def update_result(
             "text": data.add_comment.text,
             "author": author,
             "author_id": data.add_comment.author_id or str(user_id),
+            "reply_to": data.add_comment.reply_to or None,
         }
     result = await service.update_result(
         project_id,
@@ -324,7 +332,9 @@ async def update_result(
         new_status=data.status,
         assigned_to=data.assigned_to,
         due_date=data.due_date,
+        severity=data.severity,
         add_comment=add_comment,
+        actor=str(user_id),
     )
     return ClashResultResponse.model_validate(result)
 
@@ -459,3 +469,94 @@ async def export_bcf(
         project_id, run_id, data, author=user_id, user_id=user_id
     )
     return ClashBCFExportResponse(exported=exported, skipped=skipped)
+
+
+@router.post(
+    "/projects/{project_id}/runs/{run_id}/import-bcf",
+    response_model=ClashBCFImportResponse,
+    dependencies=[Depends(RequirePermission("clash.import_bcf"))],
+)
+async def import_bcf(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    file: UploadFile = FileParam(
+        ..., description="A .bcfzip archive (BCF 2.1 or 3.0)"
+    ),
+    service: ClashService = Depends(_get_service),
+) -> ClashBCFImportResponse:
+    """Round-trip a BCF archive back into clash triage.
+
+    Each topic's signature (recovered from the description the matching
+    export embedded) is looked up against the run's clashes; matched
+    rows have their status / assignee / due-date / comments / BCF guid
+    patched. Topics with no match are logged + counted. Mirrors the
+    BCF module's own ``POST /import`` shape so the UX stays familiar.
+    """
+    await _require_project_access(session, project_id, user_id)
+    try:
+        payload = await file.read()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to read the uploaded archive.",
+        ) from exc
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded archive is empty.",
+        )
+    if len(payload) > _MAX_BCF_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="BCF archive exceeds 25 MiB upload cap.",
+        )
+    matched, unmatched, errors = await service.import_bcf(
+        project_id, run_id, payload, actor=str(user_id)
+    )
+    return ClashBCFImportResponse(
+        matched=matched, unmatched=unmatched, errors=errors
+    )
+
+
+@router.post(
+    "/projects/{project_id}/runs/{run_id}/results/{result_id}/watch",
+    response_model=ClashWatchResponse,
+    dependencies=[Depends(RequirePermission("clash.update"))],
+)
+async def watch_result(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    result_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    service: ClashService = Depends(_get_service),
+) -> ClashWatchResponse:
+    """Subscribe the calling user to this clash (idempotent)."""
+    await _require_project_access(session, project_id, user_id)
+    watchers, watching = await service.set_watch(
+        project_id, run_id, result_id, str(user_id), watching=True
+    )
+    return ClashWatchResponse(watchers=watchers, watching=watching)
+
+
+@router.delete(
+    "/projects/{project_id}/runs/{run_id}/results/{result_id}/watch",
+    response_model=ClashWatchResponse,
+    dependencies=[Depends(RequirePermission("clash.update"))],
+)
+async def unwatch_result(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    result_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    service: ClashService = Depends(_get_service),
+) -> ClashWatchResponse:
+    """Unsubscribe the calling user from this clash (idempotent)."""
+    await _require_project_access(session, project_id, user_id)
+    watchers, watching = await service.set_watch(
+        project_id, run_id, result_id, str(user_id), watching=False
+    )
+    return ClashWatchResponse(watchers=watchers, watching=watching)

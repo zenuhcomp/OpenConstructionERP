@@ -9,7 +9,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ChevronRight, HardDrive, UploadCloud } from 'lucide-react';
+import { ArrowLeft, ChevronRight, HardDrive, UploadCloud, Search, Send } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { EmptyState } from '@/shared/ui';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -37,6 +38,13 @@ import { UploadDialog } from './components/UploadDialog';
 import { BulkActionsBar } from './components/BulkActionsBar';
 import { InitialLoadProgress } from './components/InitialLoadProgress';
 import { FilesStatsStrip } from './components/FilesStatsStrip';
+import {
+  RecentlyViewedStrip,
+  recordRecentlyViewed,
+  type RecentItem,
+} from './components/RecentlyViewedStrip';
+import { ShortcutsCheatsheet } from './components/ShortcutsCheatsheet';
+import { useFileShortcuts } from './useFileShortcuts';
 import { primaryModule } from './kindModule';
 import type { FileFilters, FileKind, FileRow } from './types';
 
@@ -104,6 +112,7 @@ export function FileManagerPage() {
   const [showUpload, setShowUpload] = useState(false);
   const [uploadKind, setUploadKind] = useState<FileKind | null>(null);
   const [permsKind, setPermsKind] = useState<FileKind | null>(null);
+  const [showCheatsheet, setShowCheatsheet] = useState(false);
 
   // Folder-permissions surface — gear + lock badge.
   const isOwner = useIsProjectOwner(projectId);
@@ -232,7 +241,21 @@ export function FileManagerPage() {
           : projectsLite.find((p) => p.id === row.project_id)?.name ?? ctx.activeProjectName;
       ctx.setActiveProject(row.project_id, name);
     }
+    recordRecentlyViewed(row);
     navigate(target.route(row.project_id, row.id));
+  }
+
+  function handleOpenRecent(item: RecentItem) {
+    const target = primaryModule(item.kind, item.extension);
+    if (target.setsActiveProject) {
+      const ctx = useProjectContextStore.getState();
+      const name =
+        ctx.activeProjectId === item.project_id
+          ? ctx.activeProjectName
+          : projectsLite.find((p) => p.id === item.project_id)?.name ?? ctx.activeProjectName;
+      ctx.setActiveProject(item.project_id, name);
+    }
+    navigate(target.route(item.project_id, item.id));
   }
 
   function handleOpenCategory(kind: FileKind) {
@@ -252,6 +275,28 @@ export function FileManagerPage() {
     setUploadKind(kind);
     setShowUpload(true);
   }
+
+  useFileShortcuts({
+    enabled: !showCheatsheet && !showUpload && !showExport && !showImport,
+    onFocusSearch: () => {
+      const input = document.querySelector<HTMLInputElement>(
+        'input[type="search"]',
+      );
+      input?.focus();
+      input?.select();
+    },
+    onSetView: setView,
+    onEscape: () => {
+      if (previewRow) {
+        setPreviewRow(null);
+        return;
+      }
+      if (selectedIds.size > 0) {
+        setSelectedIds(new Set());
+      }
+    },
+    onToggleCheatsheet: () => setShowCheatsheet((p) => !p),
+  });
 
   if (!projectId) {
     return (
@@ -327,14 +372,38 @@ export function FileManagerPage() {
           )}
         </nav>
 
-        <button
-          type="button"
-          onClick={() => handleOpenUpload(selectedKind)}
-          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold bg-oe-blue text-white hover:bg-oe-blue-hover transition-colors shrink-0"
-        >
-          <UploadCloud size={14} />
-          {t('files.upload', { defaultValue: 'Upload files' })}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* W10 — cross-project search */}
+          <Link
+            to="/files/search"
+            className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg text-xs font-medium text-content-secondary hover:text-content-primary hover:bg-surface-secondary transition-colors"
+            title={t('files.global_search.title', { defaultValue: 'Search across projects' })}
+          >
+            <Search size={13} />
+            <span className="hidden md:inline">
+              {t('files.global_search.short', { defaultValue: 'Search all projects' })}
+            </span>
+          </Link>
+          {/* W7 — transmittal log entry point */}
+          <Link
+            to="/files/transmittals"
+            className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg text-xs font-medium text-content-secondary hover:text-content-primary hover:bg-surface-secondary transition-colors"
+            title={t('files.transmittals.open_log', { defaultValue: 'Transmittal log' })}
+          >
+            <Send size={13} />
+            <span className="hidden md:inline">
+              {t('files.transmittals.open_log', { defaultValue: 'Transmittal log' })}
+            </span>
+          </Link>
+          <button
+            type="button"
+            onClick={() => handleOpenUpload(selectedKind)}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold bg-oe-blue text-white hover:bg-oe-blue-hover transition-colors shrink-0"
+          >
+            <UploadCloud size={14} />
+            {t('files.upload', { defaultValue: 'Upload files' })}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 flex min-h-0">
@@ -347,12 +416,14 @@ export function FileManagerPage() {
             setPreviewRow(null);
           }}
           isLoading={treeLoading}
+          projectId={projectId}
         />
 
         <main className="flex-1 flex flex-col min-w-0">
           {showFolderGrid ? (
             <div className="flex-1 overflow-auto">
               <FilesStatsStrip tree={tree} locations={locations} />
+              <RecentlyViewedStrip projectId={projectId} onOpen={handleOpenRecent} />
               <FolderCardGrid
                 nodes={tree ?? []}
                 isLoading={treeLoading}
@@ -377,6 +448,8 @@ export function FileManagerPage() {
                 totalCount={list?.total ?? 0}
                 extension={extension}
                 onExtensionChange={setExtension}
+                projectId={projectId}
+                category={selectedKind}
               />
               <BulkActionsBar
                 selectedRows={selectedRows}
@@ -452,6 +525,10 @@ export function FileManagerPage() {
           permsKind ? t(`files.category.${permsKind}`, { defaultValue: permsKind }) : undefined
         }
         onClose={() => setPermsKind(null)}
+      />
+      <ShortcutsCheatsheet
+        open={showCheatsheet}
+        onClose={() => setShowCheatsheet(false)}
       />
     </div>
   );

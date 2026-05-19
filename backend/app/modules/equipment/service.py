@@ -283,6 +283,34 @@ class EquipmentService:
     async def list_types(self) -> list[EquipmentType]:
         return await self.type_repo.list_all()
 
+    async def delete_type(self, type_id: uuid.UUID) -> None:
+        """Delete an equipment type. Blocks if any Equipment still references it."""
+        from sqlalchemy import func as _sa_func, select as _sa_select
+
+        t = await self.type_repo.get_by_id(type_id)
+        if t is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Equipment type not found",
+            )
+        # Block delete when any Equipment still points at this type's code —
+        # otherwise we'd orphan the FK reference (it's a string code, not a
+        # DB-level FK).
+        ref_count = await self.session.scalar(
+            _sa_select(_sa_func.count())
+            .select_from(Equipment)
+            .where(Equipment.type_code == t.code)
+        )
+        if ref_count and ref_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Cannot delete type '{t.code}': {ref_count} equipment "
+                    "unit(s) still reference it"
+                ),
+            )
+        await self.type_repo.delete(type_id)
+
     # ── Equipment ────────────────────────────────────────────────────────
 
     async def create_equipment(self, data: EquipmentCreate) -> Equipment:
