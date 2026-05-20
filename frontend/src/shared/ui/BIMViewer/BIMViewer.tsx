@@ -1502,6 +1502,12 @@ export function BIMViewer({
   // tabs can snapshot/restore the camera without a direct SceneManager handle.
   // Also surfaces measure-tool actions (remove / clear / setVisible / focus)
   // so the Tools panel measurement list can drive the in-scene THREE objects.
+  //
+  // v3.12.0 (Stream D) — surface screenshot capture + clip state on the same
+  // bridge so the saved-views feature can snapshot the full viewer state
+  // (camera + filter + clip + thumbnail) in one call. Filter state lives in
+  // BIMFilterPanel and is exposed via a separate ``window.__oeBimFilter``
+  // bridge installed by that panel.
   useEffect(() => {
     const w = window as unknown as {
       __oeBim?: {
@@ -1510,6 +1516,17 @@ export function BIMViewer({
           pos: { x: number; y: number; z: number },
           target: { x: number; y: number; z: number },
         ) => void;
+        getScreenshot: (opts?: { width?: number; height?: number }) => string | null;
+        getClipState: () => {
+          mode: 'none' | 'box' | 'plane';
+          boxExtent: ReturnType<NonNullable<typeof clipMgrRef.current>['getBoxExtent']>;
+          plane: ReturnType<NonNullable<typeof clipMgrRef.current>['getPlaneState']>;
+        } | null;
+        setClipState: (state: {
+          mode: 'none' | 'box' | 'plane';
+          boxExtent?: typeof clipBox;
+          plane?: typeof clipPlane;
+        }) => void;
         removeMeasurement: (id: string) => void;
         clearMeasurements: () => void;
         setMeasurementVisible: (id: string, visible: boolean) => void;
@@ -1519,6 +1536,24 @@ export function BIMViewer({
     w.__oeBim = {
       getViewpoint: () => sceneRef.current?.getViewpoint() ?? null,
       setViewpoint: (pos, target) => sceneRef.current?.setViewpoint(pos, target),
+      getScreenshot: (opts) => sceneRef.current?.getScreenshot(opts) ?? null,
+      getClipState: () => {
+        const mgr = clipMgrRef.current;
+        if (!mgr) return null;
+        return {
+          mode: mgr.mode,
+          boxExtent: mgr.getBoxExtent(),
+          plane: mgr.getPlaneState(),
+        };
+      },
+      setClipState: (state) => {
+        // Order matters: update the local mirrors first so the existing
+        // sync effects push the values into ClipManager and the React
+        // popover at the same time.
+        if (state.boxExtent) setClipBox(state.boxExtent);
+        if (state.plane) setClipPlane(state.plane);
+        setClipMode(state.mode);
+      },
       removeMeasurement: (id) => measureMgrRef.current?.removeMeasurement(id),
       clearMeasurements: () => measureMgrRef.current?.clearAll(),
       setMeasurementVisible: (id, visible) =>
@@ -1528,7 +1563,7 @@ export function BIMViewer({
     return () => {
       if (w.__oeBim) delete w.__oeBim;
     };
-  }, []);
+  }, [setClipBox, setClipPlane, setClipMode]);
 
   // Sync selection from parent — ONLY when the parent explicitly changes
   // selection (e.g. clicking a row in the filter panel). Skip when the

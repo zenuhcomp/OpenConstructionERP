@@ -46,5 +46,10 @@ export {
   removeViewpoint,
   renameViewpoint,
   getViewpoint,
+  setViewpointScreenshot,
 } from './SavedViewsStore';
-export type { Viewpoint } from './SavedViewsStore';
+export type {
+  Viewpoint,
+  SavedBIMFilterState,
+  BIMClipState,
+} from './SavedViewsStore';

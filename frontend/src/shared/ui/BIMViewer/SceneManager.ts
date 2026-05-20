@@ -473,6 +473,43 @@ export class SceneManager {
     };
   }
 
+  /**
+   * Capture the current viewport as a PNG data-URL.
+   *
+   * By default returns the renderer canvas verbatim (matches what the user
+   * sees on screen). When ``opts.width`` is provided we downscale into an
+   * off-screen canvas first — used by the saved-views feature to attach a
+   * small thumbnail (320×180 ≈ 30–60 KB) instead of a full-resolution PNG
+   * (~1 MB) which would blow through the localStorage quota after a handful
+   * of views.
+   *
+   * Three.js on-demand rendering means the back-buffer can be one frame
+   * stale relative to the latest selection / colour change; we force a
+   * synchronous render before reading the pixels so the screenshot matches
+   * what was visible the instant the call was made.
+   */
+  getScreenshot(opts?: { width?: number; height?: number }): string {
+    // Force a synchronous render so the back-buffer matches the current
+    // scene graph — otherwise a recent selection / colour mutation that
+    // hasn't tripped the on-demand render flag yet would be missing.
+    this.renderer.render(this.scene, this.camera);
+    const sourceCanvas = this.renderer.domElement;
+    const width = opts?.width;
+    const height = opts?.height;
+    if (!width || !height) {
+      return sourceCanvas.toDataURL('image/png');
+    }
+    // Downscale path — used for saved-view thumbnails. Off-screen canvas
+    // keeps the live renderer untouched.
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.floor(width));
+    out.height = Math.max(1, Math.floor(height));
+    const ctx = out.getContext('2d');
+    if (!ctx) return sourceCanvas.toDataURL('image/png');
+    ctx.drawImage(sourceCanvas, 0, 0, out.width, out.height);
+    return out.toDataURL('image/png');
+  }
+
   /** Toggle grid visibility. */
   toggleGrid(): void {
     if (this.gridHelper) {

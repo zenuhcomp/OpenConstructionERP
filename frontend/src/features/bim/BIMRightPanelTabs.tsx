@@ -17,7 +17,11 @@ import {
   useBIMViewerStore,
   type BIMRightPanelTab,
 } from '@/stores/useBIMViewerStore';
-import type { Viewpoint as SavedViewpoint } from '@/shared/ui/BIMViewer';
+import type {
+  Viewpoint as SavedViewpoint,
+  BIMClipState,
+  SavedBIMFilterState,
+} from '@/shared/ui/BIMViewer';
 import BIMLinkedBOQPanel from './BIMLinkedBOQPanel';
 import BIMGroupsPanel from './BIMGroupsPanel';
 import BIMLayersPanel from './BIMLayersPanel';
@@ -73,32 +77,93 @@ export default function BIMRightPanelTabs({
   // The measure/saved-view tool needs a camera snapshot + the ability to
   // restore one.  Rather than drill a SceneManager handle through the
   // component tree we use a tiny window-bound bridge: BIMViewer exposes
-  // helpers on `window.__oeBim`.  The indirection keeps the store slim.
+  // helpers on `window.__oeBim` and BIMFilterPanel exposes filter state on
+  // `window.__oeBimFilter`.  The indirection keeps the store slim.
+  //
+  // v3.12.0 (Stream D) — the bridge surface now covers screenshot capture,
+  // filter snapshot, and clip-state round-trip so saved views can replay
+  // the full inspection context, not just the camera.
+  type BIMBridge = {
+    getViewpoint(): {
+      position: { x: number; y: number; z: number };
+      target: { x: number; y: number; z: number };
+    } | null;
+    setViewpoint(
+      pos: { x: number; y: number; z: number },
+      target: { x: number; y: number; z: number },
+    ): void;
+    getScreenshot(opts?: { width?: number; height?: number }): string | null;
+    getClipState(): BIMClipState | null;
+    setClipState(state: BIMClipState): void;
+  };
+  type FilterBridge = {
+    get(): {
+      search: string;
+      storeys: string[];
+      types: string[];
+      buildingsOnly: boolean;
+    };
+    set(snapshot: {
+      search?: string;
+      storeys?: string[];
+      types?: string[];
+      buildingsOnly?: boolean;
+    }): void;
+  };
+  const getBridge = (): BIMBridge | null =>
+    (window as unknown as { __oeBim?: BIMBridge }).__oeBim ?? null;
+  const getFilterBridge = (): FilterBridge | null =>
+    (window as unknown as { __oeBimFilter?: FilterBridge }).__oeBimFilter ?? null;
+
   const getCurrentViewpoint = useCallback(() => {
-    const bridge = (window as unknown as {
-      __oeBim?: {
-        getViewpoint(): {
-          position: { x: number; y: number; z: number };
-          target: { x: number; y: number; z: number };
-        } | null;
-      };
-    }).__oeBim;
-    return bridge?.getViewpoint() ?? null;
+    return getBridge()?.getViewpoint() ?? null;
   }, []);
 
+  const getCurrentFilterState = useCallback((): SavedBIMFilterState | null => {
+    const snap = getFilterBridge()?.get();
+    if (!snap) return null;
+    return {
+      search: snap.search,
+      storeys: snap.storeys,
+      types: snap.types,
+      buildingsOnly: snap.buildingsOnly,
+    };
+  }, []);
+
+  const getCurrentClipState = useCallback((): BIMClipState | null => {
+    return getBridge()?.getClipState() ?? null;
+  }, []);
+
+  const getCurrentScreenshot = useCallback(
+    (opts?: { width?: number; height?: number }): string | null => {
+      return getBridge()?.getScreenshot(opts) ?? null;
+    },
+    [],
+  );
+
   const onApplyViewpoint = useCallback((vp: SavedViewpoint) => {
-    const bridge = (window as unknown as {
-      __oeBim?: {
-        setViewpoint(
-          pos: { x: number; y: number; z: number },
-          target: { x: number; y: number; z: number },
-        ): void;
-      };
-    }).__oeBim;
-    bridge?.setViewpoint(
+    const bridge = getBridge();
+    if (!bridge) return;
+    bridge.setViewpoint(
       { x: vp.cameraPos[0], y: vp.cameraPos[1], z: vp.cameraPos[2] },
       { x: vp.target[0], y: vp.target[1], z: vp.target[2] },
     );
+    // Restore the rest of the view context when the viewpoint carries it.
+    // Older entries (pre-v3.12.0) only have camera + target; we leave the
+    // current filter / clip state untouched in that case to avoid a
+    // surprising wipe.
+    if (vp.clipState) {
+      bridge.setClipState(vp.clipState);
+    }
+    if (vp.filterState) {
+      const fb = getFilterBridge();
+      fb?.set({
+        search: vp.filterState.search,
+        storeys: vp.filterState.storeys,
+        types: vp.filterState.types,
+        buildingsOnly: vp.filterState.buildingsOnly,
+      });
+    }
   }, []);
 
   const tabs: {
@@ -190,6 +255,9 @@ export default function BIMRightPanelTabs({
           <BIMToolsPanel
             modelId={modelId}
             getCurrentViewpoint={getCurrentViewpoint}
+            getCurrentFilterState={getCurrentFilterState}
+            getCurrentClipState={getCurrentClipState}
+            getCurrentScreenshot={getCurrentScreenshot}
             onApplyViewpoint={onApplyViewpoint}
           />
         )}

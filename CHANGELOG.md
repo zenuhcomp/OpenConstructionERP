@@ -5,6 +5,60 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.12.0] — 2026-05-20 · Wave 5/6/7 pro-grade — BOQ + Cost Intelligence + Clash A4 + BIM viewpoints + Files CDE + Takeoff PDF/Excel
+
+### Added
+
+- **BOQ pro-grade UX (Wave 5 / Stream A)** —
+  - Bulk operations expansion: "Multiply rate" / "Multiply qty" / "Set classification" chips in the floating BatchActionBar; new endpoint `PATCH /api/v1/boqs/{boq_id}/positions/bulk-update/` accepting `{ids, updates | rate_factor | quantity_factor}` (transactional, allowlist-enforced, audit-logged).
+  - Per-cell restore — new "Field history" tab in VersionHistoryDrawer flattens BOQActivityLog diff entries into per-field rows with a Restore button calling new `POST /api/v1/boqs/{boq_id}/positions/{position_id}/restore-field/` (validates log_id ↔ position ↔ field).
+  - Keyboard shortcuts in BOQGrid — `Ctrl+D` fill-down to all selected rows in the focused column (respects PASTE_PROTECTED_FIELDS), `Ctrl+;` inserts today's ISO date.
+- **Cost Intelligence (Wave 5 / Stream B)** —
+  - `oe_regional_indices` + `oe_cost_item_usage` tables (alembic `v3096_regional_indices_certainty`).
+  - 4 endpoints under `/api/v1/costs/`: `GET regional-adjust`, `GET regional-indices`, `GET {item_id}/certainty`, `POST {item_id}/record-usage`.
+  - Seeded 8×6 regional matrix (DE_BERLIN/DE_MUNICH/UK_LONDON/UK_MANCHESTER/US_NYC/US_LA/FR_PARIS/ES_MADRID × concrete/steel/labor/mep/finishes/sitework), source `OE_v3.12_seed_2026Q2`.
+  - `CertaintyBadge` (green/yellow/red) on every cost row + `RegionalAdjustPanel` live-preview in the toolbar.
+  - Certainty band rule: green if freq≥10 AND age<365d; yellow if freq 3-9 OR age 365-1095d; else red.
+- **Clash Wave A4 wiring (Wave 6 / Stream C)** — schema + DBSCAN engine + FP-mining had landed in v3.11.0 but were unreachable from REST; now wired:
+  - 6 endpoints under `/api/v1/clash/runs/{run_id}/`: `GET clusters`, `GET rule-suggestions`, `POST apply-rule-suggestion`, `GET rules`, `PATCH rules` (cap 500, 422 above), `GET kpi` (total / by_status / by_severity / by_type / by_discipline_pair / top_clashing_pairs / mttr_hours).
+  - `_apply_rules` spliced into `_detect` so per-pair tolerance overrides + severity overrides actually drive detection (was schema-only).
+  - 4 new UI components — `ClashClusterChips` (filter), `ClashRuleEditor` (WideModal CRUD), `ClashRuleSuggestionBanner` (review + apply), `ClashKpiPanel` (tiles + severity bar + top pairs + MTTR).
+- **BIM viewpoint state + property search + DDC version badge (Wave 6 / Stream D)** —
+  - `Viewpoint` now captures full state: `cameraPos`, `target`, `filterState` (storey/types/discipline/isolatedIds), `clipState` (mode/box/plane), `screenshotDataUrl`. Save view → restore view round-trips camera + filter + clip + thumbnail.
+  - `getScreenshot()` on SceneManager → PNG download from a Camera-icon button in the BIMViewer toolbar. Filename includes diacritics-stripped model name + ISO timestamp.
+  - `ConverterVersionBadge` on every model card — shows green-dot `DDC v{X}` pill when `metadata.converter_version` populated (sourced via `dpkg` on Linux or parent-dir on Windows from the v3.11 helper); returns null cleanly when absent.
+  - `PropertySearchPanel` toolbar popover — column dropdown (sourced from DDC Parquet schema) + operator + value query builder; Search → isolates matching elements via existing `setIsolatedIds`. Graceful empty-state when schema unavailable.
+- **Files CDE finish (Wave 7 / Stream E)** —
+  - `SavedViewsRail` spliced into FileManager left sidebar; `SaveViewButton` appears when any filter is active, persists name + filter to `oe_file_saved_view`.
+  - `TagFilterFacet` in the actions bar — multi-select tags, filters file list.
+  - `VersionHistorySection` in FilePreviewPane — chronological version list with `VersionBadge` per row + "Make current" on superseded rows.
+  - Backend: `purge_expired_trash()` background job (24h scheduler) + `POST /api/v1/file-trash/purge-now` admin endpoint deletes underlying file on disk + row.
+  - Backend: `on_file_new_revision(file_id)` hook fans out per-recipient notifications across active matching `oe_file_distribution_list` entries; wired into `register_new_version`.
+- **Takeoff PDF/Excel export (Wave 6 / Stream F)** —
+  - `Export PDF (with annotations)` — client-side jsPDF builder lazy-imported; renders each annotated PDF page to canvas via PDF.js, bakes the existing measurement overlay rendering on top, JPEG-encodes at 0.85; final A4 summary page lists per-group / per-type counts with color swatches. Respects group visibility.
+  - `Export Excel (.xlsx)` — exceljs builder; "Measurements" sheet (Group/Type/Annotation/Page/Value/Unit/Linked BOQ Position + group header rows tinted + per-type subtotal rows + frozen header) and "Summary" sheet (pivot by group with grand-total row).
+  - Filename: `takeoff-{slug(projectName)}-{YYYY-MM-DD}.{ext}`, slug preserves Unicode letters (São Paulo, Cyrillic, etc.).
+- **/about further refinements (post-v3.11)** —
+  - Platform Capabilities — 6 stats collapsed to a single row for compactness, height matched to Community card.
+  - Header right — UpdateNotification now paired with a "Recent releases" mini-list (last 3 versions with date + headline + anchor to in-page Changelog).
+  - Community card — Telegram featured on its own row (cyan-tinted + "Live" badge + 2-line copy), LinkedIn + X each on their own full-width row with longer descriptions, so the card stretches to match Platform Capabilities.
+  - Documentation card — enriched with "Popular topics" 2×3 deep-link grid (Quick start · BIM import · GAEB · Takeoff · Module SDK · VPS deployment).
+  - License card — restructured into "You can / You must" 2-col bullets + badges + "Commercial licensing" CTA at bottom (parallel button position to Documentation's "Open Docs").
+  - Support OpenConstructionERP right column — 4 impact-stat KPI tiles on top mirror the visual weight of the left hero, then the existing "Your support enables" bullet list below.
+  - Free Guidebook — book cover 1/3 → 2/5 column (max-w 200px → 320px) with 10-part TOC column narrowed to 3/5.
+
+### Fixed
+
+- **Stream E hotfix (3 defects from Playwright verification)** —
+  - `POST /api/v1/file-versions/{id}/restore/` was returning 500 → root-caused + fixed in `file_versions/service.py`; "Make current" now flips current-flag correctly with toast confirmation.
+  - `POST /api/v1/file-saved-views/{id}/use/` telemetry was returning 500 → fixed in `file_saved_views/service.py`; `use_count` + `last_used_at` now increment per apply.
+  - `FileManagerPage` URL-sync effect was stripping new query params when a saved view was applied while already on /files → effect now re-reads `searchParams` on URL change instead of only at mount.
+
+### Notes
+
+- 6 implementation streams + 6 deep audit agents + 6 testing agents ran in parallel — first multi-wave structure where audit → slice → ship → verify all ran as independent agent fleets. Audit reports + Playwright screenshots archived under `qa-tests/_v3.12.0-stream-{A,B,C,D,E,F}/`.
+- Deferred to v3.13.0: Assembly Library 2.0, What-If BOQ branches, Model Federation, BCF round-trip, semantic Clash rules + PDF coordination-meeting export + async Celery clustering, CCI/BCIS escalation feeds, supplier price feeds, AI symbol detection (CV pipeline), 3D markup persistence.
+
 ## [3.11.0] — 2026-05-20 · Wave 3/4 modules + Validation@Import + X84 export + /about redesign
 
 ### Added

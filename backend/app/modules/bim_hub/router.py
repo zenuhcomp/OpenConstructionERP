@@ -1208,6 +1208,20 @@ async def _process_cad_in_background(
                     "geometry_quality": result.get(
                         "geometry_quality", result.get("geometry_type", "unknown"),
                     ),
+                    # DDC converter version stamp — drives the "Processed
+                    # with DDC v{X}" badge on the BIM model card and the
+                    # /about page. Both keys are optional: missing values
+                    # leave the badge hidden (v3.12.0 / Stream D).
+                    **(
+                        {"converter_version": result["converter_version"]}
+                        if result.get("converter_version")
+                        else {}
+                    ),
+                    **(
+                        {"converter_source": result["converter_source"]}
+                        if result.get("converter_source")
+                        else {}
+                    ),
                 }
 
                 # BUG-V320-DDC-01 / D-TKC-NEW-01 — non-destructive honesty
