@@ -888,8 +888,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         </button>
       </div>
 
-      {/* Main navigation — grouped with collapsible headers */}
+      {/* Main navigation — grouped with collapsible headers.
+          role="navigation" + aria-label make this an addressable
+          landmark for screen readers; previously the sidebar was just
+          a div soup with no landmark, so AT users could not jump to
+          the nav region (WCAG 2.4.1 + 1.3.1, Round 2 Wave D audit). */}
       <nav
+        role="navigation"
+        aria-label="Main navigation"
         className={clsx(
           'flex-1 overflow-y-auto pt-2 pb-3',
           iconified ? 'px-2' : 'px-3',
@@ -1578,30 +1584,3 @@ export function FloatingRecentButton() {
   );
 }
 
-/** Floating AI Chat button — large pill-shaped FAB in bottom-right that
- *  navigates to /chat. Hidden when already on the chat page. */
-export function FloatingChatButton() {
-  const { t } = useTranslation();
-  const location = useLocation();
-
-  // Hide when already on the chat page so it doesn't overlap the chat itself
-  if (location.pathname.startsWith('/chat')) return null;
-
-  return (
-    <NavLink
-      to="/chat"
-      className="fixed bottom-6 end-6 z-40 group flex items-center gap-2.5 px-5 py-3.5 rounded-full bg-gradient-to-r from-oe-blue to-blue-600 text-white shadow-xl shadow-oe-blue/30 hover:shadow-2xl hover:shadow-oe-blue/40 hover:scale-105 active:scale-95 transition-all duration-200 border border-oe-blue/50"
-      title={t('nav.erp_chat', { defaultValue: 'AI Chat' })}
-    >
-      <MessageSquare size={20} strokeWidth={2.25} className="shrink-0" />
-      <span className="text-sm font-semibold whitespace-nowrap">
-        {t('nav.erp_chat', { defaultValue: 'AI Chat' })}
-      </span>
-      {/* Subtle pulse indicator */}
-      <span className="relative flex h-2 w-2">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-        <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
-      </span>
-    </NavLink>
-  );
-}

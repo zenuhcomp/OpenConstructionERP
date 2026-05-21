@@ -5,6 +5,38 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.2] — 2026-05-21 · i18n + a11y + event flow + performance polish
+
+### Added
+
+- **`useFocusTrap` hook.** New `frontend/src/shared/hooks/useFocusTrap.ts` — captures `document.activeElement` on mount, intercepts Tab / Shift+Tab to wrap focus within the container, restores focus on cleanup (covers Escape, backdrop click, explicit close). Filters disabled / `aria-hidden` / off-screen nodes. Now wired into `ConfirmDialog` + `WideModal`.
+- **`role="navigation" aria-label="Main navigation"` landmark on Sidebar.** Screen readers can now identify the sidebar and skip-nav directly to it.
+- **3 previously-orphan event subscribers now wired:**
+  - `qms.ncr.mirrored_from_hse` → notifications wave-5 dispatcher (in-app notification to HSE incident creator + QMS NCR owner)
+  - `procurement.supplier_rating_update` → procurement events log subscriber (INFO with `ncr_id` / `supplier_id` / severity — stub until supplier-rating model lands)
+  - `contracts.risk_register_update` → risk-events subscriber materialises a risk row with `metadata.source_incident_id` for idempotency (PostgreSQL-gated)
+- **Detached-task error visibility.** New `_log_failures(coro, *, name)` helper in `app.core.events` attaches a done-callback that logs failures at WARNING with exception class + traceback. Wired into `procurement._on_tender_awarded` and `schedule._on_field_report_submitted`. No more silent task failures.
+
+### Fixed
+
+- **i18n: 327 missing `admin.*` keys backfilled across 23 locales.** Permissions Matrix + Audit Log pages now render correctly in ar, bg, cs, da, es, fi, fr, hi, hr, id, it, ja, ko, mn, nl, no, pl, pt, ro, sv, th, tr, vi, zh — 24 × 54 = 1,296 inserts. DE + RU already complete in native; EN unchanged. Translation refinements pending — initial release ships the English fallback so the UI works correctly in every locale.
+- **StatusDot color-only-meaning gap.** Component now always renders a screen-reader-only `<span>` with the variant name ("Success" / "Warning" / "Error" / "Info" / "Neutral") when no visible `label` is supplied. Wrapper gets `role="status"`. Color-blind + high-contrast users now have a text signal.
+- **BOQ N+1 query loops.**
+  - `_subtree_height` (`boq/service.py:1935`): per-node `list_children` → single `list_all_for_boq` + in-memory parent→children index. O(subtree_size) → O(1) round-trips.
+  - `apply_quantity_links` (`boq/service.py:7234`): per-link `get_by_id` lookup → new bulk `PositionRepository.list_by_ids` + snapshot dict. N round-trips → 1.
+
+### Removed
+
+- **Unused exports:** `FloatingChatButton` (only referenced in a stale comment).
+- **Unused frontend dep:** `react-is` (zero direct imports; still pulled transitively by recharts / ag-grid / testing-library where actually needed).
+- **Dev scratch artefacts:** `frontend/_capture_v4_news.mjs`, `frontend/_capture_v4_v2.mjs`, `frontend/_verify_cards_layout.mjs`, `tmp/check_full.py`, `tmp/check_vi.py`. These were one-off v4.0 marketing capture / i18n-build scripts that didn't belong in the shipped tree.
+
+### Notes
+
+Test coverage this release: 299 BOQ + 198 events / risk / procurement / qms / hse / notifications + 18 a11y (ConfirmDialog + WideModal) + 14 admin-i18n — all green.
+
+`email-validator` was intentionally **not** removed: pydantic's `EmailStr` uses it via `users` / `portal` / `file_distribution` / `file_transmittals` and would `ImportError` at runtime without it.
+
 ## [4.2.1] — 2026-05-21 · Security & correctness hotfix
 
 ### Fixed
