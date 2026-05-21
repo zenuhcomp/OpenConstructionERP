@@ -5372,9 +5372,16 @@ async def _extract_from_cad(content: bytes, ext: str, filename: str) -> dict[str
             "cad_no_converter": True,
         }
 
+    # Strip any directory components from the uploaded filename before
+    # we use it to build a path inside the tempdir. Without this a
+    # filename like "../../etc/passwd" would land outside ``tmpdir``.
+    safe_name = Path(filename).name
+    if not safe_name or safe_name in ("..", "."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
     # Save to temp dir, convert, parse
     with tempfile.TemporaryDirectory() as tmpdir:
-        input_path = Path(tmpdir) / filename
+        input_path = Path(tmpdir) / safe_name
         input_path.write_bytes(content)
 
         output_dir = Path(tmpdir) / "output"

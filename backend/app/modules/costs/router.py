@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1294,20 +1294,28 @@ async def qdrant_smoke_search(
 @router.post(
     "/vector/index/",
     dependencies=[Depends(RequirePermission("costs.create"))],
+    # Either ``JSONResponse`` (when the vector backend is unavailable → 503)
+    # or a plain ``dict`` (happy path). FastAPI can't auto-derive a single
+    # response model from that union, and we want the bare-dict happy-path
+    # serialisation untouched — so we opt out of response-model generation.
+    response_model=None,
 )
 async def vectorize_cost_items(
     session: SessionDep,
     _user_id: CurrentUserId,
     region: str | None = Query(default=None, description="Only index items from this region"),
     batch_size: int = Query(default=256, ge=32, le=1024),
-) -> dict:
+) -> JSONResponse | dict:
     """Generate embeddings and index cost items into vector DB.
 
     Uses FastEmbed/ONNX (all-MiniLM-L6-v2, 384d) locally — no API key needed.
     Default backend: LanceDB (embedded, no Docker required).
 
-    Returns a graceful 200 with an error message when vector dependencies
-    (sentence-transformers, LanceDB) are not available instead of a 500.
+    Returns ``503 Service Unavailable`` when the vector backend
+    (Qdrant / LanceDB / embedding model) is not reachable or not
+    installed. Body keeps the legacy ``{"indexed": 0, "message":
+    ..., "error": ...}`` shape so existing clients still parse it;
+    only the status code flips from the previous silent 200.
     """
     import asyncio
     import time
@@ -1319,34 +1327,47 @@ async def vectorize_cost_items(
         from app.core.vector import encode_texts, get_embedder, vector_index
     except Exception as exc:
         logger.warning("Vector module import failed: %s", exc)
-        return {
-            "indexed": 0,
-            "message": "Vector indexing is not available: vector module failed to load.",
-            "error": str(exc),
-        }
+        return JSONResponse(
+            content={
+                "indexed": 0,
+                "message": "Vector indexing is not available: vector module failed to load.",
+                "error": str(exc),
+            },
+            status_code=503,
+        )
 
     # Verify embedding model is loadable (run in thread with short timeout
     # so a slow model download doesn't hang the request indefinitely).
     try:
         embedder = await asyncio.wait_for(asyncio.to_thread(get_embedder), timeout=30)
         if embedder is None:
-            return {
-                "indexed": 0,
-                "message": "Vector indexing is not available: no embedding model found. "
-                "Install sentence-transformers (pip install sentence-transformers).",
-            }
+            return JSONResponse(
+                content={
+                    "indexed": 0,
+                    "message": "Vector indexing is not available: no embedding model "
+                    "found. Install sentence-transformers (pip install "
+                    "sentence-transformers).",
+                },
+                status_code=503,
+            )
     except TimeoutError:
-        return {
-            "indexed": 0,
-            "message": "Vector indexing is not available: embedding model loading timed out. "
-            "The model may need to be downloaded first — try again later.",
-        }
+        return JSONResponse(
+            content={
+                "indexed": 0,
+                "message": "Vector indexing is not available: embedding model loading "
+                "timed out. The model may need to be downloaded first — try again later.",
+            },
+            status_code=503,
+        )
     except Exception as exc:
         logger.warning("Embedding model check failed: %s", exc)
-        return {
-            "indexed": 0,
-            "message": f"Vector indexing is not available: {exc}",
-        }
+        return JSONResponse(
+            content={
+                "indexed": 0,
+                "message": f"Vector indexing is not available: {exc}",
+            },
+            status_code=503,
+        )
 
     from app.modules.costs.models import CostItem
 
@@ -3076,6 +3097,15 @@ async def load_cwicr_database(
         duration,
     )
     _invalidate_cost_cache()
+
+    # Schema-level failures (e.g. parquet missing the required ``rate_code``
+    # column) must surface as 422 Unprocessable Entity — the file was
+    # uploaded fine, the server understood it, but the payload doesn't
+    # carry the columns this endpoint needs. The previous silent 200 made
+    # the failure invisible to monitoring + client retry logic. The body
+    # shape is preserved so existing UIs that read ``error`` still work.
+    if result_data.get("error") == "no rate_code column":
+        return JSONResponse(content=result_data, status_code=422)
     return result_data
 
 

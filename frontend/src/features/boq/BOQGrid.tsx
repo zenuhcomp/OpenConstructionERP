@@ -500,7 +500,14 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
   bimModelId,
   onHighlightBIMElements,
 }, ref) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  // `t` is a fresh function on every render which would invalidate the
+  // `columnDefs` useMemo every render and force AG Grid to rebuild its
+  // column model (resets sort, width, pinning state). Mirror the latest
+  // `t` into a ref and key the memo on the actual language string instead
+  // — v4.3 audit (BOQGrid column-defs thrash).
+  const tRef = useRef(t);
+  tRef.current = t;
   const navigate = useNavigate();
   const gridRef = useRef<AgGridReact>(null);
   const gridApiRef = useRef<GridApi | null>(null);
@@ -1019,7 +1026,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
 
   /* ── Column defs (standard + custom) ─────────────────────────────── */
   const columnDefs = useMemo(() => {
-    const defs = getColumnDefs({ currencySymbol, currencyCode, locale, fmt, t, displayCurrency: displayCurrency ?? null });
+    const defs = getColumnDefs({ currencySymbol, currencyCode, locale, fmt, t: tRef.current, displayCurrency: displayCurrency ?? null });
     // Override ordinal column with custom renderer
     const ordinalCol = defs.find((c) => c.field === 'ordinal');
     if (ordinalCol) {
@@ -1056,7 +1063,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
       }
     }
     return defs;
-  }, [currencySymbol, currencyCode, locale, fmt, t, customColumns, positions, boqVariables, displayCurrency]);
+  }, [currencySymbol, currencyCode, locale, fmt, i18n.language, customColumns, positions, boqVariables, displayCurrency]);
 
   /* ── Calculated-column refresh on positions change ──────────────────
    * AG Grid re-runs `valueGetter` on every refresh; for cross-position

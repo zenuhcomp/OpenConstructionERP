@@ -5,6 +5,43 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.3] — 2026-05-21 · Security hardening + observability foundation + bundle slimdown
+
+### Added
+
+- **Request correlation IDs.** New `app/middleware/request_id.py` (`RequestIDMiddleware`) generates `uuid4().hex[:16]` (or honours a client-supplied `X-Request-ID` matching `^[A-Za-z0-9_-]{1,64}$`), stores it in a `ContextVar`, echoes it on every response. Wired into the root logger via `RequestIDLogFilter` so every log line in the process gets the request ID injected. Format prefix is now `[%(request_id)s]`.
+- **Slow-query logging.** SQLAlchemy `before_cursor_execute` / `after_cursor_execute` event listeners measure each statement; anything over `OE_SLOW_QUERY_MS` (default 500 ms) is logged at WARNING with structured `extra={elapsed_ms, statement[:200], executemany}`. Covers both async and sync engines.
+- **`/api/health` deepened.** Adds `alembic_head_matches` (script head vs DB current rev) and `frontend_dist_present` (`_frontend_dist/index.html` exists). Either being false flips top-level `status` to `"degraded"` (still 200 — load balancers can probe without page-flapping).
+- **Operator runbook.** New `docs/RUNBOOK.md` (156 lines): service basics, restart / logs / health probes, deploy procedure, sqlite backup-restore, alembic `DATABASE_SYNC_URL` gotcha, rollback, common-500 causes. Extracted from internal memory so on-call doesn't need Claude or Artem to recover the box.
+- **Client-error sink endpoint.** New module `oe_client_errors`: `POST /api/v1/client-errors/` accepts anonymised payloads (length-capped: message ≤ 2048, ≤ 64 stack lines, ua / path ≤ 512), per-IP 30/min rate limit, logs at WARNING with structured `extra`. Frontend `errorLogger.ts` now POSTs alongside localStorage (fire-and-forget, `keepalive: true`, gated by `VITE_ENABLE_ERROR_REPORTING`).
+- **FK indexes migration (`v3096_round3_fk_indexes`).** Adds 6 missing indexes: `oe_contracts_progress_claim_line.contract_line_id`, `oe_clash_issue.{first_seen,last_seen,resolved}_run_id`, `oe_crm_opportunity.lost_reason_code`, `oe_equipment_work_order.schedule_id`. Inspector-guarded so re-running is safe. The other 8 audit-flagged FKs turned out to be already covered by composite indexes.
+
+### Security
+
+- **Closed `POST /api/v1/jobs/{job_id}/cancel` unauthenticated mutation.** Requires `CurrentUserId` now (the `JobRun` model has no project/owner column, so per-row ownership gating isn't possible yet — authentication is the floor).
+- **Path-traversal hardening in CAD/BOQ smart-import.** `takeoff/router.py:1382`, `takeoff/router.py:1617`, and `boq/router.py:5377` all built `Path(tmpdir) / filename` from `file.filename`. Now normalise to `Path(filename).name` (drops any directory components) and 400 on empty / `.` / `..`. Normal filenames like `report.xlsx` are unchanged.
+- **AI photo / file estimate now magic-byte validates.** `ai/router.py` `photo-estimate` calls `require_signature(... ALLOWED_PHOTO_TYPES ...)`; `file-estimate` uses a per-category allow-list (pdf / excel / cad / image), skipping only `csv` (no reliable signature). Bytes whose declared `Content-Type` doesn't match the magic prefix → HTTP 415.
+- **StampTemplateEditor XSS fix.** `frontend/src/features/file-approvals/StampTemplateEditor.tsx:184` used `dangerouslySetInnerHTML` to preview pasted SVG. A shared malicious template could `<script>` against the next viewer. Now renders inside `<iframe sandbox="" srcDoc={...} />` — empty sandbox attribute strips all capabilities (no scripts, no same-origin, no forms).
+
+### Fixed
+
+- **3 silent-fail `200 + {error}` responses → proper status codes.**
+  - `fieldreports/router.py` `/weather/` 200 → 503 when provider key missing or upstream fetch fails.
+  - `costs/router.py` `/vector/index/` 200 → 503 (× 4 sibling early-returns) when Qdrant unreachable.
+  - `costs/router.py` rate import 200 + "no rate_code column" → 422 with the same body shape.
+- **Broken collection in `test_tendering_leveling.py` repaired.** `AddendumCreate` was never added with the bid-leveling Addendum feature — the test targets unimplemented service methods on top of a missing schema. Marked `pytest.mark.skip` at module level with a docstring listing the 4 implementation prerequisites for re-enable, plus a guarded import so the file becomes valid the moment the feature ships. 5,922 tests now collect cleanly.
+
+### Changed
+
+- **Frontend bundle slimdown.** `index-*.js` 1.76 MB → **1.27 MB** (gzip 311 KB). Five unused deps dropped (`leaflet`, `react-leaflet`, `@types/leaflet`, `jszip`, `i18next-http-backend`, `i18next-browser-languagedetector` — 11 packages removed in total including transitives). Seven admin pages converted from eager to `React.lazy()` (`SettingsPage`, `ModulesPage`, `ModuleDeveloperGuide`, `AssembliesPage` + 3 siblings, `ImportDatabasePage`, `OnboardingWizard`, `LoginPageNext`, `QuickEstimatePage`) — each emits its own chunk; total ~530 KB raw split off the main chunk.
+- **BOQ grid column stability.** `BOQGrid.tsx` previously listed the i18next `t` function as a `useMemo` dependency. Because `useTranslation()` returns a fresh `t` on every render, column defs rebuilt every render → AG Grid `setColumnDefs` re-ran constantly. Replaced with `i18n.language` as the real dep and a `tRef` for the latest `t`. Removes a measurable repaint on every unrelated state update.
+- **`MoneyDisplay` / `QuantityDisplay` Zustand reads use field selectors.** Each cell was subscribing to the full preferences store; an unrelated preference change (theme toggle, locale switch) re-rendered every money / quantity cell in the BOQ. Now uses `useStore(s => s.field)` per field.
+- **4 orphan `describe.skip` / `it.skip` blocks annotated.** Sites in `api-mocks.test.tsx` and `visual-regression.test.tsx` now carry a single-line `// SKIP: <reason>. Re-enable when: <condition>. Tracked in v4.3 backlog.` so future maintainers can decide without guessing.
+
+### Notes
+
+109 modules load (was 108 — `oe_client_errors` added). Boot time on VPS unchanged at ~3-4 min. No additional Python deps; alembic chain stays single-head at `v3096_round3_fk_indexes`. Frontend dev deps `@types/leaflet` also removed.
+
 ## [4.2.2] — 2026-05-21 · i18n + a11y + event flow + performance polish
 
 ### Added
