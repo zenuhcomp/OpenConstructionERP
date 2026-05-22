@@ -453,6 +453,17 @@ class MeetingService:
             # made it into the DB.  An empty creation set means
             # downstream subscribers (notifications, vector index)
             # have nothing to consume — publishing would be a lie.
+            #
+            # Idempotency note: ``complete_meeting`` is guarded above
+            # against re-completion ("Meeting is already completed"),
+            # so this event fires at most once per meeting in the
+            # happy path.  We still hand subscribers a stable
+            # ``event_key`` (``meeting:complete:<id>``) so they can
+            # dedupe defensively if the bus ever gains
+            # at-least-once delivery semantics — the publish itself
+            # is a fire-and-forget detached task and a transient
+            # bus retry would otherwise create duplicate
+            # notifications on the task owner's inbox.
             if created_action_items:
                 event_bus.publish_detached(
                     "meeting.action_items_created",
@@ -464,6 +475,7 @@ class MeetingService:
                         "failed_action_items": failed_action_items,
                         "created_count": len(created_action_items),
                         "failed_count": len(failed_action_items),
+                        "event_key": f"meeting:complete:{meeting.id}",
                     },
                     source_module="meetings",
                 )
