@@ -10,7 +10,6 @@ import {
   Key,
   ShieldAlert,
   Plus,
-  X,
   Search,
   Loader2,
   Check,
@@ -25,6 +24,7 @@ import {
   EmptyState,
   Breadcrumb,
   SkeletonTable,
+  SideDrawer,
 } from '@/shared/ui';
 import {
   WideModal,
@@ -1011,41 +1011,28 @@ function PlotDetailDrawer({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  // Esc-to-close — registered before the early return so the hook order
-  // is stable regardless of whether the plot is resolved yet.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
   const plot = plots.find((p) => p.id === plotId);
   const ht = plot?.house_type_id ? houseTypes.find((h) => h.id === plot.house_type_id) : null;
-  if (!plot) return null;
+  // SideDrawer owns the Escape handler + portal + focus trap + body
+  // scroll lock + ``role=dialog`` chrome. Returning ``open={false}`` if
+  // the plot has not resolved yet keeps the unmount path clean — when
+  // the buyers/plots query refetches behind an open drawer and the row
+  // briefly disappears, the drawer drops back to the closed state
+  // gracefully instead of throwing inside the render tree (R6
+  // insertBefore regression).
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/30" />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="propdev-plot-drawer-title"
-        className="relative h-full w-full max-w-lg overflow-y-auto bg-surface-elevated shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border-light bg-surface-elevated px-5 py-3">
-          <h2 id="propdev-plot-drawer-title" className="text-base font-semibold">
-            {t('propdev.plot_n', { defaultValue: 'Plot {{n}}', n: plot.plot_number })}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-          >
-            <X size={16} />
-          </button>
-        </div>
+    <SideDrawer
+      open={!!plot}
+      onClose={onClose}
+      widthClass="max-w-lg"
+      aria-labelledby="propdev-plot-drawer-title"
+      title={
+        plot
+          ? t('propdev.plot_n', { defaultValue: 'Plot {{n}}', n: plot.plot_number })
+          : ''
+      }
+    >
+      {plot && (
         <div className="space-y-3 p-5">
           <div className="flex items-center justify-between">
             <Badge variant={PLOT_STATUS_VARIANT[plot.status]} dot>{plot.status}</Badge>
@@ -1074,8 +1061,8 @@ function PlotDetailDrawer({
             <ReserveBlock plotId={plot.id} onSuccess={onClose} />
           )}
         </div>
-      </div>
-    </div>
+      )}
+    </SideDrawer>
   );
 }
 
@@ -1174,63 +1161,45 @@ function BuyerDetailDrawer({
   });
   const items = selectionsQ.data ?? [];
   const freezeDays = daysUntil(buyer?.freeze_deadline);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // Don't close the drawer when the user presses Escape from inside
-      // the EditBuyerModal — that modal owns its own Escape handler.
-      if (e.key === 'Escape' && !editOpen) onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, editOpen]);
-  if (!buyer) return null;
+  // SideDrawer owns Escape; suppress it via ``busy`` while the
+  // EditBuyerModal is open so its own Escape handler can close the
+  // nested modal without also collapsing the drawer underneath. The
+  // EditBuyerModal still attaches its handler at capture phase so it
+  // wins the race for the keystroke.
+  const headerActions = canEdit ? (
+    <button
+      type="button"
+      onClick={() => setEditOpen(true)}
+      className="inline-flex items-center gap-1 rounded-md border border-border-light px-2 py-1 text-xs font-medium text-content-secondary hover:bg-surface-secondary hover:text-content-primary"
+      data-testid="open-edit-buyer"
+    >
+      <Pencil size={12} />
+      {t('propdev.edit_buyer', { defaultValue: 'Edit' })}
+    </button>
+  ) : null;
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/30" />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="propdev-buyer-drawer-title"
-        className="relative h-full w-full max-w-xl overflow-y-auto bg-surface-elevated shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border-light bg-surface-elevated px-5 py-3">
-          <div className="min-w-0 flex-1">
-            <h2 id="propdev-buyer-drawer-title" className="truncate text-base font-semibold">{buyer.full_name || buyer.email}</h2>
-            <p className="truncate text-xs text-content-tertiary">{buyer.email}</p>
-          </div>
-          <div className="flex items-center gap-1">
-            {canEdit && (
-              <button
-                type="button"
-                onClick={() => setEditOpen(true)}
-                className="inline-flex items-center gap-1 rounded-md border border-border-light px-2 py-1 text-xs font-medium text-content-secondary hover:bg-surface-secondary hover:text-content-primary"
-                data-testid="open-edit-buyer"
-              >
-                <Pencil size={12} />
-                {t('propdev.edit_buyer', { defaultValue: 'Edit' })}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded p-1 hover:bg-surface-secondary"
-              aria-label={t('common.close', { defaultValue: 'Close' })}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </div>
-        {editOpen && (
-          <EditBuyerModal
-            open={editOpen}
-            buyer={buyer}
-            plots={plots}
-            developmentId={developmentId}
-            onClose={() => setEditOpen(false)}
-          />
-        )}
-        <div className="space-y-4 p-5">
+    <SideDrawer
+      open={!!buyer}
+      onClose={onClose}
+      widthClass="max-w-xl"
+      busy={editOpen}
+      aria-labelledby="propdev-buyer-drawer-title"
+      title={buyer ? buyer.full_name || buyer.email : ''}
+      subtitle={buyer?.email}
+      headerActions={headerActions}
+    >
+      {buyer && (
+        <>
+          {editOpen && (
+            <EditBuyerModal
+              open={editOpen}
+              buyer={buyer}
+              plots={plots}
+              developmentId={developmentId}
+              onClose={() => setEditOpen(false)}
+            />
+          )}
+          <div className="space-y-4 p-5">
           <StageProgress current={buyer.status} />
 
           <div className="grid grid-cols-2 gap-3 text-sm">
@@ -1322,8 +1291,9 @@ function BuyerDetailDrawer({
             <ContractBuyerBlock buyer={buyer} />
           )}
         </div>
-      </div>
-    </div>
+        </>
+      )}
+    </SideDrawer>
   );
 }
 

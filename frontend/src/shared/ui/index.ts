@@ -63,6 +63,9 @@ export type {
   WideModalSize,
 } from './WideModal';
 
+export { SideDrawer } from './SideDrawer';
+export type { SideDrawerProps } from './SideDrawer';
+
 export { Breadcrumb } from './Breadcrumb';
 
 export { ProjectMap, buildGeocodeQuery } from './ProjectMap';
