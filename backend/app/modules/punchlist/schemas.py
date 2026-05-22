@@ -36,6 +36,10 @@ class PunchItemCreate(BaseModel):
         pattern=r"^(structural|mechanical|electrical|architectural|fire_safety|plumbing|finishing|hvac|exterior|landscaping|general)$",
     )
     trade: str | None = Field(default=None, max_length=100)
+    # WGS84 world-space pin (companion to the sheet-pinned location_x/y).
+    # Optional — punch items without a map pin still work end-to-end.
+    geo_lat: float | None = Field(default=None, ge=-90, le=90)
+    geo_lon: float | None = Field(default=None, ge=-180, le=180)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -62,6 +66,8 @@ class PunchItemUpdate(BaseModel):
     )
     trade: str | None = Field(default=None, max_length=100)
     resolution_notes: str | None = Field(default=None, max_length=5000)
+    geo_lat: float | None = Field(default=None, ge=-90, le=90)
+    geo_lon: float | None = Field(default=None, ge=-180, le=180)
     metadata: dict[str, Any] | None = None
 
 
@@ -85,6 +91,8 @@ class PunchItemResponse(BaseModel):
     category: str | None = None
     trade: str | None = None
     photos: list[str] = Field(default_factory=list)
+    geo_lat: float | None = None
+    geo_lon: float | None = None
     resolution_notes: str | None = None
     resolved_at: datetime | None = None
     verified_at: datetime | None = None

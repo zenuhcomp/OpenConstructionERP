@@ -110,6 +110,8 @@ class PunchListService:
             due_date=data.due_date,
             category=data.category,
             trade=data.trade,
+            geo_lat=data.geo_lat,
+            geo_lon=data.geo_lon,
             created_by=user_id,
             metadata_=data.metadata,
         )

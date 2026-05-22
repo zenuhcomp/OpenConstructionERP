@@ -68,6 +68,8 @@ def _item_to_response(item: object) -> PunchItemResponse:
         category=item.category,  # type: ignore[attr-defined]
         trade=item.trade,  # type: ignore[attr-defined]
         photos=item.photos or [],  # type: ignore[attr-defined]
+        geo_lat=getattr(item, "geo_lat", None),
+        geo_lon=getattr(item, "geo_lon", None),
         resolution_notes=item.resolution_notes,  # type: ignore[attr-defined]
         resolved_at=item.resolved_at,  # type: ignore[attr-defined]
         verified_at=item.verified_at,  # type: ignore[attr-defined]
