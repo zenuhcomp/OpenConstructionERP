@@ -21,6 +21,7 @@ import {
   ThumbsUp,
   UserX,
   AlertOctagon,
+  Globe2,
 } from 'lucide-react';
 import {
   Button,
@@ -503,15 +504,30 @@ export function SafetyPage() {
       />
 
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-content-primary">
-          {t('safety.title', { defaultValue: 'Safety' })}
-        </h1>
-        <p className="mt-1 text-sm text-content-secondary">
-          {t('safety.subtitle', {
-            defaultValue: 'Report incidents, record observations, and monitor site safety compliance',
-          })}
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-content-primary">
+            {t('safety.title', { defaultValue: 'Safety' })}
+          </h1>
+          <p className="mt-1 text-sm text-content-secondary">
+            {t('safety.subtitle', {
+              defaultValue: 'Report incidents, record observations, and monitor site safety compliance',
+            })}
+          </p>
+        </div>
+        {projectId && (
+          <button
+            type="button"
+            onClick={() => navigate(`/projects/${projectId}/geo`)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border-light bg-surface-primary px-2.5 py-1.5 text-xs font-medium text-content-secondary hover:bg-surface-secondary hover:text-oe-blue focus:outline-none focus:ring-2 focus:ring-oe-blue/40 shrink-0"
+            title={t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
+            aria-label={t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
+            data-testid="safety-view-on-map"
+          >
+            <Globe2 size={13} />
+            {t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
+          </button>
+        )}
       </div>
 
       <SectionIntro

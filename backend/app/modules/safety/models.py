@@ -8,7 +8,7 @@ Tables:
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import GUID, Base
@@ -32,6 +32,23 @@ class SafetyIncident(Base):
     incident_type: Mapped[str] = mapped_column(String(50), nullable=False)
     severity: Mapped[str] = mapped_column(String(50), nullable=False, default="minor")
     description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # ── Geo binding (cross-module) ────────────────────────────────────────
+    # Companion to the free-form ``location`` text — when the user pins the
+    # incident on a map, ``geo_lat``/``geo_lon`` are populated so Geo Hub can
+    # render a project-scoped layer of incident pins. Canonical anchor
+    # fields are named ``lat``/``lon`` across the platform, but on this
+    # table we prefix with ``geo_`` to avoid colliding with any future
+    # incident geometry (e.g. zone polygon).
+    #
+    # Nullable + no server_default — incidents that pre-date this column
+    # genuinely have no geo binding, and we don't want a fake (0, 0) point
+    # leaking into the map layer. Add via Base.metadata.create_all on
+    # fresh installs, and migration v3107_cross_module_geo_binding for
+    # existing installs (inspector-guarded so it's a no-op when the
+    # column already exists).
+    geo_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    geo_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Injured person details: {name, role, company, age, ...}
     injured_person_details: Mapped[dict | None] = mapped_column(  # type: ignore[assignment]
