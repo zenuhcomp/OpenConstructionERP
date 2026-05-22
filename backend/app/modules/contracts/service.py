@@ -1235,6 +1235,24 @@ class ContractsService:
         claim = await self.claim_repo.get_by_id(claim_id)
         if claim is None:
             raise HTTPException(status_code=404, detail="Progress claim not found")
+        # Lien waivers are a legal release of lien rights tied to a specific
+        # payment application. A waiver on a draft claim (never submitted)
+        # has no underlying lien to release; one on a rejected claim ties
+        # the waiver to an amount the owner has explicitly refused. Both
+        # are operationally bogus and reject up-front.
+        if claim.status in ("draft", "rejected"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "claim_not_in_lienable_state",
+                    "message": (
+                        "Lien waivers can only be attached to claims that "
+                        "have been submitted to the owner. Current status: "
+                        f"{claim.status!r}."
+                    ),
+                    "claim_status": claim.status,
+                },
+            )
         meta = dict(claim.metadata_ or {})
         waivers = list(meta.get("lien_waivers", []) or [])
         from datetime import UTC
