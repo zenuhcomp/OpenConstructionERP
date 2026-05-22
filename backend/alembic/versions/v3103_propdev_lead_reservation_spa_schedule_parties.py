@@ -66,12 +66,15 @@ def upgrade() -> None:  # noqa: PLR0915 — single linear bootstrap
     inspector = sa.inspect(bind)
 
     # ── Drop Buyer plot_id uniqueness (multi-buyer SPAs) ────────────
+    # SQLite has no ALTER TABLE DROP CONSTRAINT — must go through batch
+    # mode (copy-and-move). On PostgreSQL batch_alter_table still works
+    # via a no-op recreate so this stays portable.
     if _has_unique(inspector, "oe_property_dev_buyer", "uq_oe_property_dev_buyer_plot"):
-        op.drop_constraint(
-            "uq_oe_property_dev_buyer_plot",
-            "oe_property_dev_buyer",
-            type_="unique",
-        )
+        with op.batch_alter_table("oe_property_dev_buyer") as batch_op:
+            batch_op.drop_constraint(
+                "uq_oe_property_dev_buyer_plot",
+                type_="unique",
+            )
 
     # ── Lead ─────────────────────────────────────────────────────────
     if not _has_table(inspector, "oe_property_dev_lead"):
