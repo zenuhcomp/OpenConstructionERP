@@ -139,8 +139,18 @@ async def get_calendar(
 
 @router.get("/weather/")
 async def get_current_weather(
-    lat: float = Query(..., description="Latitude"),
-    lon: float = Query(..., description="Longitude"),
+    lat: float = Query(
+        ...,
+        ge=-90.0,
+        le=90.0,
+        description="Latitude in decimal degrees, -90..90",
+    ),
+    lon: float = Query(
+        ...,
+        ge=-180.0,
+        le=180.0,
+        description="Longitude in decimal degrees, -180..180",
+    ),
     _user_id: CurrentUserId = None,  # type: ignore[assignment]
 ) -> JSONResponse:
     """Fetch current weather for a location (optional, requires OPENWEATHERMAP_API_KEY).
@@ -152,9 +162,25 @@ async def get_current_weather(
     surfaces the failure to monitoring + retry layers (the previous
     silent-200 made the dashboard's "weather widget healthy" indicator
     impossible to drive from HTTP status alone).
+
+    ``lat`` / ``lon`` are bound to the valid WGS-84 range — out-of-range
+    or non-finite (``nan`` / ``inf``) coordinates yield a 422 from
+    FastAPI's query-param validator before any upstream call is made.
     """
+    import math
+
     from app.config import get_settings
     from app.modules.fieldreports.weather import fetch_weather
+
+    # FastAPI's float coercion accepts ``nan`` / ``inf`` literals from
+    # the query string even with ``ge`` / ``le`` set — those comparisons
+    # silently evaluate to ``False`` for NaN, so the bounds gate alone
+    # is not enough. Reject explicitly to keep upstream params safe.
+    if not (math.isfinite(lat) and math.isfinite(lon)):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Coordinates must be finite numbers.",
+        )
 
     settings = get_settings()
     api_key = settings.openweathermap_api_key
