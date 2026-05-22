@@ -657,11 +657,10 @@ class DailyDiaryService:
             )
 
         entries = await self.entry_repo.list_for_diary(diary_id)
-        photos_stmt = await self.photo_repo.photos_for_project_in_range(
-            diary.project_id,
-            limit=10_000,
-        )
-        photos = [p for p in photos_stmt[0] if getattr(p, "diary_id", None) == diary_id]
+        # Single indexed query scoped to the diary — previously we fetched
+        # every photo in the entire project (limit=10 000) and filtered in
+        # Python, which scaled O(project size) per signature operation.
+        photos = await self.photo_repo.photos_for_diary(diary_id)
 
         payload = compute_immutable_payload(diary, entries, photos)
         content_hash = compute_content_sha256(payload)
@@ -1130,10 +1129,10 @@ class DailyDiaryService:
     async def immutable_payload_hash(self, diary_id: uuid.UUID) -> dict[str, Any]:
         diary = await self.get_diary(diary_id)
         entries = await self.entry_repo.list_for_diary(diary_id)
-        photos_stmt = await self.photo_repo.photos_for_project_in_range(
-            diary.project_id, limit=10_000,
-        )
-        photos = [p for p in photos_stmt[0] if getattr(p, "diary_id", None) == diary_id]
+        # Single indexed query scoped to the diary (see ``sign_diary`` for
+        # rationale). The previous project-wide fetch was an O(N) hit per
+        # hash computation.
+        photos = await self.photo_repo.photos_for_diary(diary_id)
         payload = compute_immutable_payload(diary, entries, photos)
         return {
             "diary_id": diary_id,

@@ -157,6 +157,12 @@ class _StubPhotoRepo(_BaseStubRepo):
         rows = [r for r in self.rows.values() if r.project_id == project_id]
         return rows[offset: offset + limit], len(rows)
 
+    async def photos_for_diary(self, diary_id: uuid.UUID) -> list[Any]:
+        return [
+            r for r in self.rows.values()
+            if getattr(r, "diary_id", None) == diary_id
+        ]
+
 
 class _StubSignatureRepo(_BaseStubRepo):
     async def signatures_for_diary(self, diary_id: uuid.UUID) -> list[Any]:
@@ -645,6 +651,53 @@ async def test_create_today_diary_allowed() -> None:
     today = datetime.now(UTC).date().isoformat()
     diary = await svc.create_diary(_diary_payload(diary_date=today), user_id="u")
     assert diary.diary_date == today
+
+
+@pytest.mark.asyncio
+async def test_immutable_hash_scoped_to_diary_photos_only() -> None:
+    """Photos belonging to a SIBLING diary in the same project must NOT
+    influence the immutable hash of the diary under inspection.
+
+    Regression: previously the service loaded every photo in the entire
+    project and filtered by ``diary_id`` in Python — fine for correctness
+    but expensive at scale. The new code path uses an indexed
+    ``photos_for_diary`` repo method; this test confirms the scoping is
+    preserved.
+    """
+    svc = _make_service()
+    diary_a = await svc.create_diary(
+        _diary_payload(diary_date="2026-04-09"), user_id="u",
+    )
+    diary_b = await svc.create_diary(
+        _diary_payload(diary_date="2026-04-10"), user_id="u",
+    )
+
+    # Attach one photo to each diary; both share the same project.
+    photo_a = SimpleNamespace(
+        id=uuid.uuid4(),
+        project_id=PROJECT_ID,
+        diary_id=diary_a.id,
+        taken_at=datetime(2026, 4, 9, 12, tzinfo=UTC),
+        lat=52.0, lng=13.0,
+        file_url="http://x/a.jpg", mime_type="image/jpeg",
+        is_360=False, is_drone=False,
+    )
+    photo_b = SimpleNamespace(
+        id=uuid.uuid4(),
+        project_id=PROJECT_ID,
+        diary_id=diary_b.id,
+        taken_at=datetime(2026, 4, 10, 12, tzinfo=UTC),
+        lat=52.0, lng=13.0,
+        file_url="http://x/b.jpg", mime_type="image/jpeg",
+        is_360=False, is_drone=False,
+    )
+    svc.photo_repo.rows[photo_a.id] = photo_a
+    svc.photo_repo.rows[photo_b.id] = photo_b
+
+    hash_b = await svc.immutable_payload_hash(diary_b.id)
+    assert hash_b["payload_preview"]["photos_count"] == 1, (
+        "diary B's hash must include only its own photo, not photo A"
+    )
 
 
 @pytest.mark.asyncio
