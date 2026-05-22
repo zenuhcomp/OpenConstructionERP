@@ -106,6 +106,23 @@ class RFIService:
         if ball_in_court is None and data.assigned_to is not None:
             ball_in_court = data.assigned_to
 
+        # BUG-RFI-RAISED-SPOOF: ``raised_by`` is part of the audit log
+        # (who filed this RFI) and must always be the authenticated
+        # caller. The Pydantic schema still exposes the field — older
+        # clients populate it as a convenience and some internal
+        # background paths supply it explicitly when no JWT is in
+        # scope — but when a real ``user_id`` is in scope it wins
+        # unconditionally, so the wire payload cannot impersonate
+        # another user. Mirrors the changeorders / variations pattern
+        # (created_by is always JWT-derived).
+        if user_id:
+            try:
+                raised_by_val: uuid.UUID | None = uuid.UUID(str(user_id))
+            except (ValueError, TypeError):
+                raised_by_val = data.raised_by
+        else:
+            raised_by_val = data.raised_by
+
         # Auto-calculate response_due_date (14 business days) when status
         # is 'open' and no explicit due date was given.
         response_due_date = data.response_due_date
@@ -120,7 +137,7 @@ class RFIService:
                 rfi_number=rfi_number,
                 subject=data.subject,
                 question=data.question,
-                raised_by=data.raised_by or (uuid.UUID(user_id) if user_id else None),
+                raised_by=raised_by_val,
                 assigned_to=data.assigned_to,
                 status=data.status,
                 ball_in_court=ball_in_court,
