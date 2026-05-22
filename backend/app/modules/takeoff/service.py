@@ -949,6 +949,8 @@ class TakeoffService:
         self,
         measurement_id: uuid.UUID,
         data: TakeoffMeasurementUpdate,
+        *,
+        existing: TakeoffMeasurement | None = None,
     ) -> TakeoffMeasurement:
         """Update measurement fields.
 
@@ -958,8 +960,20 @@ class TakeoffService:
         before calling the recompute so partial updates work correctly
         (e.g. caller bumps just ``scale_pixels_per_unit`` without
         re-sending the whole points array).
+
+        Round-6 audit (2026-05-22) — the router has already loaded the
+        row for the IDOR check via ``verify_project_access``. Re-fetching
+        here doubles the query count on every PATCH and shows up as a
+        sustained 2× SELECT load when a user is bulk-editing measurements
+        on a large takeoff. Accept the pre-fetched row via ``existing``
+        and skip the redundant lookup. The legacy id-only path stays
+        available for any caller (CLI scripts, tests) that doesn't have
+        the row handy.
         """
-        item = await self.get_measurement(measurement_id)
+        if existing is None:
+            item = await self.get_measurement(measurement_id)
+        else:
+            item = existing
 
         fields = data.model_dump(exclude_unset=True)
         if "metadata" in fields:
@@ -1001,9 +1015,19 @@ class TakeoffService:
         logger.info("Measurement updated: %s (fields=%s)", measurement_id, list(fields.keys()))
         return item
 
-    async def delete_measurement(self, measurement_id: uuid.UUID) -> None:
-        """Delete a measurement."""
-        await self.get_measurement(measurement_id)  # Raises 404 if not found
+    async def delete_measurement(
+        self,
+        measurement_id: uuid.UUID,
+        *,
+        existing: TakeoffMeasurement | None = None,
+    ) -> None:
+        """Delete a measurement.
+
+        Round-6 audit (2026-05-22) — accept a pre-fetched row from the
+        router's IDOR check to avoid the duplicate ``get_by_id`` query.
+        """
+        if existing is None:
+            await self.get_measurement(measurement_id)  # Raises 404 if not found
         await self.measurement_repo.delete(measurement_id)
         logger.info("Measurement deleted: %s", measurement_id)
 
@@ -1114,9 +1138,18 @@ class TakeoffService:
         self,
         measurement_id: uuid.UUID,
         boq_position_id: str,
+        *,
+        existing: TakeoffMeasurement | None = None,
     ) -> TakeoffMeasurement:
-        """Link a measurement to a BOQ position."""
-        item = await self.get_measurement(measurement_id)
+        """Link a measurement to a BOQ position.
+
+        Round-6 audit (2026-05-22) — accept a pre-fetched row from the
+        router's IDOR check to avoid the duplicate ``get_by_id`` query.
+        """
+        if existing is None:
+            item = await self.get_measurement(measurement_id)
+        else:
+            item = existing
         await self.measurement_repo.update_fields(measurement_id, linked_boq_position_id=boq_position_id)
         await self.session.refresh(item)
         logger.info(

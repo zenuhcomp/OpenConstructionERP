@@ -4285,10 +4285,15 @@ async def update_measurement(
     target row and gate via ``verify_project_access`` before any
     mutation. We check ownership *before* calling the update service
     so we don't leak existence via different error codes.
+
+    Round-6 audit (2026-05-22) — pass the pre-fetched row into the
+    service to skip the redundant ``get_by_id`` query that used to
+    happen inside ``update_measurement`` (one query per PATCH instead
+    of two).
     """
     existing = await service.get_measurement(measurement_id)
     await verify_project_access(existing.project_id, str(user_id), session)
-    item = await service.update_measurement(measurement_id, data)
+    item = await service.update_measurement(measurement_id, data, existing=existing)
     return _measurement_to_response(item)
 
 
@@ -4312,10 +4317,13 @@ async def delete_measurement(
     ``takeoff.delete`` could destroy another tenant's measurements by
     UUID. We resolve the owning project from the target row and gate
     via ``verify_project_access``.
+
+    Round-6 audit (2026-05-22) — pass the pre-fetched row into the
+    service to skip the redundant ``get_by_id`` query.
     """
     existing = await service.get_measurement(measurement_id)
     await verify_project_access(existing.project_id, str(user_id), session)
-    await service.delete_measurement(measurement_id)
+    await service.delete_measurement(measurement_id, existing=existing)
 
 
 # ── Link to BOQ ──────────────────────────────────────────────────────────
@@ -4339,8 +4347,13 @@ async def link_measurement_to_boq(
     tenant's measurement at their own BOQ position (or vice versa)
     without permission on the measurement side. Gate on the
     measurement's owning project before performing the link.
+
+    Round-6 audit (2026-05-22) — pass the pre-fetched row into the
+    service to skip the redundant ``get_by_id`` query.
     """
     existing = await service.get_measurement(measurement_id)
     await verify_project_access(existing.project_id, str(user_id), session)
-    item = await service.link_measurement_to_boq(measurement_id, data.boq_position_id)
+    item = await service.link_measurement_to_boq(
+        measurement_id, data.boq_position_id, existing=existing,
+    )
     return _measurement_to_response(item)
