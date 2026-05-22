@@ -57,6 +57,104 @@ const MAX_STORAGE_ENTRIES = 64;
 const STORAGE_KEY = 'oe_error_log';
 
 // ---------------------------------------------------------------------------
+// Recording whitelist (suppress benign noise from the bug-report buffer)
+// ---------------------------------------------------------------------------
+
+/**
+ * A predicate that matches a captured event we want to *exclude* from the
+ * bug-report buffer. All fields are AND-combined; an omitted field is a
+ * wildcard. ``path`` is matched against the captured URL/endpoint; status
+ * matches API errors; errorName matches the JS Error.name field.
+ *
+ * Triggered by the user error log openconstructionerp-log-2026-05-22.json
+ * where 50 of 64 captured errors were identical handled 404s on
+ * /projects/{id}/profile and converter-install AbortErrors that the UI
+ * already shows a toast for — pure noise in a bug report.
+ */
+export interface RecordingFilter {
+  path?: RegExp;
+  status?: number;
+  errorName?: string;
+}
+
+/**
+ * Whitelist of events that must NOT be recorded by the bug-report logger.
+ *
+ * Each entry is a strict predicate so unrelated errors on the same path
+ * still get through (e.g. a 500 on /profile is real and must be captured).
+ *
+ * Exported for testability — keep entries terse and add a comment per row.
+ */
+export const RECORDING_WHITELIST: readonly RecordingFilter[] = [
+  // 1) /projects/{uuid}/profile 404 — backend now auto-retrofits, but older
+  // SPA bundles may briefly see one 404 before the new build lands.
+  {
+    path: /\/v1\/projects\/[0-9a-f-]+\/profile(?:\/?$|\?)/i,
+    status: 404,
+  },
+  // 2) /bim_hub/* 404 when the user navigates to a deleted model. The
+  // /bim/<uuid> route catches this and shows a friendly message; the 404
+  // is not actionable.
+  {
+    path: /\/v1\/bim_hub\//i,
+    status: 404,
+  },
+  // 3) Converter-install AbortError — the install genuinely takes 60-90s
+  // and the AbortController timeout fires from time to time. The user
+  // sees a "still installing — try again in a minute" toast; we don't
+  // need it in the bug report. Matches both the takeoff route (current)
+  // and the integrations route (older builds the user log reported).
+  {
+    path: /\/v1\/(?:takeoff|integrations)\/converters\/[^/]+\/install/i,
+    errorName: 'AbortError',
+  },
+  // 4) Safety-net for 422s the frontend itself caused with stale defaults
+  // (now fixed: CRM limit 500→200, Users limit 200→100). Keep the catch
+  // so a stale tab can't spam the buffer if redeployed mid-session.
+  {
+    path: /\/v1\/crm\/opportunities\/?\?[^#]*\blimit=(?:[3-9]\d{2,}|\d{4,})\b/i,
+    status: 422,
+  },
+  {
+    path: /\/v1\/users\/?\?[^#]*\blimit=(?:1[1-9]\d|[2-9]\d{2,}|\d{4,})\b/i,
+    status: 422,
+  },
+];
+
+/**
+ * Internal: return true if the event matches any whitelist entry and
+ * therefore must NOT be recorded.
+ *
+ * Strict matcher: an entry with both ``path`` and ``status`` requires
+ * BOTH to match. An entry with only ``path`` matches any status (use
+ * sparingly — prefer narrower predicates).
+ */
+export function shouldSuppress(args: {
+  path?: string;
+  status?: number;
+  errorName?: string;
+}): boolean {
+  for (const f of RECORDING_WHITELIST) {
+    if (f.path !== undefined) {
+      if (args.path === undefined) continue;
+      if (!f.path.test(args.path)) continue;
+    }
+    if (f.status !== undefined) {
+      if (args.status !== f.status) continue;
+    }
+    if (f.errorName !== undefined) {
+      if (args.errorName !== f.errorName) continue;
+    }
+    // A predicate must constrain at least one field to be meaningful.
+    if (f.path === undefined && f.status === undefined && f.errorName === undefined) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Internal state
 // ---------------------------------------------------------------------------
 
@@ -272,6 +370,17 @@ export function logError(
   const message = isError ? error.message : String(error);
   const stack = isError ? error.stack : undefined;
 
+  // Drop matches against the recording whitelist (handled noise that
+  // would otherwise spam the bug-report buffer).
+  const errorName = isError ? error.name : undefined;
+  const contextPath =
+    context && typeof context === 'object' && 'url' in context
+      ? String((context as Record<string, unknown>).url ?? '')
+      : undefined;
+  if (shouldSuppress({ path: contextPath, errorName })) {
+    return;
+  }
+
   const anonymizedContext: Record<string, string> | undefined = context
     ? Object.fromEntries(
         Object.entries(context).map(([k, v]) => [k, anonymize(String(v))]),
@@ -306,6 +415,14 @@ export function logApiError(
   status: number,
   message: string,
 ): void {
+  // Drop matches against the recording whitelist (handled 4xx/5xx noise
+  // that would otherwise spam the bug-report buffer). Whitelist runs on
+  // the *raw* URL because anonymisation collapses UUIDs and other tokens
+  // a path regex may want to see.
+  if (shouldSuppress({ path: url, status })) {
+    return;
+  }
+
   const anonymizedUrl = anonymize(url);
   const anonymizedMessage = anonymize(message);
 

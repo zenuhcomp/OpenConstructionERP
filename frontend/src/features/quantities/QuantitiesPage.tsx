@@ -833,8 +833,21 @@ export function QuantitiesPage() {
 
       try {
         const qs = opts.force ? '?force=true' : '';
+        // 120 s explicit timeout — RVT converter download/extract can
+        // take up to 90 s; user log v4.3.2 captured AbortErrors on this
+        // exact endpoint.
+        const installSignal: AbortSignal | undefined =
+          typeof AbortSignal !== 'undefined' &&
+          typeof (AbortSignal as { timeout?: (ms: number) => AbortSignal }).timeout ===
+            'function'
+            ? (AbortSignal as unknown as {
+                timeout: (ms: number) => AbortSignal;
+              }).timeout(120_000)
+            : undefined;
         const data = await apiPost<InstallResult>(
           `/v1/takeoff/converters/${converter.id}/install/${qs}`,
+          undefined,
+          installSignal ? { signal: installSignal } : undefined,
         );
 
         setLocalInstalled((prev) => new Set(prev).add(converter.id));

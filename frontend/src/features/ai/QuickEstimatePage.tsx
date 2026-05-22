@@ -1259,7 +1259,22 @@ export function QuickEstimatePage() {
     setInstallResult(null);
     setInstallError(null);
     try {
-      const data = await apiPost<{ message: string }>(`/v1/takeoff/converters/${c.id}/install/`);
+      // 120 s explicit timeout — converter install (RVT especially) can
+      // run 60-90 s; the user error log for v4.3.2 caught AbortErrors
+      // on this exact path.
+      const signal: AbortSignal | undefined =
+        typeof AbortSignal !== 'undefined' &&
+        typeof (AbortSignal as { timeout?: (ms: number) => AbortSignal }).timeout ===
+          'function'
+          ? (AbortSignal as unknown as { timeout: (ms: number) => AbortSignal }).timeout(
+              120_000,
+            )
+          : undefined;
+      const data = await apiPost<{ message: string }>(
+        `/v1/takeoff/converters/${c.id}/install/`,
+        undefined,
+        signal ? { signal } : undefined,
+      );
       setInstallResult(data);
       addToast({ type: 'success', title: `${c.name} installed`, message: data.message });
       queryClient.invalidateQueries({ queryKey: ['takeoff', 'converters'] });

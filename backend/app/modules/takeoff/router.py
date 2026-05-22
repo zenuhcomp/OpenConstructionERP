@@ -2361,8 +2361,13 @@ async def cad_data_describe(
 
     cad_session = await _get_cad_session(db_session, body.session_id)
     if not cad_session:
+        # 410 Gone is the correct HTTP semantic for an expired/discarded
+        # resource that the client previously held. 404 would be wrong —
+        # the endpoint exists; only this specific session is no longer
+        # available. Letting the frontend distinguish 410 lets it auto-
+        # prompt re-upload instead of treating this as a routing error.
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_410_GONE,
             detail=("Session not found or expired. Please re-upload the CAD file via POST /cad-columns."),
         )
 
@@ -2729,8 +2734,10 @@ async def cad_data_elements(
 
     cad_session = await _get_cad_session(db_session, session_id)
     if not cad_session:
+        # 410 Gone — see /cad-data/describe/ for the rationale. The
+        # endpoint is fine; this particular session is just gone.
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_410_GONE,
             detail=("Session not found or expired. Please re-upload the CAD file via POST /cad-columns."),
         )
 

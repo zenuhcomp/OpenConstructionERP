@@ -178,7 +178,10 @@ export function CRMPage() {
   });
   const oppsQ = useQuery({
     queryKey: ['crm', 'opportunities'],
-    queryFn: () => listOpportunities({ limit: 500 }),
+    // Backend caps /v1/crm/opportunities/?limit at 200 (422 above it).
+    // Passing 500 was a 422 every time the CRM page mounted — see user
+    // error log 2026-05-22.
+    queryFn: () => listOpportunities({ limit: 200 }),
     enabled: view === 'pipeline' || view === 'list',
   });
   const leadsQ = useQuery({

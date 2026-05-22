@@ -2682,6 +2682,12 @@ async def list_wizard_presets(
     "/{project_id}/profile",
     response_model=ProjectProfileResult,
     summary="Get a project's setup profile + resolved modules",
+    description="Returns the saved wizard profile if one exists. For "
+    "projects created before the wizard existed (or never run through it), "
+    "this auto-retrofits a default profile (focus mode off — legacy view, "
+    "every module enabled) so the caller always gets a usable response. "
+    "Idempotent: repeat calls return the same profile without duplicating "
+    "rows. Matches the retrofit done by /profile/focus-mode and /modules.",
 )
 async def get_project_profile(
     project_id: uuid.UUID,
@@ -2692,11 +2698,13 @@ async def get_project_profile(
     await _verify_project_owner(service, project_id, user_id, payload)
     result = await profile_service.get_profile(service.session, project_id)
     if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="This project has no setup profile yet. Run the wizard "
-            "(POST /{project_id}/profile) or GET /{project_id}/modules to "
-            "retrofit a default.",
+        # Auto-retrofit a default profile (same as /profile/focus-mode and
+        # /modules already do) so callers never see a 404 for an old project.
+        # ensure_default_profile is idempotent — a concurrent caller that
+        # already created the profile will short-circuit at the existence
+        # check.
+        result = await profile_service.ensure_default_profile(
+            service.session, project_id,
         )
     return result
 
