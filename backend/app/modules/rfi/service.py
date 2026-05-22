@@ -53,6 +53,14 @@ _ASSIGNER_ROLES = frozenset({"admin", "manager", "owner"})
 # assignee is unavailable.
 _ESCALATION_ROLES = frozenset({"admin", "manager", "owner"})
 
+# BUG-RFI-FSM-REOPEN: roles permitted to reopen an ``answered`` RFI
+# (status answered → open). The generic FSM table allows it as a
+# free transition because the workflow has to support "the answer was
+# wrong, let's re-open", but doing that invalidates the prior response
+# and should never be a silent EDITOR action — it's the same
+# escalation chain as (re)assigning ball-in-court.
+_REOPEN_ROLES = frozenset({"admin", "manager", "owner"})
+
 # ── Allowed RFI status transitions ────────────────────────────────────────────
 
 _RFI_STATUS_TRANSITIONS: dict[str, set[str]] = {
@@ -291,6 +299,27 @@ class RFIService:
                     detail=(
                         f"Cannot transition RFI from '{rfi.status}' to '{new_status}'. "
                         f"Allowed transitions: {', '.join(sorted(allowed)) or 'none'}"
+                    ),
+                )
+
+            # BUG-RFI-FSM-REOPEN: reopening an answered RFI invalidates
+            # the prior official response and should never be a silent
+            # EDITOR action. The FSM table allows answered → open as a
+            # mechanical transition; the role gate keeps it scoped to
+            # MANAGER+ so a junior estimator can't quietly invalidate a
+            # vetted answer. ``actor_role=None`` means an internal
+            # caller (no JWT in scope) — those bypass the check, same
+            # convention as the assigner gate above.
+            if (
+                rfi.status == "answered"
+                and new_status == "open"
+                and actor_role
+                and actor_role.lower() not in _REOPEN_ROLES
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        "Only managers or admins may reopen an answered RFI."
                     ),
                 )
 
