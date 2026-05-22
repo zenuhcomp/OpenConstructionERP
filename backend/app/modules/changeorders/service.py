@@ -1067,7 +1067,26 @@ class ChangeOrderService:
             rows.append(row)
 
         await self.repo.update_fields(order_id, current_approval_step=1)
-        await self.session.flush()
+        # Race-safety: ``_has_approval_chain`` is a TOCTOU check — two
+        # concurrent callers can both pass the probe and then both
+        # attempt to write step 1. The unique index
+        # ``uq_oe_changeorder_approval_change_order_id_step_order``
+        # catches the second writer at flush time; surface that to the
+        # caller as a 409 (matches the "already exists" path above) and
+        # roll back so the partially-built chain doesn't leak.
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            await self.session.flush()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "An approval chain was concurrently started for this "
+                    "change order. Use /advance-approval to drive it forward."
+                ),
+            ) from exc
 
         await _safe_publish(
             "changeorders.approval.started",

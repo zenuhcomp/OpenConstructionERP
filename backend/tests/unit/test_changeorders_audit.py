@@ -285,17 +285,17 @@ async def test_start_approval_chain_handles_concurrent_start_collision(
 
     monkeypatch.setattr(session, "execute", _exec)
 
-    # First flush succeeds (cursor write); second flush (rows added)
-    # collides with the concurrent winner.
+    # The first session.flush call from inside start_approval_chain
+    # carries the freshly-added approval rows; that's the moment the
+    # unique index on (change_order_id, step_order) catches the
+    # concurrent winner. Force the collision there.
     flush_calls = {"n": 0}
 
     async def _flush() -> None:
         flush_calls["n"] += 1
-        if flush_calls["n"] >= 2:
-            raise IntegrityError(
-                "INSERT", {}, Exception("uq_oe_changeorder_approval_change_order_id_step_order")
-            )
-        return None
+        raise IntegrityError(
+            "INSERT", {}, Exception("uq_oe_changeorder_approval_change_order_id_step_order")
+        )
 
     monkeypatch.setattr(session, "flush", _flush)
 
