@@ -1,0 +1,144 @@
+{
+  "common": {
+    "page_of": "Seite {page} von {total}",
+    "generated_at": "Erstellt {timestamp} UTC",
+    "doc_ref": "Dok.-Nr.",
+    "developer": "Bauträger",
+    "unit_code": "Einheit-Code",
+    "watermark_draft": "ENTWURF",
+    "currency": "Währung",
+    "amount": "Betrag",
+    "date": "Datum",
+    "signature": "Unterschrift",
+    "place": "Ort",
+    "buyer_signature": "Unterschrift Käufer",
+    "developer_signature": "Unterschrift Bauträger",
+    "witness": "Zeuge"
+  },
+  "reservation_receipt": {
+    "title": "Reservierungsbestätigung",
+    "intro": "Diese Bestätigung dokumentiert die Reservierung der unten beschriebenen Immobilie. Die Anzahlung wurde empfangen und die Einheit wird bis zum Ablauf der Widerrufsfrist oder bis zum Abschluss eines Kaufvertrages vom Markt genommen.",
+    "headings": {
+      "buyer": "Käufer",
+      "property": "Immobilie",
+      "amount_paid": "Gezahlter Betrag",
+      "valid_until": "Gültig bis",
+      "next_step": "Nächster Schritt",
+      "reservation_number": "Reservierungs-Nr.",
+      "cooling_off": "Widerrufsfrist",
+      "deposit_status": "Status der Anzahlung",
+      "plot_details": "Einheit-Details"
+    },
+    "next_step_text": "Innerhalb von {days} Tagen muss der Käufer den Kaufvertrag unterzeichnen und die nächste Rate zahlen, andernfalls verfällt diese Reservierung.",
+    "cooling_off_text": "{days} Tage ab Erhalt dieses Dokuments.",
+    "footer_note": "Die Anzahlung ist nur während der gesetzlichen Widerrufsfrist vollständig erstattungsfähig. Danach gelten die jeweiligen Verfallsregelungen."
+  },
+  "sales_contract": {
+    "title": "Kaufvertrag",
+    "subtitle": "Vertrag Nr. {number}",
+    "preamble": "Dieser Kaufvertrag (der „Vertrag\") wird am unten genannten Datum zwischen dem Bauträger und den unten aufgeführten Käufer(n) über den Verkauf der hier beschriebenen Immobilie geschlossen.",
+    "headings": {
+      "parties": "Vertragsparteien",
+      "property": "Die Immobilie",
+      "price": "Kaufpreis",
+      "payment_schedule": "Zahlungsplan",
+      "clauses": "Vertragsbedingungen",
+      "instalments": "Ratenzahlungen",
+      "signatures": "Unterschriften",
+      "co_ownership": "Miteigentum",
+      "regulatory": "Behördliche Angaben",
+      "annexes": "Anlagen"
+    },
+    "parties_intro": "Die Käufer erwerben die Immobilie gemeinsam in den unten angegebenen Eigentumsanteilen. Alle Parteien haften gesamtschuldnerisch für die Verpflichtungen aus diesem Vertrag, sofern nicht ausdrücklich anders vermerkt.",
+    "instalment_columns": {
+      "sequence": "Nr.",
+      "milestone": "Meilenstein",
+      "due_date": "Fälligkeit",
+      "amount": "Betrag",
+      "currency": "Währung"
+    },
+    "party_columns": {
+      "name": "Name",
+      "role": "Rolle",
+      "ownership_pct": "Anteil %",
+      "email": "E-Mail"
+    },
+    "property_columns": {
+      "plot_number": "Einheit-Nr.",
+      "development": "Projekt",
+      "area_m2": "Fläche (m²)",
+      "house_type": "Haustyp"
+    },
+    "price_label": "Gesamtkaufpreis",
+    "breakdown_label": "Preisaufstellung",
+    "signature_note": "Unterzeichnet in {place} am {date}. Mit ihrer Unterschrift bestätigen Käufer und Bauträger, die Vertragsbedingungen einschließlich aller Anlagen gelesen, verstanden und akzeptiert zu haben."
+  },
+  "payment_receipt": {
+    "title": "Zahlungsbestätigung",
+    "intro": "Diese Quittung bestätigt die Zahlung einer Rate gemäß dem unten referenzierten Kaufvertrag.",
+    "headings": {
+      "spa_ref": "Vertrag Nr.",
+      "instalment": "Rate",
+      "milestone": "Meilenstein",
+      "amount_paid": "Gezahlter Betrag",
+      "payment_method": "Zahlungsart",
+      "payment_ref": "Zahlungsreferenz",
+      "paid_at": "Bezahlt am",
+      "outstanding": "Restsaldo"
+    },
+    "footer_note": "Diese Quittung wird automatisch erstellt und ist auch ohne manuelle Unterschrift gültig. Bitte für Ihre Unterlagen aufbewahren."
+  },
+  "handover_certificate": {
+    "title": "Übergabeprotokoll",
+    "intro": "Dieses Protokoll dokumentiert die Übergabe der Immobilie vom Bauträger an den/die Käufer. Der Käufer akzeptiert die Einheit vorbehaltlich der angehängten Mängelliste und der Gewährleistungsbedingungen.",
+    "headings": {
+      "spa_ref": "Vertrag Nr.",
+      "completed_at": "Übergabedatum",
+      "snag_count": "Offene Mängel",
+      "warranty_period": "Gewährleistungszeitraum",
+      "keys_handed_over": "Schlüssel übergeben",
+      "buyer_acceptance": "Käuferannahme",
+      "developer_declaration": "Erklärung des Bauträgers"
+    },
+    "developer_declaration_text": "Der Bauträger bestätigt hiermit, dass die Immobilie vertragsgemäß errichtet wurde, dass alle erforderlichen Unterlagen an den Käufer übergeben wurden und dass die Struktur- und Ausbau-Gewährleistung mit dem Datum dieses Protokolls beginnt.",
+    "buyer_acceptance_text": "Der Käufer akzeptiert hiermit die Übergabe der Immobilie unter Vorbehalt der angehängten Mängelliste. Der Käufer bestätigt den Empfang der Schlüssel, Handbücher und aller erforderlichen Unterlagen.",
+    "snag_note": "Offene Mängel werden vom Bauträger innerhalb angemessener Frist gemäß der Mängelbeseitigungsklausel des Kaufvertrags behoben."
+  },
+  "warranty_certificate": {
+    "title": "Gewährleistungsurkunde",
+    "intro": "Diese Urkunde legt die Gewährleistungspflichten des Bauträgers für die am unten genannten Datum übergebene Immobilie fest.",
+    "headings": {
+      "spa_ref": "Vertrag Nr.",
+      "handover_date": "Übergabedatum",
+      "structural": "Struktur-Gewährleistung",
+      "finishing": "Ausbau-Gewährleistung",
+      "structural_period": "Struktur-Zeitraum",
+      "finishing_period": "Ausbau-Zeitraum",
+      "warranty_expiry": "Gewährleistungsende",
+      "scope": "Geltungsbereich",
+      "exclusions": "Ausschlüsse"
+    },
+    "structural_text": "Der Bauträger gewährleistet die strukturelle Integrität der Immobilie — einschließlich der tragenden Konstruktion, der Fundamente und der Abdichtung — für einen Zeitraum von {years} Jahren ab dem Datum der Übergabe.",
+    "finishing_text": "Der Bauträger gewährleistet die Ausbauarbeiten — einschließlich Anstrich, Sanitäreinrichtungen, vom Bauträger installierter Geräte und kleinerer kosmetischer Mängel — für einen Zeitraum von {years} Jahr(en) ab Übergabe.",
+    "exclusions_text": "Diese Gewährleistung schließt Schäden durch Fehlgebrauch, vom Käufer oder Dritten durchgeführte Änderungen, normalen Verschleiß, höhere Gewalt sowie Gegenstände aus, die durch separate Herstellergarantien abgedeckt sind.",
+    "claim_procedure": "Zur Einreichung eines Anspruchs muss der Käufer dem Bauträger innerhalb des Gewährleistungszeitraums eine schriftliche Mitteilung zukommen lassen, die den Mangel beschreibt und angemessene Nachweise enthält."
+  },
+  "noc": {
+    "title": "Unbedenklichkeitsbescheinigung",
+    "subtitle": "Für den Weiterverkauf der Einheit",
+    "intro": "Diese Unbedenklichkeitsbescheinigung wird vom Bauträger ausgestellt, um zu bestätigen, dass keine offenen Verpflichtungen des Käufers bestehen, die den Weiterverkauf der unten genannten Einheit verhindern würden.",
+    "headings": {
+      "spa_ref": "Vertrag Nr.",
+      "requested_by": "Beantragt von",
+      "issued_to": "Ausgestellt an",
+      "purpose": "Zweck",
+      "validity": "Gültigkeit",
+      "outstanding_balance": "Offener Saldo",
+      "transfer_fee": "Übertragungsgebühr"
+    },
+    "validity_text": "Diese Bescheinigung ist {days} Tage ab Ausstellungsdatum gültig. Nach Ablauf muss eine neue Bescheinigung beantragt werden.",
+    "purpose_text": "Verkauf der Einheit an einen Dritt-Käufer, vorbehaltlich der Standardübertragungsverfahren des Bauträgers.",
+    "no_outstanding": "Alle bis zum Datum dieser Bescheinigung fälligen Raten wurden vollständig bezahlt. Es liegen keine offenen Zahlungen aus diesem Vertrag vor.",
+    "developer_statement": "Der Bauträger erteilt hiermit, vorbehaltlich der Standard-Übertragungsgebühr und -verfahren, die Erlaubnis zum Eigentumsübergang der Einheit an einen Dritten. Diese Bescheinigung verzichtet auf keine Rechte des Bauträgers aus dem Kaufvertrag."
+  }
+}

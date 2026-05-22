@@ -2921,6 +2921,228 @@ async def regulator_report_214fz(
     return RegulatorReportResponse(**payload)
 
 
+# ── Document templates (#138 follow-up) ────────────────────────────────
+
+
+_VALID_DOC_TYPES_HTTP: set[str] = {
+    "reservation_receipt",
+    "sales_contract",
+    "payment_receipt",
+    "handover_certificate",
+    "warranty_certificate",
+    "noc",
+}
+
+_SUPPORTED_DOC_LOCALES: set[str] = {"en", "de", "ru", "fr", "ar", "es"}
+
+
+async def _enforce_propdev_doc_owner(
+    service: PropertyDevService,
+    payload: dict[str, Any],
+    *,
+    contract_id: uuid.UUID | None,
+    reservation_id: uuid.UUID | None,
+    handover_id: uuid.UUID | None,
+    instalment_id: uuid.UUID | None,
+) -> None:
+    """Cross-tenant IDOR closure for document endpoints.
+
+    Resolves the calling user's project ownership against the entity
+    referenced in the request. Collapses "doesn't exist" and "exists but
+    not yours" into 404 so the endpoint can't be turned into a
+    UUID-existence oracle. Admins bypass.
+    """
+    if payload.get("role") == "admin":
+        return
+    user_id = payload.get("sub") or payload.get("user_id")
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found"
+        )
+    owner_id = await service.resolve_development_owner(
+        contract_id=contract_id,
+        reservation_id=reservation_id,
+        handover_id=handover_id,
+        instalment_id=instalment_id,
+    )
+    if owner_id is None or str(owner_id) != str(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found"
+        )
+
+
+def _normalise_locale(locale: str) -> str:
+    base = (locale or "en").split("-")[0].lower()
+    return base if base in _SUPPORTED_DOC_LOCALES else "en"
+
+
+def _resolve_doc_type_or_404(doc_type: str) -> str:
+    if doc_type not in _VALID_DOC_TYPES_HTTP:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown doc_type '{doc_type}'",
+        )
+    return doc_type
+
+
+def _filename_for(doc_type: str, entity_id: uuid.UUID | None) -> str:
+    suffix = entity_id.hex[:8] if entity_id is not None else "doc"
+    base = {
+        "reservation_receipt": "reservation-receipt",
+        "sales_contract": "sales-contract",
+        "payment_receipt": "payment-receipt",
+        "handover_certificate": "handover-certificate",
+        "warranty_certificate": "warranty-certificate",
+        "noc": "no-objection-certificate",
+    }.get(doc_type, "document")
+    return f"{base}-{suffix}.pdf"
+
+
+@router.get("/documents/{doc_type}")
+async def stream_propdev_document(
+    doc_type: str,
+    payload: CurrentUserPayload,
+    contract_id: uuid.UUID | None = Query(default=None),
+    reservation_id: uuid.UUID | None = Query(default=None),
+    handover_id: uuid.UUID | None = Query(default=None),
+    instalment_id: uuid.UUID | None = Query(default=None),
+    locale: str = Query(default="en"),
+    payment_method: str = Query(default=""),
+    payment_ref: str | None = Query(default=None),
+    requested_by: str = Query(default=""),
+    structural_warranty_years: int = Query(default=10, ge=0, le=99),
+    finishing_warranty_years: int = Query(default=1, ge=0, le=99),
+    noc_validity_days: int = Query(default=30, ge=1, le=365),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> Any:
+    """Stream the generated PDF as ``application/pdf``.
+
+    The Content-Disposition header carries a stable, human-friendly
+    filename. The endpoint is gated by ``property_dev.read`` and
+    enforces cross-tenant IDOR via the owner-resolution helper.
+    """
+    from fastapi.responses import Response
+
+    doc_type = _resolve_doc_type_or_404(doc_type)
+    locale = _normalise_locale(locale)
+    await _enforce_propdev_doc_owner(
+        service,
+        payload,
+        contract_id=contract_id,
+        reservation_id=reservation_id,
+        handover_id=handover_id,
+        instalment_id=instalment_id,
+    )
+    pdf_bytes = await service.generate_document(
+        doc_type=doc_type,
+        contract_id=contract_id,
+        reservation_id=reservation_id,
+        handover_id=handover_id,
+        instalment_id=instalment_id,
+        locale=locale,
+        payment_method=payment_method,
+        payment_ref=payment_ref,
+        requested_by=requested_by,
+        structural_warranty_years=structural_warranty_years,
+        finishing_warranty_years=finishing_warranty_years,
+        noc_validity_days=noc_validity_days,
+    )
+    entity_id = (
+        contract_id or reservation_id or handover_id or instalment_id
+    )
+    filename = _filename_for(doc_type, entity_id)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Document-Type": doc_type,
+            "X-Document-Locale": locale,
+        },
+    )
+
+
+@router.post("/documents/preview")
+async def preview_propdev_document(
+    body: dict[str, Any],
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> dict[str, Any]:
+    """Return a base64-encoded preview of the generated PDF.
+
+    Used by the frontend ``DocumentPreviewModal`` so the document can be
+    embedded inline without an extra round-trip. Same gating and IDOR
+    closure as the streaming endpoint.
+    """
+    import base64
+
+    doc_type = _resolve_doc_type_or_404(str(body.get("doc_type", "")))
+    locale = _normalise_locale(str(body.get("locale", "en")))
+
+    def _uuid(name: str) -> uuid.UUID | None:
+        raw = body.get(name)
+        if raw is None or raw == "":
+            return None
+        try:
+            return uuid.UUID(str(raw))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid UUID for {name}",
+            ) from exc
+
+    contract_id = _uuid("contract_id")
+    reservation_id = _uuid("reservation_id")
+    handover_id = _uuid("handover_id")
+    instalment_id = _uuid("instalment_id")
+
+    await _enforce_propdev_doc_owner(
+        service,
+        payload,
+        contract_id=contract_id,
+        reservation_id=reservation_id,
+        handover_id=handover_id,
+        instalment_id=instalment_id,
+    )
+    pdf_bytes = await service.generate_document(
+        doc_type=doc_type,
+        contract_id=contract_id,
+        reservation_id=reservation_id,
+        handover_id=handover_id,
+        instalment_id=instalment_id,
+        locale=locale,
+        payment_method=str(body.get("payment_method", "")),
+        payment_ref=body.get("payment_ref"),
+        requested_by=str(body.get("requested_by", "")),
+        structural_warranty_years=int(body.get("structural_warranty_years", 10)),
+        finishing_warranty_years=int(body.get("finishing_warranty_years", 1)),
+        noc_validity_days=int(body.get("noc_validity_days", 30)),
+    )
+    page_count = 0
+    try:
+        from io import BytesIO as _BIO
+
+        from pypdf import PdfReader as _PdfReader
+
+        page_count = len(_PdfReader(_BIO(pdf_bytes)).pages)
+    except Exception:
+        page_count = max(1, pdf_bytes.count(b"/Type /Page"))
+
+    return {
+        "doc_type": doc_type,
+        "locale": locale,
+        "size_bytes": len(pdf_bytes),
+        "page_count": page_count,
+        "base64": base64.b64encode(pdf_bytes).decode("ascii"),
+        "filename": _filename_for(
+            doc_type,
+            contract_id or reservation_id or handover_id or instalment_id,
+        ),
+    }
+
+
 # ── Compliance dashboard + regulator reports (task #139) ───────────────
 
 

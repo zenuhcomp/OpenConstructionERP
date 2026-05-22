@@ -39,6 +39,8 @@ import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { getErrorMessage, apiGet } from '@/shared/lib/api';
 import { EditBuyerModal } from './EditBuyerModal';
+import { DocumentPreviewModal } from './DocumentPreviewModal';
+import type { PropDevDocType } from './api';
 import {
   listDevelopments,
   createDevelopment,
@@ -830,6 +832,14 @@ function HandoverPlotRow({ plot, buyer }: { plot: Plot; buyer: Buyer | undefined
     staleTime: 60_000,
   });
   const handovers = handoversQ.data ?? [];
+
+  const [docModal, setDocModal] = useState<{
+    type: PropDevDocType;
+    handoverId?: string;
+    contractId?: string;
+  } | null>(null);
+  const handoverId = handovers[0]?.id;
+
   return (
     <Card padding="md">
       <div className="flex items-start justify-between gap-3">
@@ -871,6 +881,43 @@ function HandoverPlotRow({ plot, buyer }: { plot: Plot; buyer: Buyer | undefined
             </li>
           ))}
         </ul>
+      )}
+      {/* Document-generation actions (R6 follow-up). Only shown when a
+          handover record exists — that's the trigger for all three docs. */}
+      {handoverId && (
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() =>
+              setDocModal({ type: 'handover_certificate', handoverId })
+            }
+          >
+            {t('propdev.documents.generate_handover_certificate', {
+              defaultValue: 'Generate handover certificate',
+            })}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() =>
+              setDocModal({ type: 'warranty_certificate', handoverId })
+            }
+          >
+            {t('propdev.documents.generate_warranty_certificate', {
+              defaultValue: 'Generate warranty certificate',
+            })}
+          </Button>
+        </div>
+      )}
+      {docModal && (
+        <DocumentPreviewModal
+          open
+          onClose={() => setDocModal(null)}
+          docType={docModal.type}
+          handoverId={docModal.handoverId}
+          contractId={docModal.contractId}
+        />
       )}
     </Card>
   );

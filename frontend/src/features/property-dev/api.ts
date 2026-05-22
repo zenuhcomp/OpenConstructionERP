@@ -1854,3 +1854,94 @@ export function getBuyerJourney(buyerId: string): Promise<BuyerJourneyResponse> 
     `${BASE}/dashboards/buyer-journey?${qs.toString()}`,
   );
 }
+
+/* ── Document Templates ─────────────────────────────────────────── */
+
+export type PropDevDocType =
+  | 'reservation_receipt'
+  | 'sales_contract'
+  | 'payment_receipt'
+  | 'handover_certificate'
+  | 'warranty_certificate'
+  | 'noc';
+
+export interface PropDevDocParams {
+  doc_type: PropDevDocType;
+  contract_id?: string;
+  reservation_id?: string;
+  handover_id?: string;
+  instalment_id?: string;
+  locale?: string;
+  payment_method?: string;
+  payment_ref?: string;
+  requested_by?: string;
+  structural_warranty_years?: number;
+  finishing_warranty_years?: number;
+  noc_validity_days?: number;
+}
+
+export interface PropDevDocPreview {
+  doc_type: PropDevDocType;
+  locale: string;
+  size_bytes: number;
+  page_count: number;
+  base64: string;
+  filename: string;
+}
+
+/**
+ * Server-rendered preview of a Property-Development PDF.
+ *
+ * Calls ``POST /api/v1/property-dev/documents/preview`` with the
+ * entity reference(s) and returns the base64-encoded PDF along with
+ * the page count + filename so the modal can show an inline preview
+ * and offer a sensible "Save As…" name.
+ */
+export function previewPropDevDocument(
+  params: PropDevDocParams,
+): Promise<PropDevDocPreview> {
+  return apiPost<PropDevDocPreview, PropDevDocParams>(
+    `${BASE}/documents/preview`,
+    params,
+  );
+}
+
+/**
+ * Stream-download a Property-Development PDF as a Blob.
+ *
+ * Calls ``GET /api/v1/property-dev/documents/{doc_type}`` and returns a
+ * Blob suitable for ``URL.createObjectURL`` + ``<a download>`` flow.
+ */
+export async function downloadPropDevDocument(
+  params: PropDevDocParams,
+): Promise<Blob> {
+  const { doc_type, ...rest } = params;
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(rest)) {
+    if (v !== undefined && v !== null && v !== '') {
+      qs.set(k, String(v));
+    }
+  }
+  // Bypass the JSON-parsing default of the typed helpers — the server
+  // returns ``application/pdf`` here, not JSON.
+  const url = `/api${BASE}/documents/${doc_type}?${qs.toString()}`;
+  const token = (() => {
+    try {
+      // Lazy-load to avoid a circular import; the store is already
+      // initialised by the time any document download is triggered.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+      const { useAuthStore } = require('@/stores/useAuthStore');
+      return useAuthStore.getState().accessToken as string | null;
+    } catch {
+      return null;
+    }
+  })();
+  const headers: Record<string, string> = { Accept: 'application/pdf' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(url, { method: 'GET', headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  return res.blob();
+}

@@ -5214,6 +5214,323 @@ PropertyDevService.generate_regulator_report_214FZ = (  # type: ignore[attr-defi
 )
 
 
+# ── PDF document generation (#138 follow-up) ───────────────────────────
+
+
+_VALID_DOC_TYPES: frozenset[str] = frozenset({
+    "reservation_receipt",
+    "sales_contract",
+    "payment_receipt",
+    "handover_certificate",
+    "warranty_certificate",
+    "noc",
+})
+
+
+async def _svc_generate_document(
+    svc: "PropertyDevService",
+    *,
+    doc_type: str,
+    contract_id: uuid.UUID | None = None,
+    reservation_id: uuid.UUID | None = None,
+    handover_id: uuid.UUID | None = None,
+    instalment_id: uuid.UUID | None = None,
+    locale: str = "en",
+    payment_method: str = "",
+    payment_ref: str | None = None,
+    requested_by: str = "",
+    structural_warranty_years: int = 10,
+    finishing_warranty_years: int = 1,
+    noc_validity_days: int = 30,
+) -> bytes:
+    """Render one of the six sales-pipeline PDFs.
+
+    Returns raw PDF bytes (starting with ``%PDF``). The caller wraps
+    these into a streaming or base64 response.
+
+    Loads the right entity graph for the requested ``doc_type`` and
+    invokes the corresponding pure ``render_*`` from
+    :mod:`document_templates`. Cross-tenant IDOR closure is the
+    responsibility of the router (it owns the user payload); this helper
+    raises :class:`HTTPException` 404 on missing entities.
+    """
+    from app.modules.property_dev.document_templates import (
+        render_handover_certificate_pdf,
+        render_no_objection_certificate_pdf,
+        render_payment_receipt_pdf,
+        render_reservation_receipt_pdf,
+        render_sales_contract_pdf,
+        render_warranty_certificate_pdf,
+    )
+
+    if doc_type not in _VALID_DOC_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown doc_type: {doc_type}",
+        )
+
+    if doc_type == "reservation_receipt":
+        if reservation_id is None:
+            raise HTTPException(status_code=400, detail="reservation_id required")
+        reservation = await svc.reservations.get_by_id(reservation_id)
+        if reservation is None:
+            raise HTTPException(status_code=404, detail="Reservation not found")
+        plot = await svc.plots.get_by_id(reservation.plot_id)
+        if plot is None:
+            raise HTTPException(status_code=404, detail="Plot not found")
+        development = await svc.developments.get_by_id(plot.development_id)
+        if development is None:
+            raise HTTPException(status_code=404, detail="Development not found")
+        buyers: list[Buyer] = []
+        if reservation.buyer_id is not None:
+            buyer = await svc.buyers.get_by_id(reservation.buyer_id)
+            if buyer is not None:
+                buyers.append(buyer)
+        return render_reservation_receipt_pdf(
+            reservation, plot, development, buyers, locale=locale,
+        )
+
+    if doc_type == "sales_contract":
+        if contract_id is None:
+            raise HTTPException(status_code=400, detail="contract_id required")
+        contract = await svc.sales_contracts.get_by_id(contract_id)
+        if contract is None:
+            raise HTTPException(status_code=404, detail="SalesContract not found")
+        plot = await svc.plots.get_by_id(contract.plot_id)
+        if plot is None:
+            raise HTTPException(status_code=404, detail="Plot not found")
+        development = await svc.developments.get_by_id(plot.development_id)
+        if development is None:
+            raise HTTPException(status_code=404, detail="Development not found")
+        payment_schedule = await svc.payment_schedules.get_for_contract(contract_id)
+        instalments = (
+            await svc.instalments.list_for_contract(contract_id)
+            if payment_schedule is not None
+            else []
+        )
+        parties = await svc.contract_parties.list_for_contract(contract_id)
+        # Resolve buyer rows for parties (single per-contract resolution —
+        # no N+1 because we only fetch unique buyer_ids).
+        buyer_lookup: dict[uuid.UUID, Buyer] = {}
+        for p in parties:
+            if p.buyer_id and p.buyer_id not in buyer_lookup:
+                b = await svc.buyers.get_by_id(p.buyer_id)
+                if b is not None:
+                    buyer_lookup[p.buyer_id] = b
+        return render_sales_contract_pdf(
+            contract,
+            payment_schedule,
+            instalments,
+            parties,
+            plot,
+            development,
+            locale=locale,
+            buyer_lookup=buyer_lookup,
+        )
+
+    if doc_type == "payment_receipt":
+        if instalment_id is None:
+            raise HTTPException(status_code=400, detail="instalment_id required")
+        instalment = await svc.instalments.get_by_id(instalment_id)
+        if instalment is None:
+            raise HTTPException(status_code=404, detail="Instalment not found")
+        schedule = await svc.payment_schedules.get_by_id(instalment.schedule_id)
+        if schedule is None:
+            raise HTTPException(status_code=404, detail="PaymentSchedule not found")
+        contract = await svc.sales_contracts.get_by_id(schedule.sales_contract_id)
+        if contract is None:
+            raise HTTPException(status_code=404, detail="SalesContract not found")
+        plot = await svc.plots.get_by_id(contract.plot_id)
+        development = (
+            await svc.developments.get_by_id(plot.development_id)
+            if plot is not None
+            else None
+        )
+        return render_payment_receipt_pdf(
+            instalment,
+            contract,
+            payment_method or "",
+            payment_ref,
+            locale=locale,
+            plot=plot,
+            development=development,
+        )
+
+    if doc_type == "handover_certificate":
+        if handover_id is None:
+            raise HTTPException(status_code=400, detail="handover_id required")
+        handover = await svc.handovers.get_by_id(handover_id)
+        if handover is None:
+            raise HTTPException(status_code=404, detail="Handover not found")
+        plot = await svc.plots.get_by_id(handover.plot_id)
+        if plot is None:
+            raise HTTPException(status_code=404, detail="Plot not found")
+        development = await svc.developments.get_by_id(plot.development_id)
+        # The handover certificate quotes the SPA — find the most recent
+        # signed contract on the plot. Falls back to draft if no signed one.
+        from sqlalchemy import select as _select
+
+        from app.modules.property_dev.models import SalesContract as _SC
+
+        stmt = (
+            _select(_SC)
+            .where(_SC.plot_id == plot.id)
+            .order_by(_SC.revision_number.desc())
+        )
+        rows = (await svc.session.execute(stmt)).scalars().all()
+        contract = next(
+            (r for r in rows if r.status in {"signed", "completed", "executed"}),
+            next(iter(rows), None),
+        )
+        # Open-snag count from snag repo (status != 'fixed' and not closed).
+        open_snags = 0
+        try:
+            from sqlalchemy import func as _func
+
+            from app.modules.property_dev.models import Snag as _Snag
+
+            cnt_stmt = (
+                _select(_func.count(_Snag.id))
+                .where(_Snag.handover_id == handover.id)
+                .where(_Snag.status.in_(("open", "in_progress")))
+            )
+            open_snags = int(
+                (await svc.session.execute(cnt_stmt)).scalar() or 0
+            )
+        except Exception:  # noqa: BLE001 — best-effort snag count
+            open_snags = int(_attr(handover, "snag_count_at_handover", 0) or 0)
+        return render_handover_certificate_pdf(
+            handover,
+            contract,
+            open_snags,
+            plot,
+            development,
+            locale=locale,
+        )
+
+    if doc_type == "warranty_certificate":
+        if handover_id is None:
+            raise HTTPException(status_code=400, detail="handover_id required")
+        handover = await svc.handovers.get_by_id(handover_id)
+        if handover is None:
+            raise HTTPException(status_code=404, detail="Handover not found")
+        plot = await svc.plots.get_by_id(handover.plot_id)
+        development = (
+            await svc.developments.get_by_id(plot.development_id)
+            if plot is not None
+            else None
+        )
+        from sqlalchemy import select as _select
+
+        from app.modules.property_dev.models import SalesContract as _SC
+
+        stmt = (
+            _select(_SC)
+            .where(_SC.plot_id == handover.plot_id)
+            .order_by(_SC.revision_number.desc())
+        )
+        rows = (await svc.session.execute(stmt)).scalars().all()
+        contract = next(iter(rows), None)
+        return render_warranty_certificate_pdf(
+            contract,
+            handover,
+            int(structural_warranty_years),
+            int(finishing_warranty_years),
+            locale=locale,
+            plot=plot,
+            development=development,
+        )
+
+    if doc_type == "noc":
+        if contract_id is None:
+            raise HTTPException(status_code=400, detail="contract_id required")
+        contract = await svc.sales_contracts.get_by_id(contract_id)
+        if contract is None:
+            raise HTTPException(status_code=404, detail="SalesContract not found")
+        plot = await svc.plots.get_by_id(contract.plot_id)
+        if plot is None:
+            raise HTTPException(status_code=404, detail="Plot not found")
+        development = await svc.developments.get_by_id(plot.development_id)
+        return render_no_objection_certificate_pdf(
+            contract,
+            plot,
+            development,
+            requested_by or "",
+            locale=locale,
+            validity_days=int(noc_validity_days),
+        )
+
+    # Unreachable — _VALID_DOC_TYPES is exhaustive.
+    raise HTTPException(status_code=400, detail="Unhandled doc_type")  # pragma: no cover
+
+
+PropertyDevService.generate_document = _svc_generate_document  # type: ignore[attr-defined]
+
+
+async def _svc_resolve_development_owner(
+    svc: "PropertyDevService",
+    *,
+    contract_id: uuid.UUID | None = None,
+    reservation_id: uuid.UUID | None = None,
+    handover_id: uuid.UUID | None = None,
+    instalment_id: uuid.UUID | None = None,
+) -> uuid.UUID | None:
+    """Resolve the owning ``Project.owner_id`` for the entity referenced.
+
+    Used by the router for cross-tenant IDOR closure. Returns ``None``
+    when any link in the chain is missing — the router collapses that
+    into a 404 so we never leak existence of other tenants' entities.
+    """
+    plot_id: uuid.UUID | None = None
+    if contract_id is not None:
+        contract = await svc.sales_contracts.get_by_id(contract_id)
+        if contract is None:
+            return None
+        plot_id = contract.plot_id
+    elif reservation_id is not None:
+        reservation = await svc.reservations.get_by_id(reservation_id)
+        if reservation is None:
+            return None
+        plot_id = reservation.plot_id
+    elif handover_id is not None:
+        handover = await svc.handovers.get_by_id(handover_id)
+        if handover is None:
+            return None
+        plot_id = handover.plot_id
+    elif instalment_id is not None:
+        instalment = await svc.instalments.get_by_id(instalment_id)
+        if instalment is None:
+            return None
+        sched = await svc.payment_schedules.get_by_id(instalment.schedule_id)
+        if sched is None:
+            return None
+        contract = await svc.sales_contracts.get_by_id(sched.sales_contract_id)
+        if contract is None:
+            return None
+        plot_id = contract.plot_id
+
+    if plot_id is None:
+        return None
+    plot = await svc.plots.get_by_id(plot_id)
+    if plot is None:
+        return None
+    development = await svc.developments.get_by_id(plot.development_id)
+    if development is None:
+        return None
+
+    from app.modules.projects.repository import ProjectRepository
+
+    project = await ProjectRepository(svc.session).get_by_id(development.project_id)
+    if project is None:
+        return None
+    return getattr(project, "owner_id", None)
+
+
+PropertyDevService.resolve_development_owner = (  # type: ignore[attr-defined]
+    _svc_resolve_development_owner
+)
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
