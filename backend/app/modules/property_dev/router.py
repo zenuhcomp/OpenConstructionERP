@@ -32,6 +32,7 @@ from app.core.file_signature import (
     require as require_signature,
 )
 from app.dependencies import CurrentUserPayload, RequirePermission, SessionDep
+from app.modules.portal.dependencies import RequirePortalSession
 from app.modules.property_dev.schemas import (
     BlockCreate,
     BlockResponse,
@@ -3640,3 +3641,87 @@ async def dashboard_buyer_journey(
     await _verify_buyer_owner(session, buyer_id, payload)
     data = await service.dashboard_buyer_journey(buyer_id)
     return BuyerJourneyResponse.model_validate(data)
+
+
+# ── Buyer portal (task #156) ────────────────────────────────────────────
+#
+# Portal-user-facing endpoints, gated by ``RequirePortalSession`` (NOT
+# ``RequirePermission``). Buyers see ONLY their own snags + warranty
+# claims; cross-buyer enumeration is blocked at the SQL where-clause
+# level.
+
+
+async def _buyers_for_portal_user(
+    session: SessionDep, portal_user_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Resolve every Buyer row linked to this portal user.
+
+    A single email may have multiple Buyer rows (different developments
+    or co-ownership across projects). Returns an empty list when the
+    portal user has never been linked to any buyer record.
+    """
+    from sqlalchemy import select as _select
+
+    from app.modules.property_dev.models import Buyer as _Buyer
+
+    rows = await session.execute(
+        _select(_Buyer.id).where(_Buyer.portal_user_id == portal_user_id)
+    )
+    return [r for (r,) in rows.all()]
+
+
+@router.get(
+    "/portal/me/snags",
+    response_model=list[SnagResponse],
+)
+async def portal_list_my_snags(
+    session: SessionDep,
+    portal_user: RequirePortalSession,
+    status: str | None = Query(default=None),
+) -> list[SnagResponse]:
+    """List snags the calling buyer raised across every plot they own.
+
+    Returns ``[]`` when the portal user has no linked Buyer rows yet.
+    ``Snag.buyer_id`` carries the cross-link; surveyor-raised snags
+    (``buyer_id IS NULL``) are intentionally invisible to the portal.
+    """
+    from sqlalchemy import select as _select
+
+    from app.modules.property_dev.models import Snag as _Snag
+
+    buyer_ids = await _buyers_for_portal_user(session, portal_user.id)
+    if not buyer_ids:
+        return []
+
+    stmt = _select(_Snag).where(_Snag.buyer_id.in_(buyer_ids))
+    if status is not None:
+        stmt = stmt.where(_Snag.status == status)
+    stmt = stmt.order_by(_Snag.created_at.desc()).limit(500)
+    rows = (await session.execute(stmt)).scalars().all()
+    return [SnagResponse.model_validate(r) for r in rows]
+
+
+@router.get(
+    "/portal/me/warranty-claims",
+    response_model=list[WarrantyClaimResponse],
+)
+async def portal_list_my_warranty_claims(
+    session: SessionDep,
+    portal_user: "RequirePortalSession",  # noqa: F821
+    status: str | None = Query(default=None),
+) -> list[WarrantyClaimResponse]:
+    """List warranty claims raised by the calling buyer across every plot."""
+    from sqlalchemy import select as _select
+
+    from app.modules.property_dev.models import WarrantyClaim as _WC
+
+    buyer_ids = await _buyers_for_portal_user(session, portal_user.id)
+    if not buyer_ids:
+        return []
+
+    stmt = _select(_WC).where(_WC.buyer_id.in_(buyer_ids))
+    if status is not None:
+        stmt = stmt.where(_WC.status == status)
+    stmt = stmt.order_by(_WC.created_at.desc()).limit(500)
+    rows = (await session.execute(stmt)).scalars().all()
+    return [WarrantyClaimResponse.model_validate(r) for r in rows]
