@@ -343,8 +343,12 @@ class GeoHubService:
         await self._verify_project_owner(
             data.project_id, payload, not_found_detail="Project not found",
         )
+        # IDOR guard: scope the reuse lookup to the caller's project so a
+        # ``(source_kind, source_id)`` pair belonging to another tenant
+        # cannot be reattached to this tenant's job (which would leak
+        # ``tileset_json_uri`` of the foreign tileset via ``output_uri``).
         existing = await self.tilesets.find_for_source(
-            data.source_kind, data.source_id,
+            data.source_kind, data.source_id, project_id=data.project_id,
         )
         if existing is not None and existing.status == "ready" and not data.force:
             # Idempotent: hand the user back the existing tileset by

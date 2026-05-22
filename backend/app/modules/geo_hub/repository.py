@@ -96,14 +96,26 @@ class TilesetRepository(_BaseRepo):
         self,
         source_kind: str,
         source_id: uuid.UUID,
+        *,
+        project_id: uuid.UUID | None = None,
     ) -> Tileset | None:
-        """Return the most recent tileset for a polymorphic source."""
+        """Return the most recent tileset for a polymorphic source.
+
+        ``project_id`` is optional but **must** be supplied by any caller
+        that exposes the result back to a tenant — otherwise the
+        ``(source_kind, source_id)`` pair can leak across tenants when
+        two projects happen to import the same external upload key.
+        Internal callers (event-bus subscribers that already know they
+        are operating on a trusted payload) may omit it.
+        """
         stmt = (
             select(Tileset)
             .where(Tileset.source_kind == source_kind)
             .where(Tileset.source_id == source_id)
-            .order_by(Tileset.created_at.desc())
         )
+        if project_id is not None:
+            stmt = stmt.where(Tileset.project_id == project_id)
+        stmt = stmt.order_by(Tileset.created_at.desc())
         res = await self.session.execute(stmt)
         return res.scalars().first()
 

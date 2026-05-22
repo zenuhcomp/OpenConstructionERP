@@ -490,6 +490,63 @@ class TestTilesets:
         )
         assert res.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_generate_does_not_leak_other_tenants_tileset_uri(
+        self, http_client, tenant_a, tenant_b,
+    ):
+        """Cross-tenant reuse leak: tenant A owns a ``ready`` tileset for
+        ``source_id=X``; tenant B then enqueues a job against THEIR own
+        project but with the same ``source_id``. Without project-scoping
+        the reuse lookup, the service would happily return a completed
+        job whose ``output_uri`` points at tenant A's storage prefix.
+        """
+        shared_source_id = str(uuid.uuid4())
+        # Tenant A creates a tileset, walks it through the FSM to ``ready``.
+        ts = await http_client.post(
+            "/api/v1/geo-hub/tilesets/",
+            json={
+                "project_id": tenant_a["project_id"],
+                "source_kind": "bim_model",
+                "source_id": shared_source_id,
+                "status": "draft",
+                "tileset_json_uri": "minio://oe/tilesets/tenant-a-secret/tileset.json",
+            },
+            headers=tenant_a["headers"],
+        )
+        assert ts.status_code == 201, ts.text
+        ts_id = ts.json()["id"]
+        await http_client.patch(
+            f"/api/v1/geo-hub/tilesets/{ts_id}",
+            json={"status": "generating"},
+            headers=tenant_a["headers"],
+        )
+        promote = await http_client.patch(
+            f"/api/v1/geo-hub/tilesets/{ts_id}",
+            json={"status": "ready"},
+            headers=tenant_a["headers"],
+        )
+        assert promote.status_code == 200
+
+        # Tenant B enqueues against their OWN project using A's source_id.
+        res = await http_client.post(
+            "/api/v1/geo-hub/tilesets/generate/",
+            json={
+                "project_id": tenant_b["project_id"],
+                "source_kind": "bim_model",
+                "source_id": shared_source_id,
+            },
+            headers=tenant_b["headers"],
+        )
+        # Must NOT short-circuit to tenant A's tileset. Either a queued
+        # job for B's own project, or a brand-new tileset_id.
+        assert res.status_code == 202, res.text
+        job = res.json()
+        # Critical: the reused tileset_id (if any) must belong to B, not A.
+        assert job.get("tileset_id") != ts_id
+        assert job.get("output_uri") != (
+            "minio://oe/tilesets/tenant-a-secret/tileset.json"
+        )
+
 
 # ── Imagery & Terrain (6 tests) ─────────────────────────────────────────
 
