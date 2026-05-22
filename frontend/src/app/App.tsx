@@ -250,6 +250,17 @@ const CarbonPage = lazy(() =>
 const PropertyDevPage = lazy(() =>
   import('@/features/property-dev').then((m) => ({ default: m.PropertyDevPage }))
 );
+// ── Geo Hub — Cesium 3D Tiles + cross-module geo. Lazy-loaded because
+// CesiumJS is ~3 MB; this keeps the main bundle untouched.
+const GeoHubPage = lazy(() =>
+  import('@/features/geo-hub').then((m) => ({ default: m.GeoHubPage }))
+);
+const ProjectGeoPage = lazy(() =>
+  import('@/features/geo-hub').then((m) => ({ default: m.ProjectGeoPage }))
+);
+const DevelopmentGeoPage = lazy(() =>
+  import('@/features/geo-hub').then((m) => ({ default: m.DevelopmentGeoPage }))
+);
 const BidManagementPage = lazy(() =>
   import('@/features/bid-management').then((m) => ({ default: m.BidManagementPage }))
 );
@@ -719,7 +730,12 @@ export default function App() {
         <Route path="/projects/:projectId/bid-management" element={<P title="Bid Management"><BidManagementPage /></P>} />
         <Route path="/crm" element={<P title="CRM"><CRMPage /></P>} />
         <Route path="/property-dev" element={<P title="Property Development"><PropertyDevPage /></P>} />
+        <Route path="/property-dev/developments/:devId/geo" element={<P title="Development map"><DevelopmentGeoPage /></P>} />
         <Route path="/supplier-catalogs" element={<P title="Supplier Catalogs"><SupplierCatalogsPage /></P>} />
+
+        {/* Geo Hub — Cesium 3D Tiles + cross-module geo. */}
+        <Route path="/geo" element={<P title="Geo Hub"><GeoHubPage /></P>} />
+        <Route path="/projects/:projectId/geo" element={<P title="Project map"><ProjectGeoPage /></P>} />
 
         {/* 18-Modules Wave — Schedule & Quality */}
         <Route path="/schedule-advanced" element={<P title="Advanced Schedule"><ScheduleAdvancedPage /></P>} />

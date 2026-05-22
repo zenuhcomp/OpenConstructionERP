@@ -199,6 +199,8 @@ const navGroups: NavGroup[] = [
       { labelKey: 'nav.bim_federations', to: '/bim/federations', icon: Layers, badge: 'NEW' },
       { labelKey: 'nav.clash_detection', to: '/clash', icon: Radar, badge: 'BETA' },
       { labelKey: 'nav.bim_rules', to: '/bim/rules?mode=requirements', icon: SlidersHorizontal, badge: 'BETA' },
+      // Geo Hub — Cesium 3D Tiles + cross-module geo overlays.
+      { labelKey: 'sidebar.geo_hub', to: '/geo', icon: Globe, badge: 'NEW' },
     ],
   },
   // ── AI & TOOLS ─────────────────────────────────────────────────────

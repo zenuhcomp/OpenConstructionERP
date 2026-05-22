@@ -1,0 +1,172 @@
+// DDC-CWICR-OE: DataDrivenConstruction · OpenConstructionERP
+/**
+ * TS types mirroring backend/app/modules/geo_hub/schemas.py.
+ */
+
+export type GeoSourceKind =
+  | 'bim_model'
+  | 'federation'
+  | 'development'
+  | 'upload'
+  | 'point_cloud'
+  | 'photogrammetry';
+
+export type TilesetStatus =
+  | 'draft'
+  | 'generating'
+  | 'ready'
+  | 'failed'
+  | 'obsolete';
+
+export type TileFormat = 'b3dm' | 'i3dm' | 'pnts' | 'cmpt';
+
+export type TileJobState =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type ImageryProvider = 'osm' | 'bing' | 'wms' | 'wmts' | 'custom';
+
+export type TerrainProvider =
+  | 'cesium_world'
+  | 'quantized_mesh'
+  | 'ellipsoid';
+
+export type OverlayKind =
+  | 'boundary'
+  | 'survey'
+  | 'contour'
+  | 'drone_photo'
+  | 'site_plan'
+  | 'easement'
+  | 'flood_zone'
+  | 'clash_marker'
+  | 'incident'
+  | 'field_report'
+  | 'risk_zone';
+
+export interface GeoAnchor {
+  id: string;
+  project_id: string;
+  lat: string;
+  lon: string;
+  alt: string;
+  epsg_code: number;
+  region_code: string | null;
+  address: string | null;
+  accuracy_m: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Tileset {
+  id: string;
+  project_id: string;
+  source_kind: GeoSourceKind;
+  source_id: string;
+  name: string;
+  bucket: string;
+  prefix: string;
+  tileset_json_uri: string | null;
+  bounding_volume: Record<string, unknown> | null;
+  geometric_error: string;
+  tile_format: TileFormat;
+  tile_count: number;
+  total_bytes: number;
+  status: TilesetStatus;
+  generated_at: string | null;
+  generation_job_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImageryLayer {
+  id: string;
+  project_id: string;
+  name: string;
+  provider: ImageryProvider;
+  url_template: string;
+  attribution: string;
+  requires_api_key: boolean;
+  default_for_project: boolean;
+  is_visible: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TerrainSource {
+  id: string;
+  name: string;
+  provider: TerrainProvider;
+  endpoint: string | null;
+  is_default: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Viewpoint {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  camera_lat: string;
+  camera_lon: string;
+  camera_alt: string;
+  heading: string;
+  pitch: string;
+  roll: string;
+  created_by: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeoOverlay {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: OverlayKind;
+  geojson: Record<string, unknown>;
+  source_file: string | null;
+  style: Record<string, unknown>;
+  is_visible: boolean;
+  source_event_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TileJob {
+  id: string;
+  project_id: string;
+  tileset_id: string | null;
+  source_kind: GeoSourceKind;
+  source_id: string;
+  requested_by: string | null;
+  state: TileJobState;
+  progress_pct: number;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  output_uri: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MapConfig {
+  project_id: string;
+  anchor: GeoAnchor | null;
+  imagery_layers: ImageryLayer[];
+  terrain_source: TerrainSource | null;
+  tilesets: Tileset[];
+  overlays: GeoOverlay[];
+  viewpoints: Viewpoint[];
+  active_jobs: TileJob[];
+}

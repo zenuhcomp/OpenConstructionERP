@@ -259,6 +259,14 @@ export default defineConfig({
           if (id.includes('node_modules/@xyflow/')) return 'vendor-flow';
           if (id.includes('node_modules/@dnd-kit/')) return 'vendor-dnd';
           if (id.includes('node_modules/three')) return 'vendor-three';
+          // CesiumJS — Geo Hub. Optional dep (~3 MB minified). Lives
+          // in its own chunk so the main bundle never pays the cost
+          // when the user never visits /geo.
+          if (
+            id.includes('node_modules/cesium') ||
+            id.includes('node_modules/@cesium/')
+          )
+            return 'vendor-cesium';
           if (id.includes('node_modules/pdfjs-dist')) return 'vendor-pdf';
           // jsPDF + html2canvas (PDF report export) — distinct from the
           // recharts charting stack so a page that only charts doesn't

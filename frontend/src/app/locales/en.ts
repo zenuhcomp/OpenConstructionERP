@@ -6227,6 +6227,20 @@ const resource = {
     "propdev.bedrooms": "Bedrooms",
     "propdev.phone": "Phone",
     // --- /propdev ---
+    // --- geo_hub ---
+    "sidebar.geo_hub": "Geo Hub",
+    "geo_hub.title": "Geo Hub",
+    "geo_hub.project_title": "Project map",
+    "geo_hub.development_title": "Development map",
+    "geo_hub.global_subtitle": "Earth-scale map of every project anchor — drop into a project to see 3D Tiles, imagery, terrain, viewpoints and overlays.",
+    "geo_hub.loading_config": "Loading geo configuration...",
+    "geo_hub.loading_viewer": "Loading Cesium viewer (~3 MB)...",
+    "geo_hub.cesium_loading": "Loading Cesium...",
+    "geo_hub.cesium_not_installed": "CesiumJS is not installed in this build. Geo viewer is in degraded mode.",
+    "geo_hub.missing_project": "Project id missing from URL.",
+    "geo_hub.load_failed": "Could not load geo data for this project.",
+    "geo_hub.anchor_label": "Anchor:",
+    // --- /geo_hub ---
   }
 } as { translation: Record<string, string> };
 
