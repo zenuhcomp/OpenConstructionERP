@@ -1193,9 +1193,52 @@ class ChangeOrderService:
                 ),
             )
 
-        # Stamp the row.
+        # Race-safety: the python-side "set active_row.decision" pattern
+        # is a TOCTOU window when two approvers click at the same moment.
+        # Both fetch the row with decision='pending' before either commits,
+        # both then overwrite the column and both bump the cursor — the
+        # CO advances two steps at once and the last write wins on
+        # decided_at / comments.
+        #
+        # The conditional UPDATE below pushes the win condition to the
+        # database: only ONE caller's WHERE clause can match a row that
+        # is still ``pending``; the loser sees rowcount==0 and 409s
+        # cleanly. Combined with the existing cursor read this gives
+        # single-winner semantics without a SELECT … FOR UPDATE round
+        # trip (works the same on SQLite dev and Postgres prod).
+        from sqlalchemy import update as sa_update
+
+        decided_at = datetime.now(UTC)
+        update_stmt = (
+            sa_update(ChangeOrderApproval)
+            .where(ChangeOrderApproval.id == active_row.id)
+            .where(ChangeOrderApproval.decision == "pending")
+            .values(
+                decision=decision,
+                decided_at=decided_at,
+                **({"comments": comments} if comments is not None else {}),
+            )
+        )
+        result = await self.session.execute(update_stmt)
+        # rowcount is None on some dialects when the connection didn't
+        # report it (e.g. async drivers in autocommit). Treat that as a
+        # success only when ``active_row`` reflects pending (we just
+        # checked it above) — but if the driver reports 0, fail hard so
+        # we never silently drop the loser.
+        affected = getattr(result, "rowcount", None)
+        if affected == 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This approval step was concurrently decided by another "
+                    "approver — refresh and retry."
+                ),
+            )
+        # Keep the in-memory row in sync for the rest of this method so
+        # downstream code (event payload, return value) sees the new
+        # decision / timestamp.
         active_row.decision = decision
-        active_row.decided_at = datetime.now(UTC)
+        active_row.decided_at = decided_at
         if comments is not None:
             active_row.comments = comments
         await self.session.flush()

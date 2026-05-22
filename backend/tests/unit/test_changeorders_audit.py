@@ -310,50 +310,51 @@ async def test_start_approval_chain_handles_concurrent_start_collision(
 
 
 @pytest.mark.asyncio
-async def test_concurrent_advance_approval_second_caller_gets_409() -> None:
+async def test_concurrent_advance_approval_uses_conditional_update() -> None:
     """If two approvers both call advance_approval on the same active
-    step (the row was still ``pending`` when both fetched it but the
-    first has already stamped it before the second reaches the write),
-    the second must get 409 — not a duplicate stamp that double-advances
-    the cursor.
+    step, the bare ``active_row.decision != 'pending'`` check is a
+    TOCTOU window — both callers may read decision='pending' before
+    either writes. The service must instead use a conditional UPDATE
+    that only succeeds when ``decision='pending'`` AND
+    ``step_order=cursor`` so exactly one caller wins; the loser sees
+    a clean 409 without double-advancing the cursor.
     """
     from app.modules.changeorders.service import ChangeOrderService
 
     pid = uuid.uuid4()
     approver_a = uuid.uuid4()
-    approver_b = uuid.uuid4()
     order = _make_order(project_id=pid, status="submitted")
     order.current_approval_step = 1
 
-    # Shared mutable approval row — concurrent callers each get a
-    # reference to the same SimpleNamespace, but the SECOND caller must
-    # detect that the row was already stamped between fetch and write.
     shared_row = SimpleNamespace(
         id=uuid.uuid4(),
         change_order_id=order.id,
         step_order=1,
-        approver_user_id=approver_a,  # caller A is the assigned approver
-        decision="pending",
+        approver_user_id=approver_a,
+        decision="pending",  # row LOOKS pending to caller B at fetch time
         decided_at=None,
         comments=None,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
 
-    # Simulate caller B arriving AFTER caller A has flipped the row.
-    # The service must check decision-after-fetch and 409 cleanly.
-    shared_row.decision = "approved"
-    shared_row.decided_at = datetime.now(UTC)
-
     service, session, repo = _make_service()
     repo.orders[order.id] = order
+
+    # Capture the conditional UPDATE statement — that's the contract we
+    # require. The fix must issue an UPDATE … WHERE decision='pending'
+    # so the DB enforces single-winner semantics; the seen-rowcount
+    # check then maps 0 affected rows to 409 in the service.
+    update_statements: list[str] = []
+    cursor_writes: list[Any] = []
 
     async def _exec(stmt: Any) -> Any:
         sql = str(stmt).lower()
 
         class _R:
-            def __init__(self, v: Any) -> None:
+            def __init__(self, v: Any, rowcount: int = 0) -> None:
                 self._v = v
+                self.rowcount = rowcount
 
             def scalar_one(self) -> Any:
                 return self._v
@@ -367,21 +368,56 @@ async def test_concurrent_advance_approval_second_caller_gets_409() -> None:
             def all(self) -> list[Any]:
                 return list(self._v) if isinstance(self._v, list) else []
 
-        # _has_approval_chain probe → 1 row exists.
+        if sql.startswith("update"):
+            update_statements.append(sql)
+            # Caller B's conditional UPDATE affects 0 rows because
+            # caller A's UPDATE already flipped decision away from
+            # 'pending'. Returning a result with rowcount=0 here is
+            # the DB's "you lost the race" signal.
+            return _R(None, rowcount=0)
+
         if "count(" in sql:
             return _R(1)
-        # advance_approval's "fetch active row" query.
         if "step_order =" in sql or "step_order=" in sql:
             return _R(shared_row)
-        # total_steps query returns the lone row.
         return _R([shared_row])
 
     session.execute = _exec  # type: ignore[method-assign]
 
+    # Patch repo.update_fields so we can prove the cursor was NOT
+    # advanced when the race was lost.
+    original_update_fields = repo.update_fields
+
+    async def _track_update(order_id: uuid.UUID, **fields: Any) -> None:
+        cursor_writes.append(fields)
+        await original_update_fields(order_id, **fields)
+
+    repo.update_fields = _track_update  # type: ignore[method-assign]
+
     with pytest.raises(HTTPException) as exc_info:
         await service.advance_approval(order.id, str(approver_a), "approved")
     assert exc_info.value.status_code == 409
-    # Cursor untouched — the second caller must not have advanced it.
+    # The service MUST have issued a conditional UPDATE … WHERE
+    # decision = :pending — that's the DB-level guard that makes
+    # concurrent approvers single-winner. The literal pending value is
+    # bound as a parameter so the compiled SQL only shows ``decision =
+    # :decision_1``; that's enough proof the WHERE clause filters on
+    # the column (the alternative — bare python-side mutation — would
+    # never issue an UPDATE statement against the table).
+    assert any(
+        "update" in s
+        and "oe_changeorder_approval" in s
+        and "decision =" in s.split("where", 1)[-1]
+        for s in update_statements
+    ), (
+        "advance_approval must use a conditional UPDATE … WHERE "
+        "decision=:pending to be race-safe; got: "
+        + repr(update_statements)
+    )
+    # Cursor must not have moved.
+    assert all(
+        fields.get("current_approval_step") != 2 for fields in cursor_writes
+    ), f"Cursor must NOT advance on lost race; got writes: {cursor_writes!r}"
     assert order.current_approval_step == 1
 
 
