@@ -75,7 +75,14 @@ class _BaseRepo:
         )
         await self.session.execute(stmt)
         await self.session.flush()
-        self.session.expire_all()
+        # Expire ONLY the updated row in the identity map — earlier code
+        # used session.expire_all() which nuked every loaded ORM object and
+        # left siblings (Plot, Buyer, Development) with deferred columns
+        # that tripped MissingGreenlet on later attribute reads under
+        # aiosqlite. Surgical expire keeps siblings hydrated.
+        obj = await self.session.get(self.model, entity_id)
+        if obj is not None:
+            self.session.expire(obj)
 
     async def delete(self, entity_id: uuid.UUID) -> None:
         obj = await self.get_by_id(entity_id)

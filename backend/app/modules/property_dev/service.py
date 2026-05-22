@@ -1980,19 +1980,27 @@ class PropertyDevService:
         plot = await self.plots.get_by_id(data.plot_id)
         if plot is None:
             raise HTTPException(status_code=422, detail="plot not found")
-        if plot.status in {"sold", "handed_over"}:
+        # Snapshot every plot attribute the rest of this function reads —
+        # later update_fields() calls expire the ORM object and any deferred
+        # column access trips MissingGreenlet under aiosqlite (caught by R6
+        # dashboards + document-templates work).
+        plot_id_snap = plot.id
+        plot_status_before = plot.status
+        plot_development_id_snap = plot.development_id
+        plot_number_snap = plot.plot_number
+        if plot_status_before in {"sold", "handed_over"}:
             raise HTTPException(
                 status_code=409,
-                detail=f"Plot {plot.plot_number} not available for reservation",
+                detail=f"Plot {plot_number_snap} not available for reservation",
             )
 
         # Optionally materialise a Buyer shadow.
         buyer: Buyer | None = None
         if data.create_buyer:
-            dev_id = lead.development_id or plot.development_id
+            dev_id = lead.development_id or plot_development_id_snap
             buyer_obj = Buyer(
                 development_id=dev_id,
-                plot_id=plot.id,
+                plot_id=plot_id_snap,
                 full_name=lead.full_name,
                 email=lead.email,
                 phone=lead.phone,
@@ -2024,8 +2032,8 @@ class PropertyDevService:
             converted_to_buyer_id=buyer.id if buyer is not None else None,
         )
         # Flip plot to reserved unless already past reservation gate.
-        if plot.status in {"planned", "under_construction", "ready"}:
-            await self.plots.update_fields(plot.id, status="reserved")
+        if plot_status_before in {"planned", "under_construction", "ready"}:
+            await self.plots.update_fields(plot_id_snap, status="reserved")
 
         event_bus.publish_detached(
             "property_dev.lead.converted",
@@ -2033,7 +2041,7 @@ class PropertyDevService:
                 "lead_id": str(lead_id),
                 "reservation_id": str(reservation.id),
                 "buyer_id": str(buyer.id) if buyer is not None else None,
-                "plot_id": str(plot.id),
+                "plot_id": str(plot_id_snap),
                 "deposit_amount": str(reservation.deposit_amount),
                 "currency": reservation.currency,
             },
@@ -2234,15 +2242,23 @@ class PropertyDevService:
             raise HTTPException(
                 status_code=409, detail="Plot for reservation has gone away"
             )
+        # Snapshot every attribute the rest of this function touches; any
+        # later update_fields() expires its row's ORM identity-map entry and
+        # would force a lazy-load on subsequent attribute access (trips
+        # MissingGreenlet under aiosqlite).
+        plot_id_snap = plot.id
+        plot_status_before = plot.status
+        res_tenant_id_snap = res.tenant_id
+        res_buyer_id_snap = res.buyer_id
 
         contract_number = data.contract_number or await self._next_contract_number(
             plot
         )
         obj = SalesContract(
             contract_number=contract_number,
-            plot_id=plot.id,
+            plot_id=plot_id_snap,
             reservation_id=r_id,
-            tenant_id=res.tenant_id,
+            tenant_id=res_tenant_id_snap,
             signing_date=data.signing_date,
             governing_law=data.governing_law or "",
             language=data.language or "en",
@@ -2257,18 +2273,18 @@ class PropertyDevService:
 
         # Mark reservation converted + buyer/plot transition.
         await self.reservations.update_fields(r_id, status="converted")
-        if res.buyer_id is not None:
-            buyer = await self.buyers.get_by_id(res.buyer_id)
+        if res_buyer_id_snap is not None:
+            buyer = await self.buyers.get_by_id(res_buyer_id_snap)
             if buyer is not None and buyer.status == "reserved":
                 await self.buyers.update_fields(
-                    res.buyer_id,
+                    res_buyer_id_snap,
                     status="contracted",
                     contract_value=data.total_value,
                     currency=data.currency,
                     contract_signed_at=data.signing_date,
                 )
-        if plot.status == "reserved":
-            await self.plots.update_fields(plot.id, status="sold")
+        if plot_status_before == "reserved":
+            await self.plots.update_fields(plot_id_snap, status="sold")
 
         # Default payment schedule (single milestone @ spa_signed).
         await self._create_default_payment_schedule(spa)
@@ -2277,7 +2293,7 @@ class PropertyDevService:
             "property_dev.spa.created",
             data={
                 "spa_id": str(spa.id),
-                "plot_id": str(plot.id),
+                "plot_id": str(plot_id_snap),
                 "reservation_id": str(r_id),
                 "total_value": str(spa.total_value),
                 "currency": spa.currency,
