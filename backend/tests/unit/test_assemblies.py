@@ -456,3 +456,52 @@ def test_formula_basic_math_unchanged():
     ev = FormulaEvaluator()
     assert ev.evaluate("${h} * ${l} * 0.24", {"h": 3.0, "l": 12.0}) == pytest.approx(8.64)
     assert ev.evaluate("max(2, 8) + sqrt(16)") == pytest.approx(12.0)
+
+
+# ── NEW-ASM-107 — regional_factors schema sanitisation ───────────────────
+
+
+def test_assembly_create_strips_non_finite_regional_factor():
+    """NEW-ASM-107: ``{"berlin": "Infinity"}`` is dropped at the schema
+    boundary instead of being persisted into JSON."""
+    a = AssemblyCreate(
+        code="ASM-Z",
+        name="Z",
+        unit="m",
+        regional_factors={
+            "berlin": "Infinity",
+            "muc": "1.10",
+            "neg": -5,
+            "junk": "abc",
+            "nan": float("nan"),
+            "ok": 1.05,
+        },
+    )
+    assert a.regional_factors == {"muc": 1.10, "ok": 1.05}
+
+
+def test_assembly_create_strips_nested_and_bool_values():
+    """NEW-ASM-107: nested containers / booleans are not numeric factors."""
+    a = AssemblyCreate(
+        code="ASM-Y",
+        name="Y",
+        unit="m",
+        regional_factors={
+            "x": {"nested": 1},
+            "y": [1, 2],
+            "z": True,
+            "ok": 1.0,
+        },
+    )
+    assert a.regional_factors == {"ok": 1.0}
+
+
+def test_assembly_update_preserves_unset_regional_factors():
+    """NEW-ASM-107: an absent ``regional_factors`` stays absent (None)
+    so ``exclude_unset=True`` semantics still skip the column on update.
+    """
+    from app.modules.assemblies.schemas import AssemblyUpdate
+
+    u = AssemblyUpdate()  # no fields set
+    dumped = u.model_dump(exclude_unset=True)
+    assert "regional_factors" not in dumped

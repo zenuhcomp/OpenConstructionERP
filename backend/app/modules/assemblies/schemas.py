@@ -6,11 +6,12 @@ are exposed as floats in the API but stored as strings in the database for
 SQLite compatibility.
 """
 
+import math
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ── Component schemas ────────────────────────────────────────────────────────
 
@@ -21,6 +22,40 @@ from pydantic import BaseModel, ConfigDict, Field
 # pairwise/triple product finite in float and Decimal, so a component
 # total can never silently overflow to ``inf`` and serialise as ``null``.
 _NUM_MAX: float = 1e12
+
+
+def _sanitise_regional_factors(raw: Any) -> dict[str, Any]:
+    """Coerce a payload-supplied ``regional_factors`` dict to safe values.
+
+    The column is JSON so the Pydantic ``dict[str, Any]`` shape itself
+    cannot reject ``{"berlin": "Infinity"}`` / ``{"x": -5}`` / nested
+    dicts — but those values get multiplied straight into the BOQ
+    position's ``unit_rate`` at apply-to-boq time (NEW-ASM-105 /
+    ASM-007). Drop any non-finite, negative, or non-numeric entry at
+    the schema boundary rather than letting it persist and corrupt a
+    downstream rollup.
+
+    A ``None`` input is normalised to ``{}`` so the caller never has to
+    juggle a ``regional_factors is None`` branch.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    cleaned: dict[str, Any] = {}
+    for key, val in raw.items():
+        if not isinstance(key, str) or not key.strip():
+            continue
+        # Reject booleans (which are an int subclass) and nested
+        # containers — a factor must be a single number.
+        if isinstance(val, bool) or isinstance(val, (dict, list)):
+            continue
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(num) or num < 0 or num > _NUM_MAX:
+            continue
+        cleaned[key.strip()] = num
+    return cleaned
 
 
 # Allowed resource_type values. Kept as a Literal-ish string so the DB
@@ -156,6 +191,13 @@ class AssemblyCreate(BaseModel):
     project_id: UUID | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("regional_factors", mode="before")
+    @classmethod
+    def _clean_regional_factors(cls, v: Any) -> dict[str, Any]:
+        # NEW-ASM-107 — strip non-finite / negative / non-numeric
+        # entries so a poisoned factor can't reach apply-to-boq.
+        return _sanitise_regional_factors(v)
+
 
 class AssemblyUpdate(BaseModel):
     """Partial update for an assembly."""
@@ -180,6 +222,17 @@ class AssemblyUpdate(BaseModel):
     project_id: UUID | None = None
     is_active: bool | None = None
     metadata: dict[str, Any] | None = None
+
+    @field_validator("regional_factors", mode="before")
+    @classmethod
+    def _clean_regional_factors(cls, v: Any) -> Any:
+        # NEW-ASM-107 — UPDATE must not be a back door for a poisoned
+        # regional factor either. ``None`` is preserved so
+        # ``exclude_unset=True`` semantics still work (i.e. an absent
+        # field stays absent, not coerced to {}).
+        if v is None:
+            return None
+        return _sanitise_regional_factors(v)
 
 
 class AssemblyResponse(BaseModel):
