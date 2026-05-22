@@ -17,6 +17,8 @@ from app.core.file_signature import (
     ALLOWED_PHOTO_TYPES,
     SIGNATURE_BYTES_REQUIRED,
     FileSignatureMismatch,
+)
+from app.core.file_signature import (
     require as require_signature,
 )
 from app.dependencies import (

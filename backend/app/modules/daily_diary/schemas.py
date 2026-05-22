@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ── Status enums (encoded as patterns) ───────────────────────────────────
 
@@ -41,6 +41,15 @@ _VIDEO_MIME_RE = (
 _MAX_PHOTO_BYTES = 200 * 1024 * 1024       # 200 MB
 _MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
 
+# Realistic upper bound for headcount / equipment count on a single site
+# on a single calendar day. The world's largest projects (e.g. Riyadh
+# Metro mega-package, Three Gorges peak) topped out around 30 000 — but
+# THOSE are reported as PROGRAMME totals, not as a single-site daily
+# diary. 10 000 is generous for a single diary; anything higher is
+# almost certainly a unit-mistake (line items × people, or a typo).
+_MAX_LABOUR_COUNT = 10_000
+_MAX_EQUIPMENT_COUNT = 5_000
+
 
 # ── DailyDiary ───────────────────────────────────────────────────────────
 
@@ -54,8 +63,8 @@ class DailyDiaryCreate(BaseModel):
     diary_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
     site_supervisor_id: UUID | None = None
     weather_summary: dict[str, Any] = Field(default_factory=dict)
-    labour_count: int = Field(default=0, ge=0)
-    equipment_count: int = Field(default=0, ge=0)
+    labour_count: int = Field(default=0, ge=0, le=_MAX_LABOUR_COUNT)
+    equipment_count: int = Field(default=0, ge=0, le=_MAX_EQUIPMENT_COUNT)
     notes: str | None = Field(default=None, max_length=20000)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -67,8 +76,10 @@ class DailyDiaryUpdate(BaseModel):
 
     site_supervisor_id: UUID | None = None
     weather_summary: dict[str, Any] | None = None
-    labour_count: int | None = Field(default=None, ge=0)
-    equipment_count: int | None = Field(default=None, ge=0)
+    labour_count: int | None = Field(default=None, ge=0, le=_MAX_LABOUR_COUNT)
+    equipment_count: int | None = Field(
+        default=None, ge=0, le=_MAX_EQUIPMENT_COUNT,
+    )
     notes: str | None = Field(default=None, max_length=20000)
     metadata: dict[str, Any] | None = None
 
@@ -381,13 +392,33 @@ class DroneSurveyCreate(BaseModel):
     flown_at: datetime
     pilot_name: str | None = Field(default=None, max_length=255)
     drone_model: str | None = Field(default=None, max_length=255)
-    area_m2: Decimal | None = Field(default=None, ge=0)
+    # Surveyed coverage area, m² — Numeric(14, 2) in the model. Capped at
+    # 100 km² since no realistic single drone flight exceeds that
+    # (battery + line-of-sight limits); rejects a stray unit-mistake
+    # (e.g. mm² confused with m²) before it pollutes the DB.
+    area_m2: Decimal | None = Field(default=None, ge=0, le=Decimal("100000000"))
     ortho_file_url: str | None = Field(default=None, max_length=2000)
     dsm_file_url: str | None = Field(default=None, max_length=2000)
     point_cloud_url: str | None = Field(default=None, max_length=2000)
-    elevation_min_m: Decimal | None = None
-    elevation_max_m: Decimal | None = None
+    # Elevations are bounded by realistic surveyed terrain — Mariana
+    # Trench (-11 km) to Everest (8.85 km) plus a comfortable margin.
+    elevation_min_m: Decimal | None = Field(
+        default=None, ge=Decimal("-12000"), le=Decimal("10000"),
+    )
+    elevation_max_m: Decimal | None = Field(
+        default=None, ge=Decimal("-12000"), le=Decimal("10000"),
+    )
     notes: str | None = Field(default=None, max_length=20000)
+
+    @model_validator(mode="after")
+    def _check_elevation_ordering(self) -> DroneSurveyCreate:
+        """``elevation_min_m`` must be ≤ ``elevation_max_m`` when both set."""
+        lo, hi = self.elevation_min_m, self.elevation_max_m
+        if lo is not None and hi is not None and lo > hi:
+            raise ValueError(
+                "elevation_min_m must be less than or equal to elevation_max_m",
+            )
+        return self
 
 
 class DroneSurveyUpdate(BaseModel):
@@ -398,13 +429,35 @@ class DroneSurveyUpdate(BaseModel):
     flown_at: datetime | None = None
     pilot_name: str | None = Field(default=None, max_length=255)
     drone_model: str | None = Field(default=None, max_length=255)
-    area_m2: Decimal | None = Field(default=None, ge=0)
+    area_m2: Decimal | None = Field(
+        default=None, ge=0, le=Decimal("100000000"),
+    )
     ortho_file_url: str | None = Field(default=None, max_length=2000)
     dsm_file_url: str | None = Field(default=None, max_length=2000)
     point_cloud_url: str | None = Field(default=None, max_length=2000)
-    elevation_min_m: Decimal | None = None
-    elevation_max_m: Decimal | None = None
+    elevation_min_m: Decimal | None = Field(
+        default=None, ge=Decimal("-12000"), le=Decimal("10000"),
+    )
+    elevation_max_m: Decimal | None = Field(
+        default=None, ge=Decimal("-12000"), le=Decimal("10000"),
+    )
     notes: str | None = Field(default=None, max_length=20000)
+
+    @model_validator(mode="after")
+    def _check_elevation_ordering(self) -> DroneSurveyUpdate:
+        """``elevation_min_m`` must be ≤ ``elevation_max_m`` when both set.
+
+        Note: a PATCH that only updates one side can still produce an
+        inconsistent row (combined with the unchanged opposite end on the
+        DB). The service layer enforces the combined invariant; the
+        schema covers the common case where both come in the same call.
+        """
+        lo, hi = self.elevation_min_m, self.elevation_max_m
+        if lo is not None and hi is not None and lo > hi:
+            raise ValueError(
+                "elevation_min_m must be less than or equal to elevation_max_m",
+            )
+        return self
 
 
 class DroneSurveyResponse(BaseModel):

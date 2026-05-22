@@ -1050,6 +1050,21 @@ class DailyDiaryService:
         if survey is None:
             raise HTTPException(status_code=404, detail="Drone survey not found")
         fields = data.model_dump(exclude_unset=True)
+        # Cross-field invariant: elevation_min_m ≤ elevation_max_m. The
+        # schema validator catches the case where BOTH come in the same
+        # request; here we cover the partial PATCH that updates only one
+        # side — the existing row supplies the missing end of the range.
+        if "elevation_min_m" in fields or "elevation_max_m" in fields:
+            new_lo = fields.get("elevation_min_m", survey.elevation_min_m)  # type: ignore[attr-defined]
+            new_hi = fields.get("elevation_max_m", survey.elevation_max_m)  # type: ignore[attr-defined]
+            if new_lo is not None and new_hi is not None and new_lo > new_hi:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        "elevation_min_m must be less than or equal to "
+                        "elevation_max_m (would conflict with stored value)"
+                    ),
+                )
         if fields:
             await self.drone_repo.update_fields(survey_id, **fields)
         return await self.drone_repo.get_by_id(survey_id)  # type: ignore[return-value]

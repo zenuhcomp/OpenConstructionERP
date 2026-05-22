@@ -1114,9 +1114,9 @@ def test_extract_exif_gps_non_image_returns_none() -> None:
 
 def test_photo_create_rejects_svg_mime() -> None:
     """SVG is renderable as inline HTML — must never reach diary photos."""
-    from pydantic import ValidationError as _VE
+    from pydantic import ValidationError
 
-    with pytest.raises(_VE):
+    with pytest.raises(ValidationError):
         DiaryPhotoCreate(
             project_id=PROJECT_ID,
             taken_at=datetime(2026, 4, 10, 12, tzinfo=UTC),
@@ -1127,9 +1127,9 @@ def test_photo_create_rejects_svg_mime() -> None:
 
 def test_photo_create_rejects_text_html_mime() -> None:
     """Client-declared text/html MUST be rejected at the schema layer."""
-    from pydantic import ValidationError as _VE
+    from pydantic import ValidationError
 
-    with pytest.raises(_VE):
+    with pytest.raises(ValidationError):
         DiaryPhotoCreate(
             project_id=PROJECT_ID,
             taken_at=datetime(2026, 4, 10, 12, tzinfo=UTC),
@@ -1140,9 +1140,9 @@ def test_photo_create_rejects_text_html_mime() -> None:
 
 def test_photo_create_rejects_oversize_file_bytes() -> None:
     """A 5 GB photo is nonsense — cap is 200 MB."""
-    from pydantic import ValidationError as _VE
+    from pydantic import ValidationError
 
-    with pytest.raises(_VE):
+    with pytest.raises(ValidationError):
         DiaryPhotoCreate(
             project_id=PROJECT_ID,
             taken_at=datetime(2026, 4, 10, 12, tzinfo=UTC),
@@ -1153,11 +1153,11 @@ def test_photo_create_rejects_oversize_file_bytes() -> None:
 
 def test_video_create_rejects_non_video_mime() -> None:
     """A claimed ``text/html`` video MUST be rejected at the schema layer."""
-    from pydantic import ValidationError as _VE
+    from pydantic import ValidationError
 
     from app.modules.daily_diary.schemas import DiaryVideoCreate
 
-    with pytest.raises(_VE):
+    with pytest.raises(ValidationError):
         DiaryVideoCreate(
             project_id=PROJECT_ID,
             recorded_at=datetime(2026, 4, 10, 12, tzinfo=UTC),
@@ -1181,11 +1181,11 @@ def test_video_create_accepts_mp4_mime() -> None:
 
 def test_video_create_rejects_implausible_duration() -> None:
     """30-day duration is almost certainly a unit-conversion mistake."""
-    from pydantic import ValidationError as _VE
+    from pydantic import ValidationError
 
     from app.modules.daily_diary.schemas import DiaryVideoCreate
 
-    with pytest.raises(_VE):
+    with pytest.raises(ValidationError):
         DiaryVideoCreate(
             project_id=PROJECT_ID,
             recorded_at=datetime(2026, 4, 10, 12, tzinfo=UTC),
@@ -1221,6 +1221,111 @@ def test_exif_gps_endpoint_magic_byte_accepts_jpeg_head() -> None:
     jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00"
     detected = require_signature(jpeg[:16], ALLOWED_PHOTO_TYPES)
     assert detected == "jpeg"
+
+
+# ── Labour count / equipment count bounds ────────────────────────────────
+
+
+def test_diary_create_rejects_implausible_labour_count() -> None:
+    """Labour count must be ≤ MAX_LABOUR_COUNT (10 000)."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DailyDiaryCreate(
+            project_id=PROJECT_ID,
+            diary_date="2026-04-10",
+            labour_count=999_999_999,
+        )
+
+
+def test_diary_create_rejects_negative_labour_count() -> None:
+    """Labour count must be ≥ 0."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DailyDiaryCreate(
+            project_id=PROJECT_ID,
+            diary_date="2026-04-10",
+            labour_count=-1,
+        )
+
+
+def test_diary_create_rejects_implausible_equipment_count() -> None:
+    """Equipment count must be ≤ MAX_EQUIPMENT_COUNT (5 000)."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DailyDiaryCreate(
+            project_id=PROJECT_ID,
+            diary_date="2026-04-10",
+            equipment_count=10_000_000,
+        )
+
+
+# ── Drone elevation invariant ────────────────────────────────────────────
+
+
+def test_drone_create_rejects_min_above_max_elevation() -> None:
+    """``elevation_min_m`` must be ≤ ``elevation_max_m``."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DroneSurveyCreate(
+            project_id=PROJECT_ID,
+            flown_at=datetime(2026, 4, 10, 11, tzinfo=UTC),
+            elevation_min_m=Decimal("500"),
+            elevation_max_m=Decimal("200"),
+        )
+
+
+def test_drone_create_accepts_equal_min_max_elevation() -> None:
+    """Flat-terrain edge case — min == max is valid."""
+    obj = DroneSurveyCreate(
+        project_id=PROJECT_ID,
+        flown_at=datetime(2026, 4, 10, 11, tzinfo=UTC),
+        elevation_min_m=Decimal("100"),
+        elevation_max_m=Decimal("100"),
+    )
+    assert obj.elevation_min_m == obj.elevation_max_m
+
+
+def test_drone_create_rejects_implausible_area() -> None:
+    """100 km² (100 000 000 m²) is the cap — a stray "billion m²" is junk."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DroneSurveyCreate(
+            project_id=PROJECT_ID,
+            flown_at=datetime(2026, 4, 10, 11, tzinfo=UTC),
+            area_m2=Decimal("1000000000"),  # 1 000 km²
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_drone_survey_rejects_partial_inversion() -> None:
+    """PATCH that would create an inverted range against the stored row.
+
+    Stored: elevation_min=100, elevation_max=200. PATCH bumps min to 300
+    without touching max — the resulting row would have min(300) > max(200).
+    """
+    svc = _make_service()
+    survey = await svc.attach_drone_survey(
+        DroneSurveyCreate(
+            project_id=PROJECT_ID,
+            flown_at=datetime(2026, 4, 10, 11, tzinfo=UTC),
+            elevation_min_m=Decimal("100"),
+            elevation_max_m=Decimal("200"),
+        ),
+    )
+    from fastapi import HTTPException
+
+    from app.modules.daily_diary.schemas import DroneSurveyUpdate
+    with pytest.raises(HTTPException) as exc:
+        await svc.update_drone_survey(
+            survey.id,
+            DroneSurveyUpdate(elevation_min_m=Decimal("300")),
+        )
+    assert exc.value.status_code == 422
 
 
 # ── Workforce summary cross-module event ─────────────────────────────────
