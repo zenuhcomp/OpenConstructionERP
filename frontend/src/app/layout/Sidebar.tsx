@@ -1200,15 +1200,24 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             </a>
           </div>
         ) : (
-          <div className="px-2 pb-2 pt-1 flex flex-col gap-1.5">
-            <div className="flex items-center gap-1.5">
+          // GitHub / Community / version row.
+          //
+          // The horizontal padding here MUST mirror AdminGrid's column geometry
+          // (the parent `<div>` already gives us `px-2`; AdminGrid's `<ul>` uses
+          // `grid-cols-2 gap-1` with no extra inner padding). Earlier this row
+          // wrapped its buttons in another `px-2`, which made each button
+          // ~8 px narrower than every admin tile above. The buttons are now
+          // siblings of the admin grid in the layout coordinate space:
+          // same outer `px-2`, same `gap-1` between the two cards.
+          <div className="pb-2 pt-1 flex flex-col gap-1.5">
+            <div className="grid grid-cols-2 gap-1">
               <a
                 href="https://github.com/datadrivenconstruction/OpenConstructionERP"
                 target="_blank"
                 rel="noopener noreferrer"
                 title="GitHub repository"
                 aria-label="GitHub repository"
-                className="flex-1 flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
+                className="flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
               >
                 <Github size={13} strokeWidth={1.75} className="text-content-secondary" />
                 <span className="text-xs font-medium text-content-secondary">GitHub</span>
@@ -1219,7 +1228,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                 rel="noopener noreferrer"
                 title="Join the Telegram community"
                 aria-label="Telegram community"
-                className="flex-1 flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
+                className="flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
               >
                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-[13px] w-[13px] text-content-secondary" aria-hidden>
                   <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71l-4.14-3.06-1.99 1.93c-.23.23-.42.42-.83.42z" />
