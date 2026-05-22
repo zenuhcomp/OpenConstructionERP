@@ -1032,6 +1032,65 @@ async def delete_template(
 # ── Site Workforce Log CRUD ────────────────────────────────────────────────
 
 
+async def _verify_report_access(
+    report_id: uuid.UUID,
+    user_id: str,
+    session: "SessionDep",
+    service: FieldReportService,
+) -> "object":
+    """Load the parent report and run ``verify_project_access`` on it.
+
+    Used by the workforce / equipment log endpoints — those route off an
+    unscoped row id and (pre-fix) skipped the project-ownership gate
+    that every report endpoint applies. The function intentionally
+    raises through ``service.get_report`` (HTTP 404 when the report
+    doesn't exist) and ``verify_project_access`` (HTTP 404 when the
+    caller doesn't own the owning project) so a missing UUID and a
+    cross-tenant id both look identical to the attacker.
+    """
+    report = await service.get_report(report_id)
+    await verify_project_access(report.project_id, user_id, session)
+    return report
+
+
+async def _verify_workforce_entry_access(
+    entry_id: uuid.UUID,
+    user_id: str,
+    session: "SessionDep",
+    service: FieldReportService,
+) -> "object":
+    """IDOR guard for ``/workforce/{entry_id}`` endpoints.
+
+    Loads the workforce row, then resolves the parent report's project
+    and gates on it. Cross-tenant access yields 404 to avoid leaking
+    entry-id existence.
+    """
+    from app.modules.fieldreports.models import SiteWorkforceLog
+
+    entry = await session.get(SiteWorkforceLog, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Workforce log entry not found")
+    await _verify_report_access(entry.field_report_id, user_id, session, service)
+    return entry
+
+
+async def _verify_equipment_entry_access(
+    entry_id: uuid.UUID,
+    user_id: str,
+    session: "SessionDep",
+    service: FieldReportService,
+) -> "object":
+    """IDOR guard for ``/equipment/{entry_id}`` endpoints (mirror of
+    :func:`_verify_workforce_entry_access`)."""
+    from app.modules.fieldreports.models import SiteEquipmentLog
+
+    entry = await session.get(SiteEquipmentLog, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Equipment log entry not found")
+    await _verify_report_access(entry.field_report_id, user_id, session, service)
+    return entry
+
+
 @router.post(
     "/reports/{report_id}/workforce/",
     response_model=SiteWorkforceLogResponse,
@@ -1040,12 +1099,16 @@ async def delete_template(
 async def create_workforce_log(
     report_id: uuid.UUID,
     data: SiteWorkforceLogCreate,
+    user_id: CurrentUserId,
     session: SessionDep,
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("fieldreports.update")),
+    service: FieldReportService = Depends(_get_service),
 ) -> SiteWorkforceLogResponse:
     """Add a workforce log entry to a field report."""
     from app.modules.fieldreports.models import SiteWorkforceLog
+
+    # IDOR guard: the parent report must belong to a project the caller owns.
+    await _verify_report_access(report_id, user_id, session, service)
 
     entry = SiteWorkforceLog(
         field_report_id=report_id,
@@ -1066,16 +1129,21 @@ async def create_workforce_log(
 @router.get(
     "/reports/{report_id}/workforce/",
     response_model=list[SiteWorkforceLogResponse],
+    dependencies=[Depends(RequirePermission("fieldreports.read"))],
 )
 async def list_workforce_logs(
     report_id: uuid.UUID,
+    user_id: CurrentUserId,
     session: SessionDep,
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
+    service: FieldReportService = Depends(_get_service),
 ) -> list[SiteWorkforceLogResponse]:
     """List all workforce log entries for a field report."""
     from sqlalchemy import select
 
     from app.modules.fieldreports.models import SiteWorkforceLog
+
+    # IDOR guard: the parent report must belong to a project the caller owns.
+    await _verify_report_access(report_id, user_id, session, service)
 
     stmt = select(SiteWorkforceLog).where(SiteWorkforceLog.field_report_id == report_id)
     result = await session.execute(stmt)
@@ -1090,19 +1158,18 @@ async def list_workforce_logs(
 async def update_workforce_log(
     entry_id: uuid.UUID,
     data: SiteWorkforceLogUpdate,
+    user_id: CurrentUserId,
     session: SessionDep,
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("fieldreports.update")),
+    service: FieldReportService = Depends(_get_service),
 ) -> SiteWorkforceLogResponse:
     """Update a workforce log entry."""
-    from fastapi import HTTPException
     from sqlalchemy import update
 
     from app.modules.fieldreports.models import SiteWorkforceLog
 
-    entry = await session.get(SiteWorkforceLog, entry_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Workforce log entry not found")
+    # IDOR guard: gate on the owning project before any mutation.
+    await _verify_workforce_entry_access(entry_id, user_id, session, service)
 
     updates = data.model_dump(exclude_unset=True)
     if "metadata" in updates:
@@ -1112,25 +1179,21 @@ async def update_workforce_log(
         await session.execute(stmt)
         await session.flush()
         session.expire_all()
-        entry = await session.get(SiteWorkforceLog, entry_id)
+    entry = await session.get(SiteWorkforceLog, entry_id)
     return SiteWorkforceLogResponse.model_validate(entry)
 
 
 @router.delete("/workforce/{entry_id}", status_code=204)
 async def delete_workforce_log(
     entry_id: uuid.UUID,
+    user_id: CurrentUserId,
     session: SessionDep,
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("fieldreports.delete")),
+    service: FieldReportService = Depends(_get_service),
 ) -> None:
     """Delete a workforce log entry."""
-    from fastapi import HTTPException
-
-    from app.modules.fieldreports.models import SiteWorkforceLog
-
-    entry = await session.get(SiteWorkforceLog, entry_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Workforce log entry not found")
+    # IDOR guard: gate on the owning project before deletion.
+    entry = await _verify_workforce_entry_access(entry_id, user_id, session, service)
     await session.delete(entry)
     await session.flush()
 
@@ -1146,12 +1209,16 @@ async def delete_workforce_log(
 async def create_equipment_log(
     report_id: uuid.UUID,
     data: SiteEquipmentLogCreate,
+    user_id: CurrentUserId,
     session: SessionDep,
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("fieldreports.update")),
+    service: FieldReportService = Depends(_get_service),
 ) -> SiteEquipmentLogResponse:
     """Add an equipment log entry to a field report."""
     from app.modules.fieldreports.models import SiteEquipmentLog
+
+    # IDOR guard: the parent report must belong to a project the caller owns.
+    await _verify_report_access(report_id, user_id, session, service)
 
     entry = SiteEquipmentLog(
         field_report_id=report_id,
@@ -1171,16 +1238,21 @@ async def create_equipment_log(
 @router.get(
     "/reports/{report_id}/equipment/",
     response_model=list[SiteEquipmentLogResponse],
+    dependencies=[Depends(RequirePermission("fieldreports.read"))],
 )
 async def list_equipment_logs(
     report_id: uuid.UUID,
+    user_id: CurrentUserId,
     session: SessionDep,
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
+    service: FieldReportService = Depends(_get_service),
 ) -> list[SiteEquipmentLogResponse]:
     """List all equipment log entries for a field report."""
     from sqlalchemy import select
 
     from app.modules.fieldreports.models import SiteEquipmentLog
+
+    # IDOR guard: the parent report must belong to a project the caller owns.
+    await _verify_report_access(report_id, user_id, session, service)
 
     stmt = select(SiteEquipmentLog).where(SiteEquipmentLog.field_report_id == report_id)
     result = await session.execute(stmt)
@@ -1195,19 +1267,18 @@ async def list_equipment_logs(
 async def update_equipment_log(
     entry_id: uuid.UUID,
     data: SiteEquipmentLogUpdate,
+    user_id: CurrentUserId,
     session: SessionDep,
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("fieldreports.update")),
+    service: FieldReportService = Depends(_get_service),
 ) -> SiteEquipmentLogResponse:
     """Update an equipment log entry."""
-    from fastapi import HTTPException
     from sqlalchemy import update
 
     from app.modules.fieldreports.models import SiteEquipmentLog
 
-    entry = await session.get(SiteEquipmentLog, entry_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Equipment log entry not found")
+    # IDOR guard: gate on the owning project before any mutation.
+    await _verify_equipment_entry_access(entry_id, user_id, session, service)
 
     updates = data.model_dump(exclude_unset=True)
     if "metadata" in updates:
@@ -1217,24 +1288,20 @@ async def update_equipment_log(
         await session.execute(stmt)
         await session.flush()
         session.expire_all()
-        entry = await session.get(SiteEquipmentLog, entry_id)
+    entry = await session.get(SiteEquipmentLog, entry_id)
     return SiteEquipmentLogResponse.model_validate(entry)
 
 
 @router.delete("/equipment/{entry_id}", status_code=204)
 async def delete_equipment_log(
     entry_id: uuid.UUID,
+    user_id: CurrentUserId,
     session: SessionDep,
-    user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("fieldreports.delete")),
+    service: FieldReportService = Depends(_get_service),
 ) -> None:
     """Delete an equipment log entry."""
-    from fastapi import HTTPException
-
-    from app.modules.fieldreports.models import SiteEquipmentLog
-
-    entry = await session.get(SiteEquipmentLog, entry_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Equipment log entry not found")
+    # IDOR guard: gate on the owning project before deletion.
+    entry = await _verify_equipment_entry_access(entry_id, user_id, session, service)
     await session.delete(entry)
     await session.flush()
