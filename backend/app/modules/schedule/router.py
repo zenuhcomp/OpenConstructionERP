@@ -2071,10 +2071,28 @@ async def critical_path_activities(
         select(Activity)
         .where(Activity.schedule_id.in_(schedule_ids))
         .where(Activity.is_critical == True)  # noqa: E712
-        .order_by(Activity.early_start, Activity.sort_order)
+        .order_by(Activity.sort_order)
     )
     act_result = await session.execute(act_stmt)
     activities = list(act_result.scalars().all())
+
+    # ``Activity.early_start`` is a ``String(20)`` column populated by the CPM
+    # engine with integer day-offsets stringified (``"0"``, ``"1"``, ``"10"``,
+    # ``"2"`` …). A plain SQL ``ORDER BY early_start`` does a lexicographic
+    # sort and would produce ``"0" < "1" < "10" < "2"`` — wrong for any
+    # project with >9 critical activities. Sort in Python with safe integer
+    # coercion (legacy rows may also hold ISO dates or empty strings; both
+    # fall through to a large sentinel so they sort last but remain stable).
+    def _es_key(a: Activity) -> tuple[int, int]:
+        raw = getattr(a, "early_start", None)
+        try:
+            return (int(str(raw)), int(getattr(a, "sort_order", 0) or 0))
+        except (TypeError, ValueError):
+            # Non-numeric (ISO date string, None, ""): push to the end while
+            # preserving sort_order tiebreak.
+            return (2**31 - 1, int(getattr(a, "sort_order", 0) or 0))
+
+    activities.sort(key=_es_key)
 
     return [_activity_to_response(a) for a in activities]
 
