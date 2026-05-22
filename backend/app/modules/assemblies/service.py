@@ -817,18 +817,36 @@ class AssemblyService:
                     ),
                 }
 
-        # Determine effective rate (apply regional factor if provided)
+        # Determine effective rate (apply regional factor if provided).
+        # NEW-ASM-105 / ASM-007 — ``Decimal("Infinity")`` and
+        # ``Decimal("NaN")`` parse WITHOUT raising, so a poisoned
+        # ``regional_factors`` value (or a legacy assembly whose stored
+        # ``total_rate`` is non-finite) would otherwise propagate through
+        # the float() cast below into ``PositionCreate.unit_rate`` —
+        # whose schema only enforces ``ge=0.0`` and happily accepts
+        # ``inf``. The result is a BOQ position with a non-finite
+        # ``unit_rate`` that serialises as ``null`` and corrupts every
+        # downstream rollup. Reject any non-finite intermediate to 0.
         try:
             base_rate = Decimal(str(assembly.total_rate))
         except (InvalidOperation, ValueError):
+            base_rate = Decimal("0")
+        if not base_rate.is_finite() or base_rate < 0:
             base_rate = Decimal("0")
 
         if data.region and data.region in assembly.regional_factors:
             try:
                 factor = Decimal(str(assembly.regional_factors[data.region]))
-                effective_rate = base_rate * factor
             except (InvalidOperation, ValueError):
+                factor = Decimal("1")
+            if not factor.is_finite() or factor < 0:
+                # Garbage stored factor — silently skip (matches the
+                # existing fall-through contract for an absent region).
                 effective_rate = base_rate
+            else:
+                effective_rate = base_rate * factor
+                if not effective_rate.is_finite():
+                    effective_rate = base_rate
         else:
             effective_rate = base_rate
 
@@ -839,6 +857,11 @@ class AssemblyService:
         # is Decimal("1") when no conversion applies, so this is a no-op
         # for same-currency / unconfigured-rate paths.
         effective_rate = effective_rate * fx_multiplier
+        if not effective_rate.is_finite() or effective_rate < 0:
+            # Final guard — the product can also overflow when both
+            # ``base_rate`` and ``fx_multiplier`` sit near the upper
+            # bound. Land at 0 rather than poison the BOQ.
+            effective_rate = Decimal("0")
 
         ordinal = data.ordinal if data.ordinal else f"ASM-{assembly.code}"
 

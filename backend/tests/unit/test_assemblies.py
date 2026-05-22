@@ -458,6 +458,91 @@ def test_formula_basic_math_unchanged():
     assert ev.evaluate("max(2, 8) + sqrt(16)") == pytest.approx(12.0)
 
 
+# ── NEW-ASM-105 — apply-to-boq guards non-finite regional factor ─────────
+
+
+@pytest.mark.asyncio
+async def test_apply_to_boq_drops_non_finite_regional_factor(session):
+    """NEW-ASM-105: a stored ``regional_factors`` value of Infinity / NaN
+    (e.g. from a legacy JSON blob written before the schema sanitiser)
+    must not poison the BOQ position's unit_rate. The factor is
+    dropped, base_rate flows through unchanged.
+    """
+    svc = AssemblyService(session)
+    asm = await svc.create_assembly(
+        AssemblyCreate(code="ASM-RF1", name="RF1", unit="m", currency="EUR"),
+        owner_id=str(OWNER_ID),
+    )
+    await svc.add_component(
+        asm.id,
+        ComponentCreate(unit="m", description="c", factor=1.0, quantity=1.0, unit_cost=100.0),
+    )
+    # Bypass the schema validator — we want to prove the runtime is
+    # hardened even when a poisoned blob was already in the DB before
+    # the schema patch (legacy data).
+    from sqlalchemy import update as sa_update
+
+    from app.modules.assemblies.models import Assembly as AsmModel
+
+    await session.execute(
+        sa_update(AsmModel)
+        .where(AsmModel.id == asm.id)
+        .values(regional_factors={"berlin": "Infinity", "muc": "1.10"})
+    )
+    await session.flush()
+
+    from app.modules.boq.models import BOQ
+
+    boq = BOQ(project_id=PROJECT_ID, name="RFB")
+    session.add(boq)
+    await session.flush()
+
+    pos = await svc.apply_to_boq(
+        asm.id, ApplyToBOQRequest(boq_id=boq.id, quantity=1.0, region="berlin")
+    )
+    from app.modules.assemblies.service import _str_to_float
+
+    # The non-finite Berlin factor was silently dropped → base rate 100.
+    unit_rate = _str_to_float(pos.unit_rate)
+    assert unit_rate == pytest.approx(100.0)
+    import math
+
+    assert math.isfinite(unit_rate)
+
+
+@pytest.mark.asyncio
+async def test_apply_to_boq_valid_regional_factor_still_applies(session):
+    """NEW-ASM-105 control: a normal regional factor still applies."""
+    svc = AssemblyService(session)
+    asm = await svc.create_assembly(
+        AssemblyCreate(
+            code="ASM-RF2",
+            name="RF2",
+            unit="m",
+            currency="EUR",
+            regional_factors={"muc": 1.10},
+        ),
+        owner_id=str(OWNER_ID),
+    )
+    await svc.add_component(
+        asm.id,
+        ComponentCreate(unit="m", description="c", factor=1.0, quantity=1.0, unit_cost=100.0),
+    )
+
+    from app.modules.boq.models import BOQ
+
+    boq = BOQ(project_id=PROJECT_ID, name="RFB2")
+    session.add(boq)
+    await session.flush()
+    pos = await svc.apply_to_boq(
+        asm.id, ApplyToBOQRequest(boq_id=boq.id, quantity=1.0, region="muc")
+    )
+    from app.modules.assemblies.service import _str_to_float
+
+    # 100 × 1.10 = 110.
+    assert _str_to_float(pos.unit_rate) == pytest.approx(110.0)
+
+
 # ── NEW-ASM-107 — regional_factors schema sanitisation ───────────────────
 
 
