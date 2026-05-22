@@ -501,6 +501,7 @@ export function closeWarrantyClaim(id: string): Promise<WarrantyClaim> {
   return apiPost<WarrantyClaim>(`${BASE}/warranty/${id}/close`, {});
 }
 
+
 /* ── R6: Lead / Reservation / SPA / PaymentSchedule / Instalment / ContractParty ── */
 
 export type LeadSource =
@@ -1013,4 +1014,504 @@ export function updateContractParty(
 
 export function removeContractParty(id: string): Promise<void> {
   return apiDelete(`${BASE}/contract-parties/${id}`);
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Task #138 — Broker / Commission / Escrow / PriceMatrix / Phase / Block
+ * Backed by backend/app/modules/property_dev/router.py
+ * ──────────────────────────────────────────────────────────────────── */
+
+export type KYCStatus = 'pending' | 'verified' | 'expired' | 'rejected';
+export type CommissionState = 'accrued' | 'approved' | 'paid' | 'cancelled';
+export type CommissionStructureType = 'flat' | 'percent' | 'ladder';
+export type AccrualTrigger =
+  | 'lead_qualified'
+  | 'reservation_paid'
+  | 'spa_signed'
+  | 'handover_complete';
+export type PayoutTerms = 'immediate' | 'net30' | 'net60' | 'per_milestone';
+export type RegulatorRef =
+  | 'rera_dubai'
+  | 'rera_abu_dhabi'
+  | 'maharera'
+  | '214_FZ_RU'
+  | 'cma_saudi'
+  | 'section32_au'
+  | 'other';
+export type EscrowDirection = 'debit' | 'credit';
+export type EscrowSourceType =
+  | 'instalment'
+  | 'refund'
+  | 'draw_request'
+  | 'bank_charge'
+  | 'interest'
+  | 'transfer';
+export type ReconciliationState = 'unreconciled' | 'matched' | 'disputed';
+export type PriceMatrixStatus = 'draft' | 'active' | 'expired' | 'archived';
+export type PhaseStatus = 'planned' | 'under_construction' | 'completed';
+export type BlockStatus = 'planned' | 'under_construction' | 'handed_over';
+
+export interface Broker {
+  id: string;
+  tenant_id: string | null;
+  name: string;
+  license_number: string;
+  jurisdiction: string;
+  contact_email: string;
+  contact_phone: string | null;
+  default_commission_pct: string | number;
+  kyc_status: KYCStatus;
+  kyc_verified_at: string | null;
+  active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommissionAgreement {
+  id: string;
+  broker_id: string;
+  development_id: string | null;
+  specific_plot_ids: string[] | null;
+  structure_type: CommissionStructureType;
+  structure: Record<string, unknown>;
+  accrual_trigger: AccrualTrigger;
+  payout_terms: PayoutTerms;
+  withholding_tax_pct: string | number;
+  currency: string;
+  effective_from: string;
+  effective_to: string | null;
+  status: 'draft' | 'active' | 'expired' | 'cancelled';
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommissionAccrual {
+  id: string;
+  agreement_id: string;
+  broker_id: string;
+  trigger_event: string;
+  trigger_entity_type: string;
+  trigger_entity_id: string | null;
+  base_amount: string | number;
+  commission_amount: string | number;
+  currency: string;
+  state: CommissionState;
+  accrued_at: string | null;
+  approved_at: string | null;
+  paid_at: string | null;
+  payment_ref: string | null;
+  withholding_amount: string | number;
+  net_payable: string | number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EscrowAccount {
+  id: string;
+  development_id: string;
+  regulator_ref: RegulatorRef;
+  regulator_account_number: string;
+  bank_name: string;
+  iban: string;
+  swift_bic: string;
+  currency: string;
+  opened_at: string;
+  closed_at: string | null;
+  is_active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EscrowBalance {
+  escrow_account_id: string;
+  currency: string;
+  as_of_date: string | null;
+  credit_total: string | number;
+  debit_total: string | number;
+  balance: string | number;
+  transaction_count: number;
+  unreconciled_count: number;
+}
+
+export interface EscrowTransaction {
+  id: string;
+  escrow_account_id: string;
+  direction: EscrowDirection;
+  amount: string | number;
+  currency: string;
+  source_type: EscrowSourceType;
+  source_instalment_id: string | null;
+  source_reference: string;
+  bank_reference: string | null;
+  transaction_date: string;
+  reconciliation_state: ReconciliationState;
+  reconciled_at: string | null;
+  reconciled_by_user_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PriceMatrixRule {
+  factor_type:
+    | 'floor'
+    | 'view'
+    | 'orientation'
+    | 'corner'
+    | 'launch_discount'
+    | 'phase_escalator';
+  condition: Record<string, unknown>;
+  multiplier: string | number;
+}
+
+export interface PriceMatrix {
+  id: string;
+  development_id: string;
+  name: string;
+  base_price_per_m2: string | number;
+  currency: string;
+  effective_from: string;
+  effective_to: string | null;
+  rules: PriceMatrixRule[];
+  status: PriceMatrixStatus;
+  version: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PriceMatrixPreview {
+  plot_id: string;
+  matrix_id: string | null;
+  currency: string;
+  base_price_per_m2: string | number;
+  area_m2: string | number;
+  base_price: string | number;
+  applied_rules: Array<{
+    factor_type: string;
+    condition: Record<string, unknown>;
+    multiplier: string;
+  }>;
+  combined_multiplier: string | number;
+  final_price: string | number;
+}
+
+export interface Phase {
+  id: string;
+  development_id: string;
+  code: string;
+  name: string;
+  sequence: number;
+  planned_start: string | null;
+  planned_end: string | null;
+  status: PhaseStatus;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Block {
+  id: string;
+  phase_id: string;
+  code: string;
+  name: string;
+  levels_count: number;
+  units_per_level: number;
+  orientation: string | null;
+  geo_coordinates: Record<string, unknown> | null;
+  status: BlockStatus;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RegulatorReport {
+  development_id: string;
+  regulator: 'RERA' | 'MAHARERA' | '214_FZ';
+  quarter: string;
+  generated_at: string;
+  currency: string;
+  summary: Record<string, unknown>;
+  pdf_size_bytes: number;
+  pdf_base64: string;
+}
+
+/* ── Brokers ──────────────────────────────────────────────────────── */
+
+export function listBrokers(params?: {
+  active_only?: boolean;
+  jurisdiction?: string;
+  offset?: number;
+  limit?: number;
+}): Promise<Broker[]> {
+  const qs = new URLSearchParams();
+  if (params?.active_only) qs.set('active_only', 'true');
+  if (params?.jurisdiction) qs.set('jurisdiction', params.jurisdiction);
+  if (params?.offset !== undefined) qs.set('offset', String(params.offset));
+  if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+  const q = qs.toString();
+  return apiGet<Broker[]>(`${BASE}/brokers/${q ? `?${q}` : ''}`);
+}
+
+export function createBroker(data: {
+  name: string;
+  license_number: string;
+  jurisdiction?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  default_commission_pct?: number;
+}): Promise<Broker> {
+  return apiPost<Broker>(`${BASE}/brokers/`, data);
+}
+
+export function getBroker(id: string): Promise<Broker> {
+  return apiGet<Broker>(`${BASE}/brokers/${id}`);
+}
+
+export function updateBroker(
+  id: string,
+  data: Partial<Omit<Broker, 'id' | 'created_at' | 'updated_at'>>,
+): Promise<Broker> {
+  return apiPatch<Broker>(`${BASE}/brokers/${id}`, data);
+}
+
+export function verifyBrokerKyc(id: string): Promise<Broker> {
+  return apiPost<Broker>(`${BASE}/brokers/${id}/verify-kyc`, {});
+}
+
+/* ── Commission Agreements ───────────────────────────────────────── */
+
+export function listCommissionAgreements(params: {
+  broker_id?: string;
+  development_id?: string;
+  on_date?: string;
+}): Promise<CommissionAgreement[]> {
+  const qs = new URLSearchParams();
+  if (params.broker_id) qs.set('broker_id', params.broker_id);
+  if (params.development_id) qs.set('development_id', params.development_id);
+  if (params.on_date) qs.set('on_date', params.on_date);
+  return apiGet<CommissionAgreement[]>(
+    `${BASE}/commission-agreements/?${qs.toString()}`,
+  );
+}
+
+export function createCommissionAgreement(data: {
+  broker_id: string;
+  structure_type: CommissionStructureType;
+  structure: Record<string, unknown>;
+  currency: string;
+  effective_from: string;
+  effective_to?: string;
+  accrual_trigger?: AccrualTrigger;
+  status?: string;
+}): Promise<CommissionAgreement> {
+  return apiPost<CommissionAgreement>(`${BASE}/commission-agreements/`, data);
+}
+
+/* ── Commission Accruals ─────────────────────────────────────────── */
+
+export function listCommissionAccruals(params: {
+  broker_id: string;
+  state?: CommissionState;
+}): Promise<CommissionAccrual[]> {
+  const qs = new URLSearchParams({ broker_id: params.broker_id });
+  if (params.state) qs.set('state', params.state);
+  return apiGet<CommissionAccrual[]>(
+    `${BASE}/commission-accruals/?${qs.toString()}`,
+  );
+}
+
+export function approveCommissionAccrual(id: string): Promise<CommissionAccrual> {
+  return apiPost<CommissionAccrual>(
+    `${BASE}/commission-accruals/${id}/approve`,
+    {},
+  );
+}
+
+export function payCommissionAccrual(
+  id: string,
+  payment_ref: string,
+): Promise<CommissionAccrual> {
+  return apiPost<CommissionAccrual>(`${BASE}/commission-accruals/${id}/pay`, {
+    payment_ref,
+  });
+}
+
+/* ── Escrow Accounts + Transactions ──────────────────────────────── */
+
+export function listEscrowAccounts(
+  development_id: string,
+): Promise<EscrowAccount[]> {
+  const qs = new URLSearchParams({ development_id });
+  return apiGet<EscrowAccount[]>(`${BASE}/escrow-accounts/?${qs.toString()}`);
+}
+
+export function createEscrowAccount(data: {
+  development_id: string;
+  regulator_ref: RegulatorRef;
+  iban?: string;
+  swift_bic?: string;
+  bank_name?: string;
+  regulator_account_number?: string;
+  currency: string;
+  opened_at: string;
+}): Promise<EscrowAccount> {
+  return apiPost<EscrowAccount>(`${BASE}/escrow-accounts/`, data);
+}
+
+export function getEscrowBalance(
+  id: string,
+  as_of_date?: string,
+): Promise<EscrowBalance> {
+  const qs = new URLSearchParams();
+  if (as_of_date) qs.set('as_of_date', as_of_date);
+  const q = qs.toString();
+  return apiGet<EscrowBalance>(
+    `${BASE}/escrow-accounts/${id}/balance${q ? `?${q}` : ''}`,
+  );
+}
+
+export function listEscrowTransactions(params: {
+  escrow_account_id: string;
+  unreconciled_only?: boolean;
+}): Promise<EscrowTransaction[]> {
+  const qs = new URLSearchParams({ escrow_account_id: params.escrow_account_id });
+  if (params.unreconciled_only) qs.set('unreconciled_only', 'true');
+  return apiGet<EscrowTransaction[]>(
+    `${BASE}/escrow-transactions/?${qs.toString()}`,
+  );
+}
+
+export function createEscrowTransaction(data: {
+  escrow_account_id: string;
+  direction: EscrowDirection;
+  amount: number | string;
+  currency: string;
+  source_type: EscrowSourceType;
+  source_instalment_id?: string;
+  source_reference?: string;
+  transaction_date: string;
+}): Promise<EscrowTransaction> {
+  return apiPost<EscrowTransaction>(`${BASE}/escrow-transactions/`, data);
+}
+
+export function reconcileEscrowTransaction(
+  id: string,
+  bank_reference: string,
+): Promise<EscrowTransaction> {
+  return apiPost<EscrowTransaction>(
+    `${BASE}/escrow-transactions/${id}/reconcile`,
+    { bank_reference },
+  );
+}
+
+/* ── Price Matrices ──────────────────────────────────────────────── */
+
+export function listPriceMatrices(development_id: string): Promise<PriceMatrix[]> {
+  const qs = new URLSearchParams({ development_id });
+  return apiGet<PriceMatrix[]>(`${BASE}/price-matrices/?${qs.toString()}`);
+}
+
+export function createPriceMatrix(data: {
+  development_id: string;
+  name: string;
+  base_price_per_m2: number | string;
+  currency: string;
+  effective_from: string;
+  effective_to?: string;
+  rules?: PriceMatrixRule[];
+  status?: PriceMatrixStatus;
+}): Promise<PriceMatrix> {
+  return apiPost<PriceMatrix>(`${BASE}/price-matrices/`, data);
+}
+
+export function activatePriceMatrix(id: string): Promise<PriceMatrix> {
+  return apiPost<PriceMatrix>(`${BASE}/price-matrices/${id}/activate`, {});
+}
+
+export function previewPriceOnPlot(
+  matrix_id: string,
+  plot_id: string,
+  on_date?: string,
+): Promise<PriceMatrixPreview> {
+  const qs = new URLSearchParams();
+  if (on_date) qs.set('on_date', on_date);
+  const q = qs.toString();
+  return apiGet<PriceMatrixPreview>(
+    `${BASE}/price-matrices/${matrix_id}/preview-on-plot/${plot_id}${q ? `?${q}` : ''}`,
+  );
+}
+
+export function bulkRecomputePrices(
+  matrix_id: string,
+): Promise<{ matrix_id: string; development_id: string; plots_updated: number; plots_unchanged: number }> {
+  return apiPost(`${BASE}/price-matrices/${matrix_id}/bulk-recompute`, {});
+}
+
+/* ── Phases + Blocks ─────────────────────────────────────────────── */
+
+export function listPhases(development_id: string): Promise<Phase[]> {
+  const qs = new URLSearchParams({ development_id });
+  return apiGet<Phase[]>(`${BASE}/phases/?${qs.toString()}`);
+}
+
+export function createPhase(data: {
+  development_id: string;
+  code: string;
+  name?: string;
+  sequence?: number;
+  planned_start?: string;
+  planned_end?: string;
+}): Promise<Phase> {
+  return apiPost<Phase>(`${BASE}/phases/`, data);
+}
+
+export function listBlocks(phase_id: string): Promise<Block[]> {
+  const qs = new URLSearchParams({ phase_id });
+  return apiGet<Block[]>(`${BASE}/blocks/?${qs.toString()}`);
+}
+
+export function createBlock(data: {
+  phase_id: string;
+  code: string;
+  name?: string;
+  levels_count?: number;
+  units_per_level?: number;
+  orientation?: string;
+}): Promise<Block> {
+  return apiPost<Block>(`${BASE}/blocks/`, data);
+}
+
+/* ── Regulator Reports ───────────────────────────────────────────── */
+
+export function regulatorReportRERA(
+  dev_id: string,
+  quarter: string,
+): Promise<RegulatorReport> {
+  const qs = new URLSearchParams({ dev_id, quarter });
+  return apiGet<RegulatorReport>(`${BASE}/regulator-reports/RERA?${qs.toString()}`);
+}
+
+export function regulatorReportMAHARERA(
+  dev_id: string,
+  quarter: string,
+): Promise<RegulatorReport> {
+  const qs = new URLSearchParams({ dev_id, quarter });
+  return apiGet<RegulatorReport>(
+    `${BASE}/regulator-reports/MAHARERA?${qs.toString()}`,
+  );
+}
+
+export function regulatorReport214FZ(
+  dev_id: string,
+  quarter: string,
+): Promise<RegulatorReport> {
+  const qs = new URLSearchParams({ dev_id, quarter });
+  return apiGet<RegulatorReport>(
+    `${BASE}/regulator-reports/214-FZ?${qs.toString()}`,
+  );
 }

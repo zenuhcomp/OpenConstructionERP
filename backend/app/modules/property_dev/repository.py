@@ -9,17 +9,26 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select, update
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.property_dev.models import (
+    Block,
+    Broker,
     Buyer,
     BuyerOption,
     BuyerOptionGroup,
     BuyerSelection,
     BuyerSelectionItem,
+    CommissionAccrual,
+    CommissionAgreement,
     ContractParty,
     Development,
+    EscrowAccount,
+    EscrowTransaction,
     Handover,
     HandoverDoc,
     HouseType,
@@ -27,7 +36,9 @@ from app.modules.property_dev.models import (
     Instalment,
     Lead,
     PaymentSchedule,
+    Phase,
     Plot,
+    PriceMatrix,
     Reservation,
     SalesContract,
     SalesContractRevision,
@@ -548,7 +559,7 @@ class BuyerPipelineQueries:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# R6 — Lead / Reservation / SalesContract / PaymentSchedule / ContractParty
+# R6 (task #137) — Lead / Reservation / SalesContract / PaymentSchedule / ContractParty
 # ──────────────────────────────────────────────────────────────────────────
 
 
@@ -809,3 +820,397 @@ class ContractPartyRepository(_BaseRepo):
             ContractParty.buyer_id == buyer_id,
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Task #138 — Broker / Commission / Escrow / PriceMatrix / Phase / Block
+# ════════════════════════════════════════════════════════════════════════
+
+
+# ── Phase ───────────────────────────────────────────────────────────────
+
+
+class PhaseRepository(_BaseRepo):
+    """Data access for Phase."""
+
+    model = Phase
+
+    async def list_for_dev_ordered(
+        self, development_id: uuid.UUID,
+    ) -> list[Phase]:
+        """Return Phases ordered by sequence then code."""
+        result = await self.session.execute(
+            select(Phase)
+            .where(Phase.development_id == development_id)
+            .order_by(Phase.sequence, Phase.code)
+        )
+        return list(result.scalars().all())
+
+
+# ── Block ───────────────────────────────────────────────────────────────
+
+
+class BlockRepository(_BaseRepo):
+    """Data access for Block."""
+
+    model = Block
+
+    async def list_for_phase_ordered(
+        self, phase_id: uuid.UUID,
+    ) -> list[Block]:
+        """Return Blocks ordered by code (typical Tower-A / Tower-B layout)."""
+        result = await self.session.execute(
+            select(Block)
+            .where(Block.phase_id == phase_id)
+            .order_by(Block.code)
+        )
+        return list(result.scalars().all())
+
+    async def list_for_development(
+        self, development_id: uuid.UUID,
+    ) -> list[Block]:
+        """Return Blocks belonging to any Phase of the development."""
+        stmt = (
+            select(Block)
+            .join(Phase, Phase.id == Block.phase_id)
+            .where(Phase.development_id == development_id)
+            .order_by(Phase.sequence, Block.code)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+
+# ── Broker ──────────────────────────────────────────────────────────────
+
+
+class BrokerRepository(_BaseRepo):
+    """Data access for Broker."""
+
+    model = Broker
+
+    async def find_by_license_number(
+        self, tenant_id: uuid.UUID | None, license_number: str,
+    ) -> Broker | None:
+        """Tenant-scoped broker lookup by regulator license number."""
+        stmt = select(Broker).where(Broker.license_number == license_number)
+        if tenant_id is None:
+            stmt = stmt.where(Broker.tenant_id.is_(None))
+        else:
+            stmt = stmt.where(Broker.tenant_id == tenant_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_active(
+        self,
+        tenant_id: uuid.UUID | None,
+        *,
+        jurisdiction: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> list[Broker]:
+        stmt = select(Broker).where(Broker.active.is_(True))
+        if tenant_id is not None:
+            stmt = stmt.where(Broker.tenant_id == tenant_id)
+        if jurisdiction:
+            stmt = stmt.where(Broker.jurisdiction == jurisdiction)
+        stmt = stmt.order_by(Broker.name).offset(offset).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_all(
+        self,
+        tenant_id: uuid.UUID | None,
+        *,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> list[Broker]:
+        stmt = select(Broker)
+        if tenant_id is not None:
+            stmt = stmt.where(Broker.tenant_id == tenant_id)
+        stmt = stmt.order_by(Broker.name).offset(offset).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+
+# ── CommissionAgreement ────────────────────────────────────────────────
+
+
+class CommissionAgreementRepository(_BaseRepo):
+    """Data access for CommissionAgreement."""
+
+    model = CommissionAgreement
+
+    async def list_active_for_broker(
+        self, broker_id: uuid.UUID, on_date: str,
+    ) -> list[CommissionAgreement]:
+        """Agreements that are ``status='active'`` and effective on date.
+
+        ``on_date`` is an ISO ``YYYY-MM-DD`` string — strings compare in
+        the right order across SQLite + Postgres for ISO dates.
+        """
+        stmt = (
+            select(CommissionAgreement)
+            .where(CommissionAgreement.broker_id == broker_id)
+            .where(CommissionAgreement.status == "active")
+            .where(CommissionAgreement.effective_from <= on_date)
+            .where(
+                or_(
+                    CommissionAgreement.effective_to.is_(None),
+                    CommissionAgreement.effective_to >= on_date,
+                )
+            )
+            .order_by(CommissionAgreement.created_at)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_matching(
+        self,
+        *,
+        development_id: uuid.UUID,
+        on_date: str,
+        accrual_trigger: str,
+    ) -> list[CommissionAgreement]:
+        """All active agreements applicable to a (development, trigger) pair.
+
+        Picks agreements where development_id is NULL (broker-wide) OR
+        matches the supplied development_id, AND accrual_trigger matches,
+        AND status='active' AND effective_from <= on_date <= effective_to.
+        """
+        stmt = (
+            select(CommissionAgreement)
+            .where(CommissionAgreement.status == "active")
+            .where(CommissionAgreement.accrual_trigger == accrual_trigger)
+            .where(
+                or_(
+                    CommissionAgreement.development_id.is_(None),
+                    CommissionAgreement.development_id == development_id,
+                )
+            )
+            .where(CommissionAgreement.effective_from <= on_date)
+            .where(
+                or_(
+                    CommissionAgreement.effective_to.is_(None),
+                    CommissionAgreement.effective_to >= on_date,
+                )
+            )
+            .order_by(CommissionAgreement.created_at)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+
+# ── CommissionAccrual ──────────────────────────────────────────────────
+
+
+class CommissionAccrualRepository(_BaseRepo):
+    """Data access for CommissionAccrual."""
+
+    model = CommissionAccrual
+
+    async def list_for_broker(
+        self,
+        broker_id: uuid.UUID,
+        *,
+        state: str | None = None,
+        offset: int = 0,
+        limit: int = 200,
+    ) -> list[CommissionAccrual]:
+        base = select(CommissionAccrual).where(
+            CommissionAccrual.broker_id == broker_id
+        )
+        if state:
+            base = base.where(CommissionAccrual.state == state)
+        stmt = (
+            base.order_by(CommissionAccrual.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_for_agreement(
+        self, agreement_id: uuid.UUID,
+    ) -> list[CommissionAccrual]:
+        result = await self.session.execute(
+            select(CommissionAccrual)
+            .where(CommissionAccrual.agreement_id == agreement_id)
+            .order_by(CommissionAccrual.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def compute_payable_total(
+        self, broker_id: uuid.UUID,
+    ) -> dict[str, Decimal]:
+        """Sum approved-but-unpaid net_payable per currency for a broker."""
+        stmt = (
+            select(
+                CommissionAccrual.currency,
+                func.coalesce(func.sum(CommissionAccrual.net_payable), 0),
+            )
+            .where(CommissionAccrual.broker_id == broker_id)
+            .where(CommissionAccrual.state == "approved")
+            .group_by(CommissionAccrual.currency)
+        )
+        result = await self.session.execute(stmt)
+        out: dict[str, Decimal] = {}
+        for ccy, total in result.all():
+            out[ccy or ""] = Decimal(str(total or 0))
+        return out
+
+
+# ── EscrowAccount ──────────────────────────────────────────────────────
+
+
+class EscrowAccountRepository(_BaseRepo):
+    """Data access for EscrowAccount."""
+
+    model = EscrowAccount
+
+    async def list_for_development(
+        self, development_id: uuid.UUID,
+    ) -> list[EscrowAccount]:
+        result = await self.session.execute(
+            select(EscrowAccount)
+            .where(EscrowAccount.development_id == development_id)
+            .order_by(EscrowAccount.currency, EscrowAccount.regulator_ref)
+        )
+        return list(result.scalars().all())
+
+
+# ── EscrowTransaction ──────────────────────────────────────────────────
+
+
+class EscrowTransactionRepository(_BaseRepo):
+    """Data access for EscrowTransaction."""
+
+    model = EscrowTransaction
+
+    async def list_for_account(
+        self,
+        escrow_account_id: uuid.UUID,
+        *,
+        offset: int = 0,
+        limit: int = 500,
+    ) -> list[EscrowTransaction]:
+        result = await self.session.execute(
+            select(EscrowTransaction)
+            .where(EscrowTransaction.escrow_account_id == escrow_account_id)
+            .order_by(EscrowTransaction.transaction_date.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def compute_balance(
+        self,
+        escrow_account_id: uuid.UUID,
+        *,
+        as_of_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Compute credit/debit totals + balance for the account.
+
+        ``as_of_date`` is an inclusive upper bound (ISO date). When None,
+        all transactions count.
+        """
+        base = select(
+            EscrowTransaction.direction,
+            func.coalesce(func.sum(EscrowTransaction.amount), 0),
+            func.count(),
+        ).where(EscrowTransaction.escrow_account_id == escrow_account_id)
+        if as_of_date is not None:
+            base = base.where(EscrowTransaction.transaction_date <= as_of_date)
+        base = base.group_by(EscrowTransaction.direction)
+        result = await self.session.execute(base)
+        credit = Decimal("0")
+        debit = Decimal("0")
+        count = 0
+        for direction, total, cnt in result.all():
+            if direction == "credit":
+                credit = Decimal(str(total or 0))
+            elif direction == "debit":
+                debit = Decimal(str(total or 0))
+            count += int(cnt or 0)
+        unreconciled_stmt = (
+            select(func.count())
+            .select_from(EscrowTransaction)
+            .where(EscrowTransaction.escrow_account_id == escrow_account_id)
+            .where(EscrowTransaction.reconciliation_state == "unreconciled")
+        )
+        if as_of_date is not None:
+            unreconciled_stmt = unreconciled_stmt.where(
+                EscrowTransaction.transaction_date <= as_of_date
+            )
+        unreconciled = (
+            await self.session.execute(unreconciled_stmt)
+        ).scalar_one() or 0
+        return {
+            "credit_total": credit,
+            "debit_total": debit,
+            "balance": credit - debit,
+            "transaction_count": count,
+            "unreconciled_count": int(unreconciled),
+        }
+
+    async def list_unreconciled(
+        self, escrow_account_id: uuid.UUID,
+    ) -> list[EscrowTransaction]:
+        result = await self.session.execute(
+            select(EscrowTransaction)
+            .where(EscrowTransaction.escrow_account_id == escrow_account_id)
+            .where(EscrowTransaction.reconciliation_state == "unreconciled")
+            .order_by(EscrowTransaction.transaction_date)
+        )
+        return list(result.scalars().all())
+
+
+# ── PriceMatrix ────────────────────────────────────────────────────────
+
+
+class PriceMatrixRepository(_BaseRepo):
+    """Data access for PriceMatrix."""
+
+    model = PriceMatrix
+
+    async def list_for_development(
+        self, development_id: uuid.UUID,
+    ) -> list[PriceMatrix]:
+        result = await self.session.execute(
+            select(PriceMatrix)
+            .where(PriceMatrix.development_id == development_id)
+            .order_by(PriceMatrix.effective_from.desc(), PriceMatrix.version.desc())
+        )
+        return list(result.scalars().all())
+
+    async def find_active_for_dev_on_date(
+        self,
+        dev_id: uuid.UUID,
+        on_date: str | date,
+    ) -> PriceMatrix | None:
+        """Return the active matrix whose [effective_from, effective_to]
+        window covers ``on_date``. If multiple match, the highest version
+        (most-recent) wins.
+        """
+        if isinstance(on_date, date):
+            on_date = on_date.isoformat()
+        stmt = (
+            select(PriceMatrix)
+            .where(PriceMatrix.development_id == dev_id)
+            .where(PriceMatrix.status == "active")
+            .where(PriceMatrix.effective_from <= on_date)
+            .where(
+                or_(
+                    PriceMatrix.effective_to.is_(None),
+                    PriceMatrix.effective_to >= on_date,
+                )
+            )
+            .order_by(PriceMatrix.version.desc(), PriceMatrix.effective_from.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+
+# ── unused-import sentinels (keep ruff happy) ──────────────────────────
+
+_unused_sa = (and_,)  # ``and_`` reserved for future composite filters
