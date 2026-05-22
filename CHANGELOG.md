@@ -5,6 +5,23 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.1] - 2026-05-22
+
+Hotfix above v4.3.0 — the issue #153 root-cause fix and the contact-email
+canonicalisation landed locally after the v4.3.0 PyPI wheel had been published.
+This release republishes the wheel so `pip install openconstructionerp` gets
+the working build.
+
+### Fixed
+- **Issue #153 (real root cause).** `bim_hub` DAE serve-time validator was
+  rejecting valid COLLADA files with namespace-prefixed roots like
+  `<ns0:COLLADA>` (the form the DDC/Revit pipeline emits) — both are valid
+  per the XML namespace spec. Validator now accepts either form.
+- **Contact email canonicalised.** Every user-visible string and config
+  default now points to `info@datadrivenconstruction.io`. The old aliases
+  (`support@`, `sales@`, `noreply@`, `notifications@`, `info@openconstructionerp.com`)
+  never had real mailboxes — they bounced silently.
+
 ## [4.3.0] - 2026-05-22
 
 ### Round 5 — 11-module deep hardening + issue #153 RVT crash fix
