@@ -889,10 +889,32 @@ class ContractsService:
         claim_id: uuid.UUID,
         payload: Any,
     ) -> ProgressClaim:
-        """Auto-generate claim lines + roll up totals based on contract type."""
+        """Auto-generate claim lines + roll up totals based on contract type.
+
+        Refuses non-``draft`` claims: a submitted / approved / certified /
+        paid / rejected claim is part of the immutable audit trail, and
+        silently rewriting its line breakdown and gross / retention /
+        net totals would corrupt reconciliation against AR and the lien
+        waiver chain. Changes after submission must go through the
+        proper transition + new-claim workflow.
+        """
         claim = await self.claim_repo.get_by_id(claim_id)
         if claim is None:
             raise HTTPException(status_code=404, detail="Progress claim not found")
+        if claim.status != "draft":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "claim_not_draft",
+                    "message": (
+                        "Auto-generate is only valid for draft claims; the "
+                        f"claim is currently in status {claim.status!r}. "
+                        "Create a new draft claim or reset this one via the "
+                        "rejected → draft transition."
+                    ),
+                    "claim_status": claim.status,
+                },
+            )
         contract = await self.get_contract(claim.contract_id)
         lines = await self.line_repo.list_for_contract(contract.id)
         prior_paid = await self.claim_repo.paid_total(contract.id)
