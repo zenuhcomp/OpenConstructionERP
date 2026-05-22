@@ -247,6 +247,44 @@ export interface CreateBuyerPayload {
   status?: BuyerStatus;
 }
 
+/**
+ * Partial update payload for a buyer, mirroring the backend ``BuyerUpdate``
+ * Pydantic schema. Every field is optional — only what's present in the
+ * request body is mutated, and a ``status`` value is validated against the
+ * FSM transition map (``allowedBuyerTransitions``) on the server before
+ * the row is touched.
+ */
+export interface UpdateBuyerPayload {
+  plot_id?: string | null;
+  portal_user_id?: string | null;
+  full_name?: string;
+  email?: string;
+  phone?: string | null;
+  language?: string;
+  status?: BuyerStatus;
+  contract_value?: number | string;
+  currency?: string;
+  contract_signed_at?: string | null;
+  deposit_paid_at?: string | null;
+  freeze_deadline?: string | null;
+  jurisdiction?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Buyer status-transition map. Mirrors `_BUYER_TRANSITIONS` in
+ * ``backend/app/modules/property_dev/service.py`` so the dropdown in
+ * EditBuyerModal can render only the FSM-allowed next states. Server
+ * remains the source of truth and rejects illegal transitions with 409.
+ */
+export const allowedBuyerTransitions: Record<BuyerStatus, BuyerStatus[]> = {
+  lead: ['lead', 'reserved', 'cancelled'],
+  reserved: ['reserved', 'contracted', 'cancelled', 'lead'],
+  contracted: ['contracted', 'completed', 'cancelled'],
+  completed: ['completed'],
+  cancelled: ['cancelled'],
+};
+
 const BASE = '/v1/property-dev';
 
 /* ── Developments ─────────────────────────────────────────────────────── */
@@ -367,6 +405,26 @@ export function contractBuyer(
   },
 ): Promise<Buyer> {
   return apiPost<Buyer>(`${BASE}/buyers/${id}/contract`, data);
+}
+
+/**
+ * Partial-update a buyer (FSM-validated on the server).
+ *
+ * Calls ``PATCH /api/v1/property-dev/buyers/{id}`` with only the fields
+ * the caller wants to change. Returns the updated buyer. The backend
+ * raises HTTP 409 for illegal status transitions, 422 for validation
+ * failures (bad currency, non-existent plot, …), and 403 if the caller
+ * lacks ``property_dev.update`` — keep these as inline errors in the UI.
+ */
+export function updateBuyer(
+  buyerId: string,
+  payload: UpdateBuyerPayload,
+): Promise<Buyer> {
+  return apiPatch<Buyer>(`${BASE}/buyers/${buyerId}`, payload);
+}
+
+export function listJurisdictions(): Promise<string[]> {
+  return apiGet<string[]>(`${BASE}/jurisdictions`);
 }
 
 /* ── Selections ───────────────────────────────────────────────────────── */

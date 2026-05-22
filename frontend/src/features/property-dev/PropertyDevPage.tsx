@@ -16,6 +16,7 @@ import {
   Check,
   Clock,
   AlertOctagon,
+  Pencil,
 } from 'lucide-react';
 import {
   Button,
@@ -35,7 +36,9 @@ import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { PipelineBanner } from './PipelineBanner';
 import { useToastStore } from '@/stores/useToastStore';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { getErrorMessage, apiGet } from '@/shared/lib/api';
+import { EditBuyerModal } from './EditBuyerModal';
 import {
   listDevelopments,
   createDevelopment,
@@ -419,6 +422,7 @@ export function PropertyDevPage() {
           buyerId={activeBuyerId}
           buyers={allBuyers}
           plots={allPlots}
+          developmentId={selectedDevId}
           onClose={() => setActiveBuyerId(null)}
         />
       )}
@@ -1139,14 +1143,28 @@ function BuyerDetailDrawer({
   buyerId,
   buyers,
   plots,
+  developmentId,
   onClose,
 }: {
   buyerId: string;
   buyers: Buyer[];
   plots: Plot[];
+  developmentId: string;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  // Role-gated edit affordance. The backend ``property_dev.update``
+  // permission resolves to EDITOR+ via the central permission registry —
+  // mirror that gate here so viewers don't even see the button.
+  // Mirrors the check used in /admin/permissions and elsewhere; admins,
+  // managers and editors get write access.
+  const userRole = useAuthStore((s) => s.userRole);
+  const canEdit = useMemo(() => {
+    if (!userRole) return false;
+    const normalized = userRole.toLowerCase();
+    return ['admin', 'superuser', 'owner', 'manager', 'editor'].includes(normalized);
+  }, [userRole]);
+  const [editOpen, setEditOpen] = useState(false);
   const buyer = buyers.find((b) => b.id === buyerId);
   const plot = buyer?.plot_id ? plots.find((p) => p.id === buyer.plot_id) : null;
   const selectionsQ = useQuery({
@@ -1158,11 +1176,13 @@ function BuyerDetailDrawer({
   const freezeDays = daysUntil(buyer?.freeze_deadline);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      // Don't close the drawer when the user presses Escape from inside
+      // the EditBuyerModal — that modal owns its own Escape handler.
+      if (e.key === 'Escape' && !editOpen) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, editOpen]);
   if (!buyer) return null;
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -1174,20 +1194,42 @@ function BuyerDetailDrawer({
         className="relative h-full w-full max-w-xl overflow-y-auto bg-surface-elevated shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border-light bg-surface-elevated px-5 py-3">
-          <div>
-            <h2 id="propdev-buyer-drawer-title" className="text-base font-semibold">{buyer.full_name || buyer.email}</h2>
-            <p className="text-xs text-content-tertiary">{buyer.email}</p>
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border-light bg-surface-elevated px-5 py-3">
+          <div className="min-w-0 flex-1">
+            <h2 id="propdev-buyer-drawer-title" className="truncate text-base font-semibold">{buyer.full_name || buyer.email}</h2>
+            <p className="truncate text-xs text-content-tertiary">{buyer.email}</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 hover:bg-surface-secondary"
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-1">
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="inline-flex items-center gap-1 rounded-md border border-border-light px-2 py-1 text-xs font-medium text-content-secondary hover:bg-surface-secondary hover:text-content-primary"
+                data-testid="open-edit-buyer"
+              >
+                <Pencil size={12} />
+                {t('propdev.edit_buyer', { defaultValue: 'Edit' })}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded p-1 hover:bg-surface-secondary"
+              aria-label={t('common.close', { defaultValue: 'Close' })}
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
+        {editOpen && (
+          <EditBuyerModal
+            open={editOpen}
+            buyer={buyer}
+            plots={plots}
+            developmentId={developmentId}
+            onClose={() => setEditOpen(false)}
+          />
+        )}
         <div className="space-y-4 p-5">
           <StageProgress current={buyer.status} />
 

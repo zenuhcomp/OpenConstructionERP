@@ -446,6 +446,11 @@ class BuyerUpdate(BaseModel):
     freeze_deadline: str | None = Field(
         default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"
     )
+    # Optional financial / jurisdiction fields exposed so the edit flow
+    # introduced in task #134 can adjust them post-contract without
+    # forcing the user back through ``POST /buyers/{id}/contract``.
+    deposit_amount: Decimal | None = Field(default=None, ge=0)
+    jurisdiction: str | None = Field(default=None, max_length=8)
     metadata: dict[str, Any] | None = None
 
 

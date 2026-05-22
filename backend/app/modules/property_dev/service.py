@@ -931,6 +931,39 @@ class PropertyDevService:
             _ensure_transition(
                 "buyer", buyer.status, new_status, allowed_buyer_transitions
             )
+        # plot_id consistency: if the caller sets plot_id, it must belong
+        # to the same development. Closes a cross-development link bug
+        # caught by task #134's plot-collision test. ``None`` is allowed
+        # (un-assign the plot).
+        plot_field_provided = "plot_id" in fields
+        if plot_field_provided and fields["plot_id"] is not None:
+            target_plot = await self.plots.get_by_id(fields["plot_id"])
+            if target_plot is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Plot {fields['plot_id']} not found",
+                )
+            if target_plot.development_id != buyer.development_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Plot belongs to a different development "
+                        f"({target_plot.development_id})"
+                    ),
+                )
+        # Normalise jurisdiction (ISO-3166 alpha-2) to upper-case so the
+        # deposit-forfeiture rule lookup stays case-insensitive.
+        if "jurisdiction" in fields and isinstance(fields["jurisdiction"], str):
+            fields["jurisdiction"] = fields["jurisdiction"].upper()
+        # Currency: enforce 3-letter ISO format when supplied (the schema
+        # only caps length at 8 to allow stablecoin tickers like USDT —
+        # for the edit flow we want a real currency, not a tag).
+        currency = fields.get("currency")
+        if currency is not None and currency != "" and len(currency) != 3:
+            raise HTTPException(
+                status_code=422,
+                detail="Currency must be a 3-letter ISO code",
+            )
         await self.buyers.update_fields(b_id, **fields)
         return await self.get_buyer(b_id)
 

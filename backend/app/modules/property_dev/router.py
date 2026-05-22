@@ -10,9 +10,9 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.dependencies import RequirePermission, SessionDep
+from app.dependencies import CurrentUserPayload, RequirePermission, SessionDep
 from app.modules.property_dev.schemas import (
     BuyerCancelRequest,
     BuyerConfiguratorResponse,
@@ -76,6 +76,61 @@ router = APIRouter()
 
 def _svc(session: SessionDep) -> PropertyDevService:
     return PropertyDevService(session)
+
+
+async def _verify_buyer_owner(
+    session: SessionDep,
+    buyer_id: uuid.UUID,
+    payload: dict[str, Any],
+) -> None:
+    """Confirm the calling user owns the project behind this buyer.
+
+    Closes a cross-tenant write IDOR on ``PATCH /buyers/{b_id}``: without
+    this guard, any user with ``property_dev.update`` could mutate any
+    other tenant's buyer just by guessing UUIDs. Admins bypass.
+
+    Resolves the chain buyer → development → project.owner_id and either
+    raises 404 (when the buyer does not exist OR is owned by a different
+    user, so we never leak existence) or returns silently.
+    """
+    is_admin = payload.get("role") == "admin"
+    user_id = payload.get("sub") or payload.get("user_id")
+    if user_id is None:
+        # Should not happen — RequirePermission already ensures auth —
+        # but be conservative and 401-style 404 the request.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Buyer not found"
+        )
+
+    from app.modules.projects.repository import ProjectRepository
+    from app.modules.property_dev.repository import (
+        BuyerRepository,
+        DevelopmentRepository,
+    )
+
+    buyer = await BuyerRepository(session).get_by_id(buyer_id)
+    if buyer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Buyer not found"
+        )
+    if is_admin:
+        return
+
+    development = await DevelopmentRepository(session).get_by_id(
+        buyer.development_id,
+    )
+    if development is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Buyer not found"
+        )
+    project = await ProjectRepository(session).get_by_id(development.project_id)
+    if project is None or str(project.owner_id) != str(user_id):
+        # 404 (not 403) — collapse "exists but not yours" into the same
+        # response as "doesn't exist" so this endpoint can't be turned
+        # into a UUID-existence oracle for other tenants' buyers.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Buyer not found"
+        )
 
 
 # ── Developments ────────────────────────────────────────────────────────
@@ -567,9 +622,16 @@ async def get_buyer(
 async def update_buyer(
     b_id: uuid.UUID,
     data: BuyerUpdate,
+    session: SessionDep,
+    payload: CurrentUserPayload,
     service: PropertyDevService = Depends(_svc),
     _perm: None = Depends(RequirePermission("property_dev.update")),
 ) -> BuyerResponse:
+    # Cross-tenant write IDOR gate (task #134). Verifies the buyer's
+    # development belongs to a project owned by the caller, or that the
+    # caller is admin. Bumps 404 (not 403) on cross-tenant access to
+    # avoid leaking existence of other tenants' buyer UUIDs.
+    await _verify_buyer_owner(session, b_id, payload)
     return BuyerResponse.model_validate(await service.update_buyer(b_id, data))
 
 
