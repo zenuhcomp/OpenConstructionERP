@@ -8,6 +8,7 @@ session + repositories.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -18,33 +19,49 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import event_bus
 from app.modules.property_dev.models import (
+    Block,
+    Broker,
     Buyer,
     BuyerOption,
     BuyerOptionGroup,
     BuyerSelection,
     BuyerSelectionItem,
+    CommissionAccrual,
+    CommissionAgreement,
     Development,
+    EscrowAccount,
+    EscrowTransaction,
     Handover,
     HandoverDoc,
     HouseType,
     HouseTypeVariant,
+    Phase,
     Plot,
+    PriceMatrix,
     Snag,
     WarrantyClaim,
 )
 from app.modules.property_dev.repository import (
+    BlockRepository,
+    BrokerRepository,
     BuyerOptionGroupRepository,
     BuyerOptionRepository,
     BuyerPipelineQueries,
     BuyerRepository,
     BuyerSelectionItemRepository,
     BuyerSelectionRepository,
+    CommissionAccrualRepository,
+    CommissionAgreementRepository,
     DevelopmentRepository,
+    EscrowAccountRepository,
+    EscrowTransactionRepository,
     HandoverDocRepository,
     HandoverRepository,
     HouseTypeRepository,
     HouseTypeVariantRepository,
+    PhaseRepository,
     PlotRepository,
+    PriceMatrixRepository,
     SnagRepository,
     WarrantyClaimRepository,
 )
@@ -595,6 +612,15 @@ class PropertyDevService:
         self.snags = SnagRepository(session)
         self.warranty = WarrantyClaimRepository(session)
         self.pipeline = BuyerPipelineQueries(session)
+        # Task #138 — new repositories.
+        self.phases = PhaseRepository(session)
+        self.blocks = BlockRepository(session)
+        self.brokers = BrokerRepository(session)
+        self.commission_agreements = CommissionAgreementRepository(session)
+        self.commission_accruals = CommissionAccrualRepository(session)
+        self.escrow_accounts = EscrowAccountRepository(session)
+        self.escrow_transactions = EscrowTransactionRepository(session)
+        self.price_matrices = PriceMatrixRepository(session)
 
     # ── Development ─────────────────────────────────────────────────────
 
@@ -711,6 +737,10 @@ class PropertyDevService:
             plot_number=data.plot_number,
             house_type_id=data.house_type_id,
             house_type_variant_id=data.house_type_variant_id,
+            # Task #138 — Phase/Block hierarchy fields.
+            block_id=data.block_id,
+            level_in_block=data.level_in_block,
+            position_on_floor=data.position_on_floor,
             orientation=data.orientation,
             area_m2=data.area_m2,
             garden_area_m2=data.garden_area_m2,
@@ -1715,6 +1745,1084 @@ class PropertyDevService:
         }
 
 
+# ════════════════════════════════════════════════════════════════════════
+# Task #138 — Broker / Commission / Escrow / PriceMatrix / Phase / Block
+# ════════════════════════════════════════════════════════════════════════
+
+
+# ── State machines (commissions + escrow) ──────────────────────────────
+
+
+_COMMISSION_TRANSITIONS: dict[str, set[str]] = {
+    "accrued": {"approved", "cancelled"},
+    "approved": {"paid", "cancelled"},
+    "paid": set(),
+    "cancelled": set(),
+}
+
+
+_ESCROW_RECONCILIATION_TRANSITIONS: dict[str, set[str]] = {
+    "unreconciled": {"matched", "disputed"},
+    "matched": {"disputed"},
+    "disputed": {"matched"},
+}
+
+
+def allowed_commission_transitions(current: str) -> set[str]:
+    """Return the valid next states for a CommissionAccrual."""
+    return set(_COMMISSION_TRANSITIONS.get(current, set()))
+
+
+def allowed_escrow_reconciliation_transitions(current: str) -> set[str]:
+    """Return the valid next reconciliation states for an EscrowTransaction."""
+    return set(_ESCROW_RECONCILIATION_TRANSITIONS.get(current, set()))
+
+
+# ── Pure commission math ───────────────────────────────────────────────
+
+
+def compute_commission_amount(
+    base_amount: Decimal | int | float | str,
+    structure_type: str,
+    structure: dict[str, Any],
+) -> Decimal:
+    """Compute the commission for a deal of size ``base_amount``.
+
+    All inputs are coerced through Decimal so callers may pass floats or
+    strings safely. Ladder logic picks the tier whose threshold is the
+    largest value <= base_amount.
+
+    Pure: no DB / I/O. Used both by the event-driven accrual flow and the
+    unit tests in ``test_property_dev_broker_escrow_pricematrix.py``.
+    """
+    base = Decimal(str(base_amount or 0))
+    if structure_type == "flat":
+        return Decimal(str(structure.get("amount", 0) or 0))
+    if structure_type == "percent":
+        pct = Decimal(str(structure.get("pct", 0) or 0))
+        return (base * pct / Decimal("100")).quantize(Decimal("0.01"))
+    if structure_type == "ladder":
+        tiers = structure.get("tiers") or []
+        # Sort ascending by threshold; the largest threshold ≤ base wins.
+        sorted_tiers = sorted(
+            tiers, key=lambda t: Decimal(str(t.get("threshold", 0) or 0))
+        )
+        applicable_pct = Decimal("0")
+        for tier in sorted_tiers:
+            threshold = Decimal(str(tier.get("threshold", 0) or 0))
+            if base >= threshold:
+                applicable_pct = Decimal(str(tier.get("pct", 0) or 0))
+        return (base * applicable_pct / Decimal("100")).quantize(Decimal("0.01"))
+    return Decimal("0")
+
+
+def compute_withholding(
+    commission: Decimal | int | float | str,
+    withholding_pct: Decimal | int | float | str,
+) -> tuple[Decimal, Decimal]:
+    """Return ``(withholding_amount, net_payable)`` from gross commission.
+
+    Pure: no DB.
+    """
+    gross = Decimal(str(commission or 0))
+    pct = Decimal(str(withholding_pct or 0))
+    withholding = (gross * pct / Decimal("100")).quantize(Decimal("0.01"))
+    net = (gross - withholding).quantize(Decimal("0.01"))
+    return withholding, net
+
+
+# ── Pure PriceMatrix evaluation ────────────────────────────────────────
+
+
+def _rule_matches(
+    factor_type: str, condition: dict[str, Any], plot: Any, *, on_date: str,
+) -> bool:
+    """Return True if a single PriceMatrix rule applies to ``plot``."""
+    md = _attr(plot, "metadata_", {}) or _attr(plot, "metadata", {}) or {}
+    if factor_type == "floor":
+        level = _attr(plot, "level_in_block", None)
+        if level is None:
+            return False
+        minimum = condition.get("min")
+        maximum = condition.get("max")
+        if minimum is not None and level < int(minimum):
+            return False
+        if maximum is not None and level > int(maximum):
+            return False
+        return True
+    if factor_type == "view":
+        target = condition.get("value")
+        return bool(target) and (md.get("view") == target)
+    if factor_type == "orientation":
+        target = condition.get("value")
+        return bool(target) and (_attr(plot, "orientation", None) == target)
+    if factor_type == "corner":
+        target = condition.get("value", True)
+        is_corner = bool(md.get("is_corner") or md.get("corner"))
+        return is_corner == bool(target)
+    if factor_type == "launch_discount":
+        before = condition.get("before")
+        if not before:
+            return False
+        # Discount applies when ``on_date`` is strictly before the cutoff.
+        return on_date < before
+    if factor_type == "phase_escalator":
+        phase_code = condition.get("phase_code")
+        return bool(phase_code) and md.get("phase_code") == phase_code
+    return False
+
+
+def compute_plot_price_breakdown(
+    plot: Any,
+    matrix: Any,
+    *,
+    on_date: str,
+) -> dict[str, Any]:
+    """Apply a PriceMatrix to a Plot and return the full breakdown.
+
+    Result keys: ``base_price``, ``applied_rules``, ``combined_multiplier``,
+    ``final_price``. Floats are forbidden — every monetary computation
+    runs in Decimal space to avoid drift on % math.
+
+    Pure: no DB / I/O.
+    """
+    area = Decimal(str(_attr(plot, "area_m2", 0) or 0))
+    base_per_m2 = Decimal(str(_attr(matrix, "base_price_per_m2", 0) or 0))
+    base_price = (area * base_per_m2).quantize(Decimal("0.01"))
+
+    rules = _attr(matrix, "rules", []) or []
+    applied: list[dict[str, Any]] = []
+    combined = Decimal("1")
+    for rule in rules:
+        factor_type = rule.get("factor_type") if isinstance(rule, dict) else None
+        if factor_type is None:
+            continue
+        condition = rule.get("condition") or {}
+        multiplier = Decimal(str(rule.get("multiplier", 1) or 1))
+        if _rule_matches(factor_type, condition, plot, on_date=on_date):
+            combined = combined * multiplier
+            applied.append(
+                {
+                    "factor_type": factor_type,
+                    "condition": condition,
+                    "multiplier": str(multiplier),
+                }
+            )
+
+    combined = combined.quantize(Decimal("0.0001"))
+    final = (base_price * combined).quantize(Decimal("0.01"))
+    return {
+        "base_price": base_price,
+        "applied_rules": applied,
+        "combined_multiplier": combined,
+        "final_price": final,
+    }
+
+
+# ── PropertyDevService — extension methods ─────────────────────────────
+
+
+# We attach commission/escrow/etc methods to PropertyDevService below.
+# Done as a monkey-patch via ``setattr`` after the class body would also
+# work but a subclass-style extension is harder to test — instead we
+# define standalone helpers that take a ``svc`` and add bound-method
+# shims at the bottom of this file.
+
+
+async def _svc_create_broker(svc: "PropertyDevService", data: Any) -> Broker:
+    obj = Broker(
+        tenant_id=data.tenant_id,
+        name=data.name,
+        license_number=data.license_number,
+        jurisdiction=data.jurisdiction.upper() if data.jurisdiction else "",
+        contact_email=data.contact_email,
+        contact_phone=data.contact_phone,
+        default_commission_pct=data.default_commission_pct,
+        kyc_status=data.kyc_status,
+        active=data.active,
+        metadata_=data.metadata,
+    )
+    return await svc.brokers.create(obj)
+
+
+async def _svc_get_broker(svc: "PropertyDevService", broker_id: uuid.UUID) -> Broker:
+    obj = await svc.brokers.get_by_id(broker_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Broker not found")
+    return obj
+
+
+async def _svc_update_broker(
+    svc: "PropertyDevService", broker_id: uuid.UUID, data: Any,
+) -> Broker:
+    await _svc_get_broker(svc, broker_id)
+    fields = _dump(data)
+    # ISO 3166-2 stays case-normalised.
+    if "jurisdiction" in fields and isinstance(fields["jurisdiction"], str):
+        fields["jurisdiction"] = fields["jurisdiction"].upper()
+    await svc.brokers.update_fields(broker_id, **fields)
+    return await _svc_get_broker(svc, broker_id)
+
+
+async def _svc_verify_broker_kyc(
+    svc: "PropertyDevService", broker_id: uuid.UUID,
+) -> Broker:
+    broker = await _svc_get_broker(svc, broker_id)
+    if broker.kyc_status == "verified":
+        return broker
+    now = datetime.now(UTC)
+    await svc.brokers.update_fields(
+        broker_id, kyc_status="verified", kyc_verified_at=now
+    )
+    return await _svc_get_broker(svc, broker_id)
+
+
+async def _svc_create_agreement(
+    svc: "PropertyDevService", data: Any,
+) -> CommissionAgreement:
+    await _svc_get_broker(svc, data.broker_id)
+    if data.development_id is not None:
+        await svc.get_development(data.development_id)
+    obj = CommissionAgreement(
+        broker_id=data.broker_id,
+        development_id=data.development_id,
+        specific_plot_ids=[str(p) for p in (data.specific_plot_ids or [])] or None,
+        structure_type=data.structure_type,
+        structure=data.structure,
+        accrual_trigger=data.accrual_trigger,
+        payout_terms=data.payout_terms,
+        withholding_tax_pct=data.withholding_tax_pct,
+        currency=data.currency.upper(),
+        effective_from=data.effective_from,
+        effective_to=data.effective_to,
+        status=data.status,
+        metadata_=data.metadata,
+    )
+    return await svc.commission_agreements.create(obj)
+
+
+async def _svc_get_agreement(
+    svc: "PropertyDevService", agreement_id: uuid.UUID,
+) -> CommissionAgreement:
+    obj = await svc.commission_agreements.get_by_id(agreement_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="CommissionAgreement not found")
+    return obj
+
+
+async def _svc_update_agreement(
+    svc: "PropertyDevService", agreement_id: uuid.UUID, data: Any,
+) -> CommissionAgreement:
+    await _svc_get_agreement(svc, agreement_id)
+    fields = _dump(data)
+    if "currency" in fields and isinstance(fields["currency"], str):
+        fields["currency"] = fields["currency"].upper()
+    if "specific_plot_ids" in fields and fields["specific_plot_ids"] is not None:
+        fields["specific_plot_ids"] = [str(p) for p in fields["specific_plot_ids"]]
+    await svc.commission_agreements.update_fields(agreement_id, **fields)
+    return await _svc_get_agreement(svc, agreement_id)
+
+
+async def _svc_compute_commission_on_event(
+    svc: "PropertyDevService",
+    *,
+    event_type: str,
+    development_id: uuid.UUID,
+    base_amount: Decimal,
+    currency: str,
+    trigger_entity_type: str,
+    trigger_entity_id: uuid.UUID,
+    plot_id: uuid.UUID | None = None,
+    on_date: str | None = None,
+) -> list[CommissionAccrual]:
+    """For each matching active agreement, create + persist a CommissionAccrual.
+
+    Publishes ``property_dev.commission.accrued`` per accrual.
+    """
+    on_date_str = on_date or _today_iso()
+    agreements = await svc.commission_agreements.list_matching(
+        development_id=development_id,
+        on_date=on_date_str,
+        accrual_trigger=event_type,
+    )
+    accruals: list[CommissionAccrual] = []
+    for agreement in agreements:
+        # Specific-plot restriction (when set, the accrual only fires for
+        # listed plots).
+        if agreement.specific_plot_ids:
+            allowed = {str(x) for x in agreement.specific_plot_ids}
+            if plot_id is None or str(plot_id) not in allowed:
+                continue
+        commission_amount = compute_commission_amount(
+            base_amount, agreement.structure_type, agreement.structure or {},
+        )
+        withholding, net = compute_withholding(
+            commission_amount, agreement.withholding_tax_pct or 0,
+        )
+        now = datetime.now(UTC)
+        accrual = CommissionAccrual(
+            agreement_id=agreement.id,
+            broker_id=agreement.broker_id,
+            trigger_event=event_type,
+            trigger_entity_type=trigger_entity_type,
+            trigger_entity_id=trigger_entity_id,
+            base_amount=Decimal(str(base_amount)),
+            commission_amount=commission_amount,
+            currency=(currency or agreement.currency or "").upper(),
+            state="accrued",
+            accrued_at=now,
+            withholding_amount=withholding,
+            net_payable=net,
+            metadata_={"source": "auto_event"},
+        )
+        accrual = await svc.commission_accruals.create(accrual)
+        accruals.append(accrual)
+        event_bus.publish_detached(
+            "property_dev.commission.accrued",
+            data={
+                "accrual_id": str(accrual.id),
+                "agreement_id": str(accrual.agreement_id),
+                "broker_id": str(accrual.broker_id),
+                "trigger_event": event_type,
+                "base_amount": str(accrual.base_amount),
+                "commission_amount": str(accrual.commission_amount),
+                "currency": accrual.currency,
+            },
+            source_module="property_dev",
+        )
+    return accruals
+
+
+async def _svc_approve_commission(
+    svc: "PropertyDevService",
+    accrual_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+) -> CommissionAccrual:
+    accrual = await svc.commission_accruals.get_by_id(accrual_id)
+    if accrual is None:
+        raise HTTPException(status_code=404, detail="CommissionAccrual not found")
+    target = "approved"
+    if target == accrual.state:
+        return accrual
+    if target not in allowed_commission_transitions(accrual.state):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Invalid commission transition: {accrual.state} -> {target}",
+        )
+    md = dict(accrual.metadata_ or {})
+    if user_id is not None:
+        md["approved_by"] = str(user_id)
+    await svc.commission_accruals.update_fields(
+        accrual_id,
+        state="approved",
+        approved_at=datetime.now(UTC),
+        metadata_=md,
+    )
+    updated = await svc.commission_accruals.get_by_id(accrual_id)
+    event_bus.publish_detached(
+        "property_dev.commission.approved",
+        data={
+            "accrual_id": str(accrual_id),
+            "broker_id": str(updated.broker_id) if updated else None,
+            "approved_by": str(user_id) if user_id else None,
+        },
+        source_module="property_dev",
+    )
+    return updated  # type: ignore[return-value]
+
+
+async def _svc_pay_commission(
+    svc: "PropertyDevService",
+    accrual_id: uuid.UUID,
+    payment_ref: str,
+    user_id: uuid.UUID | None = None,
+) -> CommissionAccrual:
+    accrual = await svc.commission_accruals.get_by_id(accrual_id)
+    if accrual is None:
+        raise HTTPException(status_code=404, detail="CommissionAccrual not found")
+    target = "paid"
+    if target not in allowed_commission_transitions(accrual.state):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Invalid commission transition: {accrual.state} -> {target}",
+        )
+    md = dict(accrual.metadata_ or {})
+    if user_id is not None:
+        md["paid_by"] = str(user_id)
+    await svc.commission_accruals.update_fields(
+        accrual_id,
+        state="paid",
+        paid_at=datetime.now(UTC),
+        payment_ref=payment_ref,
+        metadata_=md,
+    )
+    updated = await svc.commission_accruals.get_by_id(accrual_id)
+    event_bus.publish_detached(
+        "property_dev.commission.paid",
+        data={
+            "accrual_id": str(accrual_id),
+            "broker_id": str(updated.broker_id) if updated else None,
+            "amount": str(updated.commission_amount) if updated else "0",
+            "currency": updated.currency if updated else "",
+            "payment_ref": payment_ref,
+        },
+        source_module="property_dev",
+    )
+    return updated  # type: ignore[return-value]
+
+
+# ── Escrow ─────────────────────────────────────────────────────────────
+
+
+async def _svc_create_escrow_account(
+    svc: "PropertyDevService", data: Any,
+) -> EscrowAccount:
+    await svc.get_development(data.development_id)
+    obj = EscrowAccount(
+        development_id=data.development_id,
+        regulator_ref=data.regulator_ref,
+        regulator_account_number=data.regulator_account_number,
+        bank_name=data.bank_name,
+        iban=data.iban,
+        swift_bic=data.swift_bic,
+        currency=data.currency.upper(),
+        opened_at=data.opened_at,
+        is_active=data.is_active,
+        metadata_=data.metadata,
+    )
+    return await svc.escrow_accounts.create(obj)
+
+
+async def _svc_get_escrow_account(
+    svc: "PropertyDevService", account_id: uuid.UUID,
+) -> EscrowAccount:
+    obj = await svc.escrow_accounts.get_by_id(account_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="EscrowAccount not found")
+    return obj
+
+
+async def _svc_update_escrow_account(
+    svc: "PropertyDevService", account_id: uuid.UUID, data: Any,
+) -> EscrowAccount:
+    await _svc_get_escrow_account(svc, account_id)
+    await svc.escrow_accounts.update_fields(account_id, **_dump(data))
+    return await _svc_get_escrow_account(svc, account_id)
+
+
+async def _svc_create_escrow_transaction(
+    svc: "PropertyDevService", data: Any,
+) -> EscrowTransaction:
+    account = await _svc_get_escrow_account(svc, data.escrow_account_id)
+    if account.currency and data.currency.upper() != account.currency.upper():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Transaction currency {data.currency} does not match "
+                f"escrow account currency {account.currency}"
+            ),
+        )
+    obj = EscrowTransaction(
+        escrow_account_id=data.escrow_account_id,
+        direction=data.direction,
+        amount=data.amount,
+        currency=data.currency.upper(),
+        source_type=data.source_type,
+        source_instalment_id=data.source_instalment_id,
+        source_reference=data.source_reference,
+        bank_reference=data.bank_reference,
+        transaction_date=data.transaction_date,
+        reconciliation_state="unreconciled",
+        metadata_=data.metadata,
+    )
+    created = await svc.escrow_transactions.create(obj)
+    event_bus.publish_detached(
+        "property_dev.escrow.transaction.created",
+        data={
+            "transaction_id": str(created.id),
+            "escrow_account_id": str(created.escrow_account_id),
+            "direction": created.direction,
+            "amount": str(created.amount),
+            "currency": created.currency,
+            "source_type": created.source_type,
+        },
+        source_module="property_dev",
+    )
+    return created
+
+
+async def _svc_reconcile_escrow_transaction(
+    svc: "PropertyDevService",
+    tx_id: uuid.UUID,
+    bank_ref: str,
+    user_id: uuid.UUID | None = None,
+) -> EscrowTransaction:
+    tx = await svc.escrow_transactions.get_by_id(tx_id)
+    if tx is None:
+        raise HTTPException(status_code=404, detail="EscrowTransaction not found")
+    target = "matched"
+    if target == tx.reconciliation_state:
+        return tx
+    if target not in allowed_escrow_reconciliation_transitions(
+        tx.reconciliation_state
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Invalid reconciliation transition: "
+                f"{tx.reconciliation_state} -> {target}"
+            ),
+        )
+    await svc.escrow_transactions.update_fields(
+        tx_id,
+        reconciliation_state="matched",
+        bank_reference=bank_ref,
+        reconciled_at=datetime.now(UTC),
+        reconciled_by_user_id=user_id,
+    )
+    updated = await svc.escrow_transactions.get_by_id(tx_id)
+    event_bus.publish_detached(
+        "property_dev.escrow.transaction.reconciled",
+        data={
+            "transaction_id": str(tx_id),
+            "bank_reference": bank_ref,
+            "reconciled_by_user_id": str(user_id) if user_id else None,
+        },
+        source_module="property_dev",
+    )
+    return updated  # type: ignore[return-value]
+
+
+async def _svc_compute_escrow_balance(
+    svc: "PropertyDevService",
+    account_id: uuid.UUID,
+    *,
+    as_of_date: str | None = None,
+) -> dict[str, Any]:
+    account = await _svc_get_escrow_account(svc, account_id)
+    breakdown = await svc.escrow_transactions.compute_balance(
+        account_id, as_of_date=as_of_date,
+    )
+    breakdown["escrow_account_id"] = account.id
+    breakdown["currency"] = account.currency
+    breakdown["as_of_date"] = as_of_date
+    return breakdown
+
+
+# ── PriceMatrix ────────────────────────────────────────────────────────
+
+
+async def _svc_create_price_matrix(
+    svc: "PropertyDevService", data: Any,
+) -> PriceMatrix:
+    await svc.get_development(data.development_id)
+    rules_dump: list[dict[str, Any]] = []
+    for rule in data.rules:
+        rules_dump.append(
+            {
+                "factor_type": rule.factor_type,
+                "condition": rule.condition,
+                "multiplier": str(rule.multiplier),
+            }
+        )
+    obj = PriceMatrix(
+        development_id=data.development_id,
+        name=data.name,
+        base_price_per_m2=data.base_price_per_m2,
+        currency=data.currency.upper(),
+        effective_from=data.effective_from,
+        effective_to=data.effective_to,
+        rules=rules_dump,
+        status=data.status,
+        version=data.version,
+        metadata_=data.metadata,
+    )
+    return await svc.price_matrices.create(obj)
+
+
+async def _svc_get_price_matrix(
+    svc: "PropertyDevService", matrix_id: uuid.UUID,
+) -> PriceMatrix:
+    obj = await svc.price_matrices.get_by_id(matrix_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="PriceMatrix not found")
+    return obj
+
+
+async def _svc_update_price_matrix(
+    svc: "PropertyDevService", matrix_id: uuid.UUID, data: Any,
+) -> PriceMatrix:
+    await _svc_get_price_matrix(svc, matrix_id)
+    fields = _dump(data)
+    if fields.get("rules") is not None:
+        coerced: list[dict[str, Any]] = []
+        for rule in fields["rules"]:
+            if isinstance(rule, dict):
+                coerced.append(
+                    {
+                        "factor_type": rule.get("factor_type"),
+                        "condition": rule.get("condition", {}),
+                        "multiplier": str(rule.get("multiplier", 1)),
+                    }
+                )
+            else:
+                coerced.append(
+                    {
+                        "factor_type": rule.factor_type,
+                        "condition": rule.condition,
+                        "multiplier": str(rule.multiplier),
+                    }
+                )
+        fields["rules"] = coerced
+    await svc.price_matrices.update_fields(matrix_id, **fields)
+    return await _svc_get_price_matrix(svc, matrix_id)
+
+
+async def _svc_activate_price_matrix(
+    svc: "PropertyDevService", matrix_id: uuid.UUID,
+) -> PriceMatrix:
+    matrix = await _svc_get_price_matrix(svc, matrix_id)
+    if matrix.status == "active":
+        return matrix
+    await svc.price_matrices.update_fields(matrix_id, status="active")
+    activated = await _svc_get_price_matrix(svc, matrix_id)
+    event_bus.publish_detached(
+        "property_dev.price_matrix.activated",
+        data={
+            "matrix_id": str(matrix_id),
+            "development_id": str(activated.development_id),
+            "version": activated.version,
+            "effective_from": activated.effective_from,
+        },
+        source_module="property_dev",
+    )
+    return activated
+
+
+async def _svc_compute_plot_price(
+    svc: "PropertyDevService",
+    plot_id: uuid.UUID,
+    *,
+    on_date: str | None = None,
+    matrix_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    plot = await svc.get_plot(plot_id)
+    target_date = on_date or _today_iso()
+    if matrix_id is not None:
+        matrix = await _svc_get_price_matrix(svc, matrix_id)
+    else:
+        matrix = await svc.price_matrices.find_active_for_dev_on_date(
+            plot.development_id, target_date,
+        )
+    if matrix is None:
+        # No active matrix → return zero-rule breakdown with the explicit
+        # price_base override (priority 1) so callers always get a number.
+        explicit = Decimal(str(plot.price_base or 0))
+        return {
+            "plot_id": plot.id,
+            "matrix_id": None,
+            "currency": plot.currency,
+            "base_price_per_m2": Decimal("0"),
+            "area_m2": Decimal(str(plot.area_m2 or 0)),
+            "base_price": explicit,
+            "applied_rules": [],
+            "combined_multiplier": Decimal("1"),
+            "final_price": explicit,
+        }
+    breakdown = compute_plot_price_breakdown(plot, matrix, on_date=target_date)
+    breakdown["plot_id"] = plot.id
+    breakdown["matrix_id"] = matrix.id
+    breakdown["currency"] = matrix.currency
+    breakdown["base_price_per_m2"] = Decimal(str(matrix.base_price_per_m2))
+    breakdown["area_m2"] = Decimal(str(plot.area_m2 or 0))
+    return breakdown
+
+
+async def _svc_bulk_recompute_dev_prices(
+    svc: "PropertyDevService", dev_id: uuid.UUID,
+) -> dict[str, Any]:
+    dev = await svc.get_development(dev_id)
+    dev_id_value = dev.id
+    today = _today_iso()
+    matrix = await svc.price_matrices.find_active_for_dev_on_date(dev_id, today)
+    if matrix is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No active PriceMatrix found for the development",
+        )
+    matrix_id_value = matrix.id
+    rows, _ = await svc.plots.list_for_development(
+        dev_id, offset=0, limit=10_000,
+    )
+    # Snapshot all needed attributes BEFORE the first update_fields call —
+    # ``_BaseRepo.update_fields`` runs ``session.expire_all`` after every
+    # write, which would otherwise force a lazy load on ``plot.id`` /
+    # ``plot.computed_price`` from inside a non-greenlet context and
+    # raise MissingGreenlet.
+    snapshots: list[tuple[uuid.UUID, Decimal | None, dict[str, Any]]] = []
+    for plot in rows:
+        snapshots.append(
+            (
+                plot.id,
+                (
+                    Decimal(str(plot.computed_price))
+                    if plot.computed_price is not None
+                    else None
+                ),
+                compute_plot_price_breakdown(plot, matrix, on_date=today),
+            )
+        )
+    plots_updated = 0
+    plots_unchanged = 0
+    for plot_id, prev_price, breakdown in snapshots:
+        new_price = breakdown["final_price"]
+        if prev_price is None or prev_price != new_price:
+            await svc.plots.update_fields(plot_id, computed_price=new_price)
+            plots_updated += 1
+        else:
+            plots_unchanged += 1
+    return {
+        "matrix_id": matrix_id_value,
+        "development_id": dev_id_value,
+        "plots_updated": plots_updated,
+        "plots_unchanged": plots_unchanged,
+    }
+
+
+# ── Phase / Block ──────────────────────────────────────────────────────
+
+
+async def _svc_create_phase(svc: "PropertyDevService", data: Any) -> Phase:
+    await svc.get_development(data.development_id)
+    obj = Phase(
+        development_id=data.development_id,
+        code=data.code,
+        name=data.name,
+        sequence=data.sequence,
+        planned_start=data.planned_start,
+        planned_end=data.planned_end,
+        status=data.status,
+        metadata_=data.metadata,
+    )
+    return await svc.phases.create(obj)
+
+
+async def _svc_get_phase(svc: "PropertyDevService", phase_id: uuid.UUID) -> Phase:
+    obj = await svc.phases.get_by_id(phase_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Phase not found")
+    return obj
+
+
+async def _svc_update_phase(
+    svc: "PropertyDevService", phase_id: uuid.UUID, data: Any,
+) -> Phase:
+    await _svc_get_phase(svc, phase_id)
+    await svc.phases.update_fields(phase_id, **_dump(data))
+    return await _svc_get_phase(svc, phase_id)
+
+
+async def _svc_create_block(svc: "PropertyDevService", data: Any) -> Block:
+    await _svc_get_phase(svc, data.phase_id)
+    obj = Block(
+        phase_id=data.phase_id,
+        code=data.code,
+        name=data.name,
+        levels_count=data.levels_count,
+        units_per_level=data.units_per_level,
+        orientation=data.orientation,
+        geo_coordinates=data.geo_coordinates,
+        status=data.status,
+        metadata_=data.metadata,
+    )
+    return await svc.blocks.create(obj)
+
+
+async def _svc_get_block(svc: "PropertyDevService", block_id: uuid.UUID) -> Block:
+    obj = await svc.blocks.get_by_id(block_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Block not found")
+    return obj
+
+
+async def _svc_update_block(
+    svc: "PropertyDevService", block_id: uuid.UUID, data: Any,
+) -> Block:
+    await _svc_get_block(svc, block_id)
+    await svc.blocks.update_fields(block_id, **_dump(data))
+    return await _svc_get_block(svc, block_id)
+
+
+# ── Regulator reports (RERA / MAHARERA / 214-ФЗ) ──────────────────────
+
+
+def _render_regulator_pdf(
+    *,
+    regulator: str,
+    development_name: str,
+    development_code: str,
+    quarter: str,
+    summary: dict[str, Any],
+) -> bytes:
+    """Render a real PDF for a regulator quarterly disclosure.
+
+    Uses reportlab (already a hard dep). Layout is minimal but real —
+    header + project block + key metrics table — so the file is a valid,
+    rendered PDF that opens in any reader, not an empty stub.
+    """
+    from io import BytesIO
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=2 * cm,
+        rightMargin=2 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+        title=f"{regulator} Quarterly Disclosure",
+        author="OpenConstructionERP / DataDrivenConstruction",
+    )
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph(
+            f"<b>{regulator} — Quarterly Disclosure ({quarter})</b>",
+            styles["Title"],
+        ),
+        Spacer(1, 0.6 * cm),
+        Paragraph(
+            f"<b>Development:</b> {development_name} "
+            f"(<font face='Courier'>{development_code}</font>)",
+            styles["Normal"],
+        ),
+        Paragraph(
+            f"<b>Reporting period:</b> {quarter}",
+            styles["Normal"],
+        ),
+        Paragraph(
+            f"<b>Currency:</b> {summary.get('currency', '—')}",
+            styles["Normal"],
+        ),
+        Spacer(1, 0.4 * cm),
+    ]
+    rows = [["Metric", "Value"]]
+    for key, value in summary.items():
+        rows.append([str(key), str(value)])
+    table = Table(rows, hAlign="LEFT")
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                 [colors.HexColor("#f3f4f6"), colors.white]),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(table)
+    story.append(Spacer(1, 0.8 * cm))
+    story.append(
+        Paragraph(
+            "<i>This disclosure is generated by OpenConstructionERP "
+            "(DataDrivenConstruction). All figures are derived from the "
+            "live property_dev module ledger as of the report timestamp.</i>",
+            styles["Italic"],
+        )
+    )
+    doc.build(story)
+    return buf.getvalue()
+
+
+async def _svc_collect_regulator_summary(
+    svc: "PropertyDevService", dev_id: uuid.UUID, quarter: str,
+) -> tuple[Development, dict[str, Any]]:
+    """Aggregate the disclosure metrics for one development + quarter."""
+    dev = await svc.get_development(dev_id)
+    plots_by_status = await svc.plots.count_for_development_by_status(dev_id)
+    buyers_by_status = await svc.buyers.count_for_development_by_status(dev_id)
+    contracted_value = await svc.buyers.sum_contract_value(
+        dev_id, status_in=["contracted", "completed"],
+    )
+    accounts = await svc.escrow_accounts.list_for_development(dev_id)
+    escrow_summary: dict[str, dict[str, Any]] = {}
+    for acc in accounts:
+        balance = await svc.escrow_transactions.compute_balance(acc.id)
+        escrow_summary[f"escrow_{acc.currency}_{acc.regulator_ref}"] = {
+            "credit": str(balance["credit_total"]),
+            "debit": str(balance["debit_total"]),
+            "balance": str(balance["balance"]),
+            "unreconciled": balance["unreconciled_count"],
+        }
+    sold = plots_by_status.get("sold", 0) + plots_by_status.get("handed_over", 0)
+    total_plots = sum(plots_by_status.values())
+    currency = ""
+    rows, _ = await svc.buyers.list_for_development(dev_id, offset=0, limit=1)
+    if rows and rows[0].currency:
+        currency = rows[0].currency
+    summary: dict[str, Any] = {
+        "currency": currency,
+        "quarter": quarter,
+        "total_plots": total_plots,
+        "plots_sold": sold,
+        "plots_reserved": plots_by_status.get("reserved", 0),
+        "plots_handed_over": plots_by_status.get("handed_over", 0),
+        "buyers_contracted": buyers_by_status.get("contracted", 0),
+        "buyers_completed": buyers_by_status.get("completed", 0),
+        "buyers_cancelled": buyers_by_status.get("cancelled", 0),
+        "contracted_value": str(contracted_value or 0),
+    }
+    summary.update(escrow_summary)
+    return dev, summary
+
+
+async def _svc_generate_regulator_report(
+    svc: "PropertyDevService", dev_id: uuid.UUID, quarter: str, regulator: str,
+) -> dict[str, Any]:
+    """Generic per-regulator report generator. RERA / MAHARERA / 214-ФЗ
+    differ in title + label set but the data extraction logic is shared.
+    """
+    if not _QUARTER_RE.match(quarter):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid quarter format {quarter!r}: expected e.g. 2026-Q1",
+        )
+    dev, summary = await _svc_collect_regulator_summary(svc, dev_id, quarter)
+    if regulator == "RERA":
+        title = "RERA Dubai (DLD) Quarterly Disclosure"
+        summary["regulator_law"] = "Law No. (8) of 2007 — RERA Dubai"
+    elif regulator == "MAHARERA":
+        title = "MahaRERA Form 5 — Quarterly Project Update"
+        summary["regulator_law"] = "RERA Act 2016 — MahaRERA Rule 5"
+    elif regulator == "214_FZ":
+        title = "ФЗ-214 Ежеквартальный отчёт застройщика"
+        summary["regulator_law"] = "ФЗ № 214 от 30.12.2004"
+    else:
+        title = f"{regulator} Disclosure"
+    pdf_bytes = _render_regulator_pdf(
+        regulator=title,
+        development_name=dev.name or dev.code,
+        development_code=dev.code,
+        quarter=quarter,
+        summary=summary,
+    )
+    import base64
+
+    payload = {
+        "development_id": dev.id,
+        "regulator": regulator,
+        "quarter": quarter,
+        "generated_at": datetime.now(UTC),
+        "currency": summary.get("currency", ""),
+        "summary": summary,
+        "pdf_size_bytes": len(pdf_bytes),
+        "pdf_base64": base64.b64encode(pdf_bytes).decode("ascii"),
+    }
+    event_bus.publish_detached(
+        "property_dev.regulator_report.generated",
+        data={
+            "development_id": str(dev.id),
+            "regulator": regulator,
+            "quarter": quarter,
+            "pdf_size_bytes": payload["pdf_size_bytes"],
+        },
+        source_module="property_dev",
+    )
+    return payload
+
+
+_QUARTER_RE = re.compile(r"^\d{4}-Q[1-4]$")
+
+
+# ── Bind extension methods to PropertyDevService ───────────────────────
+
+
+PropertyDevService.create_broker = _svc_create_broker  # type: ignore[attr-defined]
+PropertyDevService.get_broker = _svc_get_broker  # type: ignore[attr-defined]
+PropertyDevService.update_broker = _svc_update_broker  # type: ignore[attr-defined]
+PropertyDevService.verify_broker_kyc = _svc_verify_broker_kyc  # type: ignore[attr-defined]
+PropertyDevService.create_agreement = _svc_create_agreement  # type: ignore[attr-defined]
+PropertyDevService.get_agreement = _svc_get_agreement  # type: ignore[attr-defined]
+PropertyDevService.update_agreement = _svc_update_agreement  # type: ignore[attr-defined]
+PropertyDevService.compute_commission_on_event = (  # type: ignore[attr-defined]
+    _svc_compute_commission_on_event
+)
+PropertyDevService.approve_commission = _svc_approve_commission  # type: ignore[attr-defined]
+PropertyDevService.pay_commission = _svc_pay_commission  # type: ignore[attr-defined]
+PropertyDevService.create_escrow_account = _svc_create_escrow_account  # type: ignore[attr-defined]
+PropertyDevService.get_escrow_account = _svc_get_escrow_account  # type: ignore[attr-defined]
+PropertyDevService.update_escrow_account = _svc_update_escrow_account  # type: ignore[attr-defined]
+PropertyDevService.create_escrow_transaction = (  # type: ignore[attr-defined]
+    _svc_create_escrow_transaction
+)
+PropertyDevService.reconcile_escrow_transaction = (  # type: ignore[attr-defined]
+    _svc_reconcile_escrow_transaction
+)
+PropertyDevService.compute_escrow_balance = _svc_compute_escrow_balance  # type: ignore[attr-defined]
+PropertyDevService.create_price_matrix = _svc_create_price_matrix  # type: ignore[attr-defined]
+PropertyDevService.get_price_matrix = _svc_get_price_matrix  # type: ignore[attr-defined]
+PropertyDevService.update_price_matrix = _svc_update_price_matrix  # type: ignore[attr-defined]
+PropertyDevService.activate_price_matrix = _svc_activate_price_matrix  # type: ignore[attr-defined]
+PropertyDevService.compute_plot_price = _svc_compute_plot_price  # type: ignore[attr-defined]
+PropertyDevService.bulk_recompute_dev_prices = (  # type: ignore[attr-defined]
+    _svc_bulk_recompute_dev_prices
+)
+PropertyDevService.create_phase = _svc_create_phase  # type: ignore[attr-defined]
+PropertyDevService.get_phase = _svc_get_phase  # type: ignore[attr-defined]
+PropertyDevService.update_phase = _svc_update_phase  # type: ignore[attr-defined]
+PropertyDevService.create_block = _svc_create_block  # type: ignore[attr-defined]
+PropertyDevService.get_block = _svc_get_block  # type: ignore[attr-defined]
+PropertyDevService.update_block = _svc_update_block  # type: ignore[attr-defined]
+PropertyDevService.generate_regulator_report = (  # type: ignore[attr-defined]
+    _svc_generate_regulator_report
+)
+
+
+async def _svc_generate_regulator_report_RERA(
+    svc: "PropertyDevService", dev_id: uuid.UUID, quarter: str,
+) -> dict[str, Any]:
+    return await _svc_generate_regulator_report(svc, dev_id, quarter, "RERA")
+
+
+async def _svc_generate_regulator_report_MAHARERA(
+    svc: "PropertyDevService", dev_id: uuid.UUID, quarter: str,
+) -> dict[str, Any]:
+    return await _svc_generate_regulator_report(svc, dev_id, quarter, "MAHARERA")
+
+
+async def _svc_generate_regulator_report_214FZ(
+    svc: "PropertyDevService", dev_id: uuid.UUID, quarter: str,
+) -> dict[str, Any]:
+    return await _svc_generate_regulator_report(svc, dev_id, quarter, "214_FZ")
+
+
+PropertyDevService.generate_regulator_report_RERA = (  # type: ignore[attr-defined]
+    _svc_generate_regulator_report_RERA
+)
+PropertyDevService.generate_regulator_report_MAHARERA = (  # type: ignore[attr-defined]
+    _svc_generate_regulator_report_MAHARERA
+)
+PropertyDevService.generate_regulator_report_214FZ = (  # type: ignore[attr-defined]
+    _svc_generate_regulator_report_214FZ
+)
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
@@ -1729,15 +2837,20 @@ def _dump(data: Any) -> dict[str, Any]:
 __all__ = [
     "PropertyDevService",
     "allowed_buyer_transitions",
+    "allowed_commission_transitions",
+    "allowed_escrow_reconciliation_transitions",
     "allowed_handover_transitions",
     "allowed_plot_transitions",
     "allowed_selection_transitions",
     "allowed_warranty_transitions",
     "can_modify_selection",
     "compute_buyer_selection_total",
+    "compute_commission_amount",
     "compute_deposit_forfeiture",
     "compute_freeze_deadline",
     "compute_plot_final_price",
+    "compute_plot_price_breakdown",
+    "compute_withholding",
     "derive_plot_construction_progress",
     "supported_jurisdictions",
     "validate_option_compatibility",

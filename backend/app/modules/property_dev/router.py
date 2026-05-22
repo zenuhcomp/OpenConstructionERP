@@ -65,6 +65,36 @@ from app.modules.property_dev.schemas import (
     WarrantyClaimResponse,
     WarrantyClaimUpdate,
 )
+from app.modules.property_dev.schemas import (
+    BlockCreate,
+    BlockResponse,
+    BlockUpdate,
+    BrokerCreate,
+    BrokerResponse,
+    BrokerUpdate,
+    CommissionAccrualPayRequest,
+    CommissionAccrualResponse,
+    CommissionAgreementCreate,
+    CommissionAgreementResponse,
+    CommissionAgreementUpdate,
+    EscrowAccountCreate,
+    EscrowAccountResponse,
+    EscrowAccountUpdate,
+    EscrowBalanceResponse,
+    EscrowTransactionCreate,
+    EscrowTransactionReconcileRequest,
+    EscrowTransactionResponse,
+    EscrowTransactionUpdate,
+    PhaseCreate,
+    PhaseResponse,
+    PhaseUpdate,
+    PriceMatrixBulkRecomputeResponse,
+    PriceMatrixCreate,
+    PriceMatrixPreviewResponse,
+    PriceMatrixResponse,
+    PriceMatrixUpdate,
+    RegulatorReportResponse,
+)
 from app.modules.property_dev.service import (
     PropertyDevService,
     compute_plot_final_price,
@@ -1162,3 +1192,787 @@ async def development_pnl(
     """Revenue + deposits + open-issues rollup for a development."""
     payload = await service.development_pnl(dev_id)
     return DevelopmentPnLResponse(**payload)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Task #138 — Broker / Commission / Escrow / PriceMatrix / Phase / Block
+# ════════════════════════════════════════════════════════════════════════
+
+
+def _payload_user_id(payload: dict[str, Any]) -> uuid.UUID | None:
+    raw = payload.get("sub") or payload.get("user_id")
+    if raw is None:
+        return None
+    try:
+        return uuid.UUID(str(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _payload_tenant_id(payload: dict[str, Any]) -> uuid.UUID | None:
+    raw = payload.get("tenant_id") or payload.get("org_id")
+    if raw is None:
+        return None
+    try:
+        return uuid.UUID(str(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+# ── Phases ──────────────────────────────────────────────────────────────
+
+
+@router.get("/phases/", response_model=list[PhaseResponse])
+async def list_phases(
+    development_id: uuid.UUID = Query(...),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[PhaseResponse]:
+    rows = await service.phases.list_for_dev_ordered(development_id)
+    return [PhaseResponse.model_validate(r) for r in rows]
+
+
+@router.post("/phases/", response_model=PhaseResponse, status_code=201)
+async def create_phase(
+    data: PhaseCreate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.create")),
+) -> PhaseResponse:
+    return PhaseResponse.model_validate(await service.create_phase(data))
+
+
+@router.get("/phases/{phase_id}", response_model=PhaseResponse)
+async def get_phase(
+    phase_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> PhaseResponse:
+    return PhaseResponse.model_validate(await service.get_phase(phase_id))
+
+
+@router.patch("/phases/{phase_id}", response_model=PhaseResponse)
+async def update_phase(
+    phase_id: uuid.UUID,
+    data: PhaseUpdate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.update")),
+) -> PhaseResponse:
+    return PhaseResponse.model_validate(
+        await service.update_phase(phase_id, data)
+    )
+
+
+@router.delete("/phases/{phase_id}", status_code=204)
+async def delete_phase(
+    phase_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> None:
+    await service.get_phase(phase_id)
+    await service.phases.delete(phase_id)
+
+
+# ── Blocks ──────────────────────────────────────────────────────────────
+
+
+@router.get("/blocks/", response_model=list[BlockResponse])
+async def list_blocks(
+    phase_id: uuid.UUID = Query(...),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[BlockResponse]:
+    rows = await service.blocks.list_for_phase_ordered(phase_id)
+    return [BlockResponse.model_validate(r) for r in rows]
+
+
+@router.post("/blocks/", response_model=BlockResponse, status_code=201)
+async def create_block(
+    data: BlockCreate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.create")),
+) -> BlockResponse:
+    return BlockResponse.model_validate(await service.create_block(data))
+
+
+@router.get("/blocks/{block_id}", response_model=BlockResponse)
+async def get_block(
+    block_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> BlockResponse:
+    return BlockResponse.model_validate(await service.get_block(block_id))
+
+
+@router.patch("/blocks/{block_id}", response_model=BlockResponse)
+async def update_block(
+    block_id: uuid.UUID,
+    data: BlockUpdate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.update")),
+) -> BlockResponse:
+    return BlockResponse.model_validate(
+        await service.update_block(block_id, data)
+    )
+
+
+@router.delete("/blocks/{block_id}", status_code=204)
+async def delete_block(
+    block_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> None:
+    await service.get_block(block_id)
+    await service.blocks.delete(block_id)
+
+
+# ── Brokers ─────────────────────────────────────────────────────────────
+
+
+@router.get("/brokers/", response_model=list[BrokerResponse])
+async def list_brokers(
+    payload: CurrentUserPayload,
+    active_only: bool = Query(default=False),
+    jurisdiction: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[BrokerResponse]:
+    tenant_id = _payload_tenant_id(payload)
+    if active_only:
+        rows = await service.brokers.list_active(
+            tenant_id,
+            jurisdiction=jurisdiction,
+            offset=offset,
+            limit=limit,
+        )
+    else:
+        rows = await service.brokers.list_all(
+            tenant_id, offset=offset, limit=limit
+        )
+    return [BrokerResponse.model_validate(r) for r in rows]
+
+
+@router.post("/brokers/", response_model=BrokerResponse, status_code=201)
+async def create_broker(
+    data: BrokerCreate,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.create")),
+) -> BrokerResponse:
+    # Forcibly bind the broker to the caller's tenant on create (closes
+    # cross-tenant tenant_id forgery).
+    tenant_id = _payload_tenant_id(payload)
+    if tenant_id is not None:
+        data = data.model_copy(update={"tenant_id": tenant_id})
+    return BrokerResponse.model_validate(await service.create_broker(data))
+
+
+@router.get("/brokers/{broker_id}", response_model=BrokerResponse)
+async def get_broker(
+    broker_id: uuid.UUID,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> BrokerResponse:
+    broker = await service.get_broker(broker_id)
+    _ensure_broker_owner(broker, payload)
+    return BrokerResponse.model_validate(broker)
+
+
+@router.patch("/brokers/{broker_id}", response_model=BrokerResponse)
+async def update_broker(
+    broker_id: uuid.UUID,
+    data: BrokerUpdate,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.update")),
+) -> BrokerResponse:
+    broker = await service.get_broker(broker_id)
+    _ensure_broker_owner(broker, payload)
+    return BrokerResponse.model_validate(
+        await service.update_broker(broker_id, data)
+    )
+
+
+@router.delete("/brokers/{broker_id}", status_code=204)
+async def delete_broker(
+    broker_id: uuid.UUID,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> None:
+    broker = await service.get_broker(broker_id)
+    _ensure_broker_owner(broker, payload)
+    await service.brokers.delete(broker_id)
+
+
+@router.post("/brokers/{broker_id}/verify-kyc", response_model=BrokerResponse)
+async def verify_broker_kyc(
+    broker_id: uuid.UUID,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.broker.kyc_verify")),
+) -> BrokerResponse:
+    broker = await service.get_broker(broker_id)
+    _ensure_broker_owner(broker, payload)
+    return BrokerResponse.model_validate(
+        await service.verify_broker_kyc(broker_id)
+    )
+
+
+def _ensure_broker_owner(broker: Any, payload: dict[str, Any]) -> None:
+    """Tenant-isolation gate for brokers.
+
+    Admins bypass. For non-admins, a broker that belongs to a different
+    tenant collapses to 404 — never leak existence via 403.
+    """
+    if payload.get("role") == "admin":
+        return
+    caller_tenant = _payload_tenant_id(payload)
+    broker_tenant = getattr(broker, "tenant_id", None)
+    if caller_tenant is None and broker_tenant is None:
+        return
+    if str(caller_tenant) != str(broker_tenant):
+        raise HTTPException(status_code=404, detail="Broker not found")
+
+
+# ── Commission Agreements ──────────────────────────────────────────────
+
+
+@router.get(
+    "/commission-agreements/", response_model=list[CommissionAgreementResponse],
+)
+async def list_commission_agreements(
+    broker_id: uuid.UUID | None = Query(default=None),
+    development_id: uuid.UUID | None = Query(default=None),
+    on_date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[CommissionAgreementResponse]:
+    if broker_id is not None and on_date is not None:
+        rows = await service.commission_agreements.list_active_for_broker(
+            broker_id, on_date,
+        )
+    elif development_id is not None and on_date is not None:
+        rows = await service.commission_agreements.list_matching(
+            development_id=development_id,
+            on_date=on_date,
+            accrual_trigger="spa_signed",
+        )
+    elif broker_id is not None:
+        # All agreements for a broker (any status).
+        from sqlalchemy import select
+
+        from app.modules.property_dev.models import (
+            CommissionAgreement as _CA,
+        )
+
+        rs = await service.session.execute(
+            select(_CA).where(_CA.broker_id == broker_id).order_by(
+                _CA.created_at.desc()
+            )
+        )
+        rows = list(rs.scalars().all())
+    else:
+        rows = []
+    return [CommissionAgreementResponse.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/commission-agreements/",
+    response_model=CommissionAgreementResponse,
+    status_code=201,
+)
+async def create_commission_agreement(
+    data: CommissionAgreementCreate,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.create")),
+) -> CommissionAgreementResponse:
+    broker = await service.get_broker(data.broker_id)
+    _ensure_broker_owner(broker, payload)
+    return CommissionAgreementResponse.model_validate(
+        await service.create_agreement(data)
+    )
+
+
+@router.get(
+    "/commission-agreements/{agreement_id}",
+    response_model=CommissionAgreementResponse,
+)
+async def get_commission_agreement(
+    agreement_id: uuid.UUID,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> CommissionAgreementResponse:
+    agreement = await service.get_agreement(agreement_id)
+    broker = await service.get_broker(agreement.broker_id)
+    _ensure_broker_owner(broker, payload)
+    return CommissionAgreementResponse.model_validate(agreement)
+
+
+@router.patch(
+    "/commission-agreements/{agreement_id}",
+    response_model=CommissionAgreementResponse,
+)
+async def update_commission_agreement(
+    agreement_id: uuid.UUID,
+    data: CommissionAgreementUpdate,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.update")),
+) -> CommissionAgreementResponse:
+    agreement = await service.get_agreement(agreement_id)
+    broker = await service.get_broker(agreement.broker_id)
+    _ensure_broker_owner(broker, payload)
+    return CommissionAgreementResponse.model_validate(
+        await service.update_agreement(agreement_id, data)
+    )
+
+
+@router.delete("/commission-agreements/{agreement_id}", status_code=204)
+async def delete_commission_agreement(
+    agreement_id: uuid.UUID,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> None:
+    agreement = await service.get_agreement(agreement_id)
+    broker = await service.get_broker(agreement.broker_id)
+    _ensure_broker_owner(broker, payload)
+    await service.commission_agreements.delete(agreement_id)
+
+
+# ── Commission Accruals ────────────────────────────────────────────────
+
+
+@router.get(
+    "/commission-accruals/", response_model=list[CommissionAccrualResponse],
+)
+async def list_commission_accruals(
+    broker_id: uuid.UUID = Query(...),
+    state: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    payload: CurrentUserPayload = None,  # type: ignore[assignment]
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[CommissionAccrualResponse]:
+    broker = await service.get_broker(broker_id)
+    _ensure_broker_owner(broker, payload or {})
+    rows = await service.commission_accruals.list_for_broker(
+        broker_id, state=state, offset=offset, limit=limit,
+    )
+    return [CommissionAccrualResponse.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/commission-accruals/{accrual_id}/approve",
+    response_model=CommissionAccrualResponse,
+)
+async def approve_commission_accrual(
+    accrual_id: uuid.UUID,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(
+        RequirePermission("property_dev.commission.approve")
+    ),
+) -> CommissionAccrualResponse:
+    user_id = _payload_user_id(payload)
+    accrual = await service.commission_accruals.get_by_id(accrual_id)
+    if accrual is None:
+        raise HTTPException(status_code=404, detail="CommissionAccrual not found")
+    broker = await service.get_broker(accrual.broker_id)
+    _ensure_broker_owner(broker, payload)
+    return CommissionAccrualResponse.model_validate(
+        await service.approve_commission(accrual_id, user_id)
+    )
+
+
+@router.post(
+    "/commission-accruals/{accrual_id}/pay",
+    response_model=CommissionAccrualResponse,
+)
+async def pay_commission_accrual(
+    accrual_id: uuid.UUID,
+    data: CommissionAccrualPayRequest,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.commission.pay")),
+) -> CommissionAccrualResponse:
+    user_id = _payload_user_id(payload)
+    accrual = await service.commission_accruals.get_by_id(accrual_id)
+    if accrual is None:
+        raise HTTPException(status_code=404, detail="CommissionAccrual not found")
+    broker = await service.get_broker(accrual.broker_id)
+    _ensure_broker_owner(broker, payload)
+    return CommissionAccrualResponse.model_validate(
+        await service.pay_commission(accrual_id, data.payment_ref, user_id)
+    )
+
+
+# ── Escrow Accounts ────────────────────────────────────────────────────
+
+
+@router.get(
+    "/escrow-accounts/", response_model=list[EscrowAccountResponse],
+)
+async def list_escrow_accounts(
+    development_id: uuid.UUID = Query(...),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[EscrowAccountResponse]:
+    await service.get_development(development_id)
+    rows = await service.escrow_accounts.list_for_development(development_id)
+    return [EscrowAccountResponse.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/escrow-accounts/", response_model=EscrowAccountResponse, status_code=201,
+)
+async def create_escrow_account(
+    data: EscrowAccountCreate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.create")),
+) -> EscrowAccountResponse:
+    return EscrowAccountResponse.model_validate(
+        await service.create_escrow_account(data)
+    )
+
+
+@router.get(
+    "/escrow-accounts/{account_id}", response_model=EscrowAccountResponse,
+)
+async def get_escrow_account(
+    account_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> EscrowAccountResponse:
+    return EscrowAccountResponse.model_validate(
+        await service.get_escrow_account(account_id)
+    )
+
+
+@router.patch(
+    "/escrow-accounts/{account_id}", response_model=EscrowAccountResponse,
+)
+async def update_escrow_account(
+    account_id: uuid.UUID,
+    data: EscrowAccountUpdate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.update")),
+) -> EscrowAccountResponse:
+    return EscrowAccountResponse.model_validate(
+        await service.update_escrow_account(account_id, data)
+    )
+
+
+@router.delete("/escrow-accounts/{account_id}", status_code=204)
+async def delete_escrow_account(
+    account_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> None:
+    await service.get_escrow_account(account_id)
+    await service.escrow_accounts.delete(account_id)
+
+
+@router.get(
+    "/escrow-accounts/{account_id}/balance",
+    response_model=EscrowBalanceResponse,
+)
+async def escrow_account_balance(
+    account_id: uuid.UUID,
+    as_of_date: str | None = Query(
+        default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"
+    ),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> EscrowBalanceResponse:
+    payload = await service.compute_escrow_balance(
+        account_id, as_of_date=as_of_date,
+    )
+    return EscrowBalanceResponse(
+        escrow_account_id=payload["escrow_account_id"],
+        currency=payload["currency"],
+        as_of_date=payload["as_of_date"],
+        credit_total=payload["credit_total"],
+        debit_total=payload["debit_total"],
+        balance=payload["balance"],
+        transaction_count=payload["transaction_count"],
+        unreconciled_count=payload["unreconciled_count"],
+    )
+
+
+# ── Escrow Transactions ────────────────────────────────────────────────
+
+
+@router.get(
+    "/escrow-transactions/", response_model=list[EscrowTransactionResponse],
+)
+async def list_escrow_transactions(
+    escrow_account_id: uuid.UUID = Query(...),
+    unreconciled_only: bool = Query(default=False),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=500),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[EscrowTransactionResponse]:
+    await service.get_escrow_account(escrow_account_id)
+    if unreconciled_only:
+        rows = await service.escrow_transactions.list_unreconciled(
+            escrow_account_id
+        )
+    else:
+        rows = await service.escrow_transactions.list_for_account(
+            escrow_account_id, offset=offset, limit=limit,
+        )
+    return [EscrowTransactionResponse.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/escrow-transactions/",
+    response_model=EscrowTransactionResponse,
+    status_code=201,
+)
+async def create_escrow_transaction(
+    data: EscrowTransactionCreate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.create")),
+) -> EscrowTransactionResponse:
+    return EscrowTransactionResponse.model_validate(
+        await service.create_escrow_transaction(data)
+    )
+
+
+@router.get(
+    "/escrow-transactions/{tx_id}", response_model=EscrowTransactionResponse,
+)
+async def get_escrow_transaction(
+    tx_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> EscrowTransactionResponse:
+    obj = await service.escrow_transactions.get_by_id(tx_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="EscrowTransaction not found")
+    return EscrowTransactionResponse.model_validate(obj)
+
+
+@router.patch(
+    "/escrow-transactions/{tx_id}", response_model=EscrowTransactionResponse,
+)
+async def update_escrow_transaction(
+    tx_id: uuid.UUID,
+    data: EscrowTransactionUpdate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.update")),
+) -> EscrowTransactionResponse:
+    obj = await service.escrow_transactions.get_by_id(tx_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="EscrowTransaction not found")
+    fields = {k: v for k, v in data.model_dump(exclude_unset=True).items()}
+    if "metadata" in fields:
+        fields["metadata_"] = fields.pop("metadata")
+    await service.escrow_transactions.update_fields(tx_id, **fields)
+    refreshed = await service.escrow_transactions.get_by_id(tx_id)
+    return EscrowTransactionResponse.model_validate(refreshed)
+
+
+@router.delete("/escrow-transactions/{tx_id}", status_code=204)
+async def delete_escrow_transaction(
+    tx_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> None:
+    obj = await service.escrow_transactions.get_by_id(tx_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="EscrowTransaction not found")
+    await service.escrow_transactions.delete(tx_id)
+
+
+@router.post(
+    "/escrow-transactions/{tx_id}/reconcile",
+    response_model=EscrowTransactionResponse,
+)
+async def reconcile_escrow_transaction(
+    tx_id: uuid.UUID,
+    data: EscrowTransactionReconcileRequest,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(
+        RequirePermission("property_dev.escrow.reconcile")
+    ),
+) -> EscrowTransactionResponse:
+    return EscrowTransactionResponse.model_validate(
+        await service.reconcile_escrow_transaction(
+            tx_id, data.bank_reference, _payload_user_id(payload),
+        )
+    )
+
+
+# ── Price Matrices ─────────────────────────────────────────────────────
+
+
+@router.get(
+    "/price-matrices/", response_model=list[PriceMatrixResponse],
+)
+async def list_price_matrices(
+    development_id: uuid.UUID = Query(...),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[PriceMatrixResponse]:
+    await service.get_development(development_id)
+    rows = await service.price_matrices.list_for_development(development_id)
+    return [PriceMatrixResponse.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/price-matrices/", response_model=PriceMatrixResponse, status_code=201,
+)
+async def create_price_matrix(
+    data: PriceMatrixCreate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.create")),
+) -> PriceMatrixResponse:
+    return PriceMatrixResponse.model_validate(
+        await service.create_price_matrix(data)
+    )
+
+
+@router.get(
+    "/price-matrices/{matrix_id}", response_model=PriceMatrixResponse,
+)
+async def get_price_matrix(
+    matrix_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> PriceMatrixResponse:
+    return PriceMatrixResponse.model_validate(
+        await service.get_price_matrix(matrix_id)
+    )
+
+
+@router.patch(
+    "/price-matrices/{matrix_id}", response_model=PriceMatrixResponse,
+)
+async def update_price_matrix(
+    matrix_id: uuid.UUID,
+    data: PriceMatrixUpdate,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.update")),
+) -> PriceMatrixResponse:
+    return PriceMatrixResponse.model_validate(
+        await service.update_price_matrix(matrix_id, data)
+    )
+
+
+@router.delete("/price-matrices/{matrix_id}", status_code=204)
+async def delete_price_matrix(
+    matrix_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> None:
+    await service.get_price_matrix(matrix_id)
+    await service.price_matrices.delete(matrix_id)
+
+
+@router.post(
+    "/price-matrices/{matrix_id}/activate",
+    response_model=PriceMatrixResponse,
+)
+async def activate_price_matrix(
+    matrix_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(
+        RequirePermission("property_dev.price_matrix.activate")
+    ),
+) -> PriceMatrixResponse:
+    return PriceMatrixResponse.model_validate(
+        await service.activate_price_matrix(matrix_id)
+    )
+
+
+@router.get(
+    "/price-matrices/{matrix_id}/preview-on-plot/{plot_id}",
+    response_model=PriceMatrixPreviewResponse,
+)
+async def preview_price_on_plot(
+    matrix_id: uuid.UUID,
+    plot_id: uuid.UUID,
+    on_date: str | None = Query(
+        default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"
+    ),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> PriceMatrixPreviewResponse:
+    payload = await service.compute_plot_price(
+        plot_id, on_date=on_date, matrix_id=matrix_id,
+    )
+    return PriceMatrixPreviewResponse(**payload)
+
+
+@router.post(
+    "/price-matrices/{matrix_id}/bulk-recompute",
+    response_model=PriceMatrixBulkRecomputeResponse,
+)
+async def bulk_recompute_prices(
+    matrix_id: uuid.UUID,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(
+        RequirePermission("property_dev.price_matrix.bulk_recompute")
+    ),
+) -> PriceMatrixBulkRecomputeResponse:
+    matrix = await service.get_price_matrix(matrix_id)
+    result = await service.bulk_recompute_dev_prices(matrix.development_id)
+    return PriceMatrixBulkRecomputeResponse(**result)
+
+
+# ── Regulator reports ──────────────────────────────────────────────────
+
+
+@router.get(
+    "/regulator-reports/RERA", response_model=RegulatorReportResponse,
+)
+async def regulator_report_rera(
+    dev_id: uuid.UUID = Query(...),
+    quarter: str = Query(..., pattern=r"^\d{4}-Q[1-4]$"),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(
+        RequirePermission("property_dev.regulator_report.generate")
+    ),
+) -> RegulatorReportResponse:
+    payload = await service.generate_regulator_report_RERA(dev_id, quarter)
+    return RegulatorReportResponse(**payload)
+
+
+@router.get(
+    "/regulator-reports/MAHARERA", response_model=RegulatorReportResponse,
+)
+async def regulator_report_maharera(
+    dev_id: uuid.UUID = Query(...),
+    quarter: str = Query(..., pattern=r"^\d{4}-Q[1-4]$"),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(
+        RequirePermission("property_dev.regulator_report.generate")
+    ),
+) -> RegulatorReportResponse:
+    payload = await service.generate_regulator_report_MAHARERA(dev_id, quarter)
+    return RegulatorReportResponse(**payload)
+
+
+@router.get(
+    "/regulator-reports/214-FZ", response_model=RegulatorReportResponse,
+)
+async def regulator_report_214fz(
+    dev_id: uuid.UUID = Query(...),
+    quarter: str = Query(..., pattern=r"^\d{4}-Q[1-4]$"),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(
+        RequirePermission("property_dev.regulator_report.generate")
+    ),
+) -> RegulatorReportResponse:
+    payload = await service.generate_regulator_report_214FZ(dev_id, quarter)
+    return RegulatorReportResponse(**payload)

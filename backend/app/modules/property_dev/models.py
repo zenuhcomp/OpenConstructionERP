@@ -23,6 +23,7 @@ External references (kept as plain UUID columns, NO FK):
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -185,6 +186,19 @@ class Plot(Base):
         ForeignKey("oe_property_dev_house_type_variant.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Task #138: Phase/Block hierarchy — Plot belongs to a Block, Block belongs
+    # to a Phase, Phase belongs to a Development. All FKs nullable so legacy
+    # Plot rows (created before the hierarchy existed) keep working.
+    block_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("oe_property_dev_block.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    level_in_block: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    position_on_floor: Mapped[str | None] = mapped_column(
+        String(40), nullable=True
+    )
     orientation: Mapped[str | None] = mapped_column(String(16), nullable=True)
     area_m2: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
@@ -192,8 +206,14 @@ class Plot(Base):
     garden_area_m2: Mapped[Decimal | None] = mapped_column(
         Numeric(18, 2), nullable=True
     )
+    # ``price_base`` = explicit override (priority 1).
+    # ``computed_price`` = cached value from PriceMatrix.compute(plot) (prio 2).
+    # Effective price helper lives in service.compute_plot_price().
     price_base: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
+    )
+    computed_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 2), nullable=True
     )
     currency: Mapped[str] = mapped_column(String(8), nullable=False, default="")
     status: Mapped[str] = mapped_column(
@@ -559,23 +579,459 @@ class WarrantyClaim(Base):
         )
 
 
+# ── Phase / Block hierarchy (task #138) ─────────────────────────────────
+
+
+class Phase(Base):
+    """A sales/build phase within a Development (e.g. "Launch Q3 2026").
+
+    Phases group Blocks; Blocks group Plots. The hierarchy lets phased
+    multi-tower / multi-cluster developments stage launches without
+    creating a separate Development row per release.
+    """
+
+    __tablename__ = "oe_property_dev_phase"
+    __table_args__ = (
+        UniqueConstraint(
+            "development_id", "code", name="uq_oe_property_dev_phase_dev_code"
+        ),
+    )
+
+    development_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("oe_property_dev_development.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    planned_start: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    planned_end: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="planned", index=True
+    )
+    metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        "metadata", JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Phase {self.code} ({self.status})>"
+
+
+class Block(Base):
+    """A building / cluster within a Phase. Groups Plots by level/position."""
+
+    __tablename__ = "oe_property_dev_block"
+    __table_args__ = (
+        UniqueConstraint(
+            "phase_id", "code", name="uq_oe_property_dev_block_phase_code"
+        ),
+    )
+
+    phase_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("oe_property_dev_phase.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    levels_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    units_per_level: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
+    orientation: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    geo_coordinates: Mapped[dict | None] = mapped_column(  # type: ignore[assignment]
+        JSON, nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="planned", index=True
+    )
+    metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        "metadata", JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Block {self.code} ({self.status})>"
+
+
+# ── Broker / Commission (task #138) ─────────────────────────────────────
+
+
+class Broker(Base):
+    """External property broker / agent that brings in deals.
+
+    Carries a KYC lifecycle (pending → verified → expired/rejected). A broker
+    can have many CommissionAgreements (one per development or one global).
+    """
+
+    __tablename__ = "oe_property_dev_broker"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "license_number",
+            name="uq_oe_property_dev_broker_tenant_license",
+        ),
+    )
+
+    # Multi-tenant key. Held as a plain UUID (no FK) — mirrors the
+    # cross-module convention used elsewhere in property_dev.
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    license_number: Mapped[str] = mapped_column(
+        String(120), nullable=False, default="", index=True
+    )
+    # ISO 3166-2 region (e.g. "AE-DU", "RU-MOW"); broader than ISO 3166-1.
+    jurisdiction: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="", index=True
+    )
+    contact_email: Mapped[str] = mapped_column(
+        String(255), nullable=False, default=""
+    )
+    contact_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    default_commission_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0")
+    )
+    kyc_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", index=True
+    )
+    kyc_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, index=True
+    )
+    metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        "metadata", JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Broker {self.name!r} ({self.kyc_status})>"
+
+
+class CommissionAgreement(Base):
+    """A broker's commission contract on a development (or all developments).
+
+    ``structure_type`` determines the shape of the ``structure`` JSONB:
+      - ``flat``:    ``{"amount": "5000", "currency": "EUR"}``
+      - ``percent``: ``{"pct": "2.50"}``
+      - ``ladder``:  ``{"tiers": [{"threshold": "100000", "pct": "1.5"}, ...]}``
+
+    ``accrual_trigger`` controls which event lifecycle stage flips this
+    agreement into an accrual: lead_qualified / reservation_paid /
+    spa_signed (default) / handover_complete.
+    """
+
+    __tablename__ = "oe_property_dev_commission_agreement"
+
+    broker_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("oe_property_dev_broker.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Nullable → applies to ALL developments for this broker.
+    development_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("oe_property_dev_development.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # Array of plot UUIDs (as strings) — empty/null means "all plots".
+    specific_plot_ids: Mapped[list | None] = mapped_column(  # type: ignore[assignment]
+        JSON, nullable=True
+    )
+    structure_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="percent"
+    )
+    structure: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    accrual_trigger: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="spa_signed", index=True
+    )
+    payout_terms: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="net30"
+    )
+    withholding_tax_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0")
+    )
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    effective_from: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+    effective_to: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="draft", index=True
+    )
+    metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        "metadata", JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<CommissionAgreement broker={self.broker_id} "
+            f"{self.structure_type} ({self.status})>"
+        )
+
+
+class CommissionAccrual(Base):
+    """A concrete commission earned by a broker on a specific event.
+
+    State machine: accrued → approved → paid (or cancelled at any step).
+    Approval + payment gates are MANAGER+ only.
+    """
+
+    __tablename__ = "oe_property_dev_commission_accrual"
+
+    agreement_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey(
+            "oe_property_dev_commission_agreement.id", ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True,
+    )
+    broker_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("oe_property_dev_broker.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    trigger_event: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="", index=True
+    )
+    trigger_entity_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, default=""
+    )
+    trigger_entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), nullable=True, index=True
+    )
+    base_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=Decimal("0")
+    )
+    commission_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=Decimal("0")
+    )
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    state: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="accrued", index=True
+    )
+    accrued_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    payment_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    withholding_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=Decimal("0")
+    )
+    net_payable: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=Decimal("0")
+    )
+    metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        "metadata", JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<CommissionAccrual broker={self.broker_id} "
+            f"{self.commission_amount}{self.currency} ({self.state})>"
+        )
+
+
+# ── Escrow (task #138) ──────────────────────────────────────────────────
+
+
+class EscrowAccount(Base):
+    """A regulator-supervised escrow account holding buyer instalments.
+
+    One Development can have multiple accounts — typically one per currency
+    + regulator (RERA AED, MAHARERA INR, etc).
+    """
+
+    __tablename__ = "oe_property_dev_escrow_account"
+    __table_args__ = (
+        UniqueConstraint(
+            "development_id", "currency", "regulator_ref",
+            name="uq_oe_property_dev_escrow_dev_ccy_reg",
+        ),
+    )
+
+    development_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("oe_property_dev_development.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    regulator_ref: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="other", index=True
+    )
+    regulator_account_number: Mapped[str] = mapped_column(
+        String(120), nullable=False, default=""
+    )
+    bank_name: Mapped[str] = mapped_column(
+        String(255), nullable=False, default=""
+    )
+    iban: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    swift_bic: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=""
+    )
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    opened_at: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+    closed_at: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, index=True
+    )
+    metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        "metadata", JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<EscrowAccount dev={self.development_id} "
+            f"{self.currency} ({self.regulator_ref})>"
+        )
+
+
+class EscrowTransaction(Base):
+    """A single debit/credit movement on an escrow account."""
+
+    __tablename__ = "oe_property_dev_escrow_transaction"
+
+    escrow_account_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey(
+            "oe_property_dev_escrow_account.id", ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True,
+    )
+    direction: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="credit"
+    )
+    amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=Decimal("0")
+    )
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    source_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="instalment", index=True
+    )
+    # Plain UUID (no FK) — instalment lives in PaymentSchedule (task #137).
+    source_instalment_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), nullable=True, index=True
+    )
+    source_reference: Mapped[str] = mapped_column(
+        String(255), nullable=False, default=""
+    )
+    bank_reference: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    transaction_date: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="", index=True
+    )
+    reconciliation_state: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unreconciled", index=True
+    )
+    reconciled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reconciled_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), nullable=True
+    )
+    metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        "metadata", JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<EscrowTx {self.direction} {self.amount}{self.currency} "
+            f"({self.reconciliation_state})>"
+        )
+
+
+# ── PriceMatrix (task #138) ─────────────────────────────────────────────
+
+
+class PriceMatrix(Base):
+    """A versioned price grid that computes plot prices via JSONB rules.
+
+    ``rules`` is an ordered list of factor descriptors::
+
+        [
+          {"factor_type": "floor",          "condition": {"min": 5},   "multiplier": "1.04"},
+          {"factor_type": "view",           "condition": {"value": "sea"}, "multiplier": "1.15"},
+          {"factor_type": "corner",         "condition": {"value": true},  "multiplier": "1.08"},
+          {"factor_type": "launch_discount","condition": {"before": "2026-09-01"}, "multiplier": "0.97"},
+          {"factor_type": "phase_escalator","condition": {"phase_code": "P2"}, "multiplier": "1.06"}
+        ]
+
+    Final price = plot.area_m2 * base_price_per_m2 * ∏ multipliers.
+    """
+
+    __tablename__ = "oe_property_dev_price_matrix"
+
+    development_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(),
+        ForeignKey("oe_property_dev_development.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    base_price_per_m2: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=Decimal("0")
+    )
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    effective_from: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="", index=True
+    )
+    effective_to: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    rules: Mapped[list] = mapped_column(  # type: ignore[assignment]
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="draft", index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
+        "metadata", JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<PriceMatrix {self.name!r} v{self.version} ({self.status})>"
+        )
+
+
 __all__ = [
+    "Block",
+    "Broker",
     "Buyer",
     "BuyerOption",
     "BuyerOptionGroup",
     "BuyerSelection",
     "BuyerSelectionItem",
+    "CommissionAccrual",
+    "CommissionAgreement",
     "Development",
+    "EscrowAccount",
+    "EscrowTransaction",
     "Handover",
     "HandoverDoc",
     "HouseType",
     "HouseTypeVariant",
+    "Phase",
     "Plot",
+    "PriceMatrix",
     "Snag",
     "WarrantyClaim",
 ]
 
 
-# Unused import sentinels for tooling: DateTime is used implicitly through
+# Unused import sentinels for tooling: Date is used implicitly through
 # String(20) ISO date columns; suppress lint by referencing here.
-_unused = (DateTime, Date)
+_unused = (Date,)

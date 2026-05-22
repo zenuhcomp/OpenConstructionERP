@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ── Development ─────────────────────────────────────────────────────────
 
@@ -197,6 +198,9 @@ class PlotCreate(BaseModel):
     plot_number: str = Field(..., min_length=1, max_length=50)
     house_type_id: UUID | None = None
     house_type_variant_id: UUID | None = None
+    block_id: UUID | None = None
+    level_in_block: int | None = Field(default=None, ge=-10, le=200)
+    position_on_floor: str | None = Field(default=None, max_length=40)
     orientation: str | None = Field(default=None, max_length=16)
     area_m2: Decimal = Field(default=Decimal("0"), ge=0)
     garden_area_m2: Decimal | None = Field(default=None, ge=0)
@@ -222,10 +226,14 @@ class PlotUpdate(BaseModel):
 
     house_type_id: UUID | None = None
     house_type_variant_id: UUID | None = None
+    block_id: UUID | None = None
+    level_in_block: int | None = Field(default=None, ge=-10, le=200)
+    position_on_floor: str | None = Field(default=None, max_length=40)
     orientation: str | None = Field(default=None, max_length=16)
     area_m2: Decimal | None = Field(default=None, ge=0)
     garden_area_m2: Decimal | None = Field(default=None, ge=0)
     price_base: Decimal | None = Field(default=None, ge=0)
+    computed_price: Decimal | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, max_length=8)
     status: str | None = Field(
         default=None,
@@ -248,10 +256,14 @@ class PlotResponse(BaseModel):
     plot_number: str
     house_type_id: UUID | None = None
     house_type_variant_id: UUID | None = None
+    block_id: UUID | None = None
+    level_in_block: int | None = None
+    position_on_floor: str | None = None
     orientation: str | None = None
     area_m2: Decimal = Decimal("0")
     garden_area_m2: Decimal | None = None
     price_base: Decimal = Decimal("0")
+    computed_price: Decimal | None = None
     currency: str = ""
     status: str = "planned"
     reservation_deadline: str | None = None
@@ -961,3 +973,788 @@ class DevelopmentPnLResponse(BaseModel):
     avg_sale_price: Decimal = Decimal("0")
     open_warranty_count: int = 0
     open_snag_count: int = 0
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Task #138 — Broker / Commission / Escrow / PriceMatrix / Phase / Block
+# ════════════════════════════════════════════════════════════════════════
+
+
+# ── Common validators ───────────────────────────────────────────────────
+
+
+_REGULATOR_REFS = (
+    "rera_dubai",
+    "rera_abu_dhabi",
+    "maharera",
+    "214_FZ_RU",
+    "cma_saudi",
+    "section32_au",
+    "other",
+)
+_REGULATOR_REF_PATTERN = (
+    r"^(rera_dubai|rera_abu_dhabi|maharera|214_FZ_RU|cma_saudi|section32_au|other)$"
+)
+
+# Loose IBAN format: 15-34 alphanumeric, first 2 letters = country code,
+# next 2 = check digits. Real-world IBANs span this range; we do not run
+# the mod-97 check here to keep this layer purely structural.
+_IBAN_RE = re.compile(r"^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$")
+
+
+def _validate_iban(value: str) -> str:
+    """Validate IBAN structurally. Empty string is allowed (no IBAN set)."""
+    if not value:
+        return value
+    normalised = value.replace(" ", "").upper()
+    if not _IBAN_RE.match(normalised):
+        raise ValueError(
+            "Invalid IBAN format — expected 15-34 alphanumeric chars starting "
+            "with 2-letter country code + 2-digit checksum"
+        )
+    return normalised
+
+
+def _validate_iso_date_order(
+    start: str | None, end: str | None, *, field_pair: str
+) -> None:
+    """Reject ``effective_from > effective_to`` style mistakes."""
+    if start and end and start > end:
+        raise ValueError(
+            f"{field_pair}: effective_from ({start}) must precede "
+            f"effective_to ({end})"
+        )
+
+
+# ── Phase ───────────────────────────────────────────────────────────────
+
+
+class PhaseCreate(BaseModel):
+    """Create a sales/build Phase within a Development."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    development_id: UUID
+    code: str = Field(..., min_length=1, max_length=50)
+    name: str = Field(default="", max_length=255)
+    sequence: int = Field(default=0, ge=0)
+    planned_start: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    planned_end: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    status: str = Field(
+        default="planned",
+        pattern=r"^(planned|under_construction|completed)$",
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_dates(self) -> "PhaseCreate":
+        _validate_iso_date_order(
+            self.planned_start, self.planned_end, field_pair="phase"
+        )
+        return self
+
+
+class PhaseUpdate(BaseModel):
+    """Partial update for a Phase."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, max_length=255)
+    sequence: int | None = Field(default=None, ge=0)
+    planned_start: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    planned_end: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    status: str | None = Field(
+        default=None, pattern=r"^(planned|under_construction|completed)$"
+    )
+    metadata: dict[str, Any] | None = None
+
+
+class PhaseResponse(BaseModel):
+    """Phase as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    development_id: UUID
+    code: str
+    name: str = ""
+    sequence: int = 0
+    planned_start: str | None = None
+    planned_end: str | None = None
+    status: str = "planned"
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, validation_alias="metadata_"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+# ── Block ───────────────────────────────────────────────────────────────
+
+
+class BlockCreate(BaseModel):
+    """Create a Block within a Phase."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    phase_id: UUID
+    code: str = Field(..., min_length=1, max_length=50)
+    name: str = Field(default="", max_length=255)
+    levels_count: int = Field(default=1, ge=1, le=400)
+    units_per_level: int = Field(default=1, ge=1, le=200)
+    orientation: str | None = Field(default=None, max_length=16)
+    geo_coordinates: dict[str, Any] | None = None
+    status: str = Field(
+        default="planned",
+        pattern=r"^(planned|under_construction|handed_over)$",
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BlockUpdate(BaseModel):
+    """Partial update for a Block."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, max_length=255)
+    levels_count: int | None = Field(default=None, ge=1, le=400)
+    units_per_level: int | None = Field(default=None, ge=1, le=200)
+    orientation: str | None = Field(default=None, max_length=16)
+    geo_coordinates: dict[str, Any] | None = None
+    status: str | None = Field(
+        default=None,
+        pattern=r"^(planned|under_construction|handed_over)$",
+    )
+    metadata: dict[str, Any] | None = None
+
+
+class BlockResponse(BaseModel):
+    """Block as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    phase_id: UUID
+    code: str
+    name: str = ""
+    levels_count: int = 1
+    units_per_level: int = 1
+    orientation: str | None = None
+    geo_coordinates: dict[str, Any] | None = None
+    status: str = "planned"
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, validation_alias="metadata_"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+# ── Broker ──────────────────────────────────────────────────────────────
+
+
+class BrokerCreate(BaseModel):
+    """Create a Broker master record."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    tenant_id: UUID | None = None
+    name: str = Field(..., min_length=1, max_length=255)
+    license_number: str = Field(..., min_length=1, max_length=120)
+    # ISO 3166-2 region code such as "AE-DU"; we allow blank for staging.
+    jurisdiction: str = Field(default="", max_length=16)
+    contact_email: str = Field(default="", max_length=255)
+    contact_phone: str | None = Field(default=None, max_length=40)
+    default_commission_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    kyc_status: str = Field(
+        default="pending", pattern=r"^(pending|verified|expired|rejected)$"
+    )
+    active: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BrokerUpdate(BaseModel):
+    """Partial update for a Broker."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    license_number: str | None = Field(default=None, min_length=1, max_length=120)
+    jurisdiction: str | None = Field(default=None, max_length=16)
+    contact_email: str | None = Field(default=None, max_length=255)
+    contact_phone: str | None = Field(default=None, max_length=40)
+    default_commission_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    kyc_status: str | None = Field(
+        default=None, pattern=r"^(pending|verified|expired|rejected)$"
+    )
+    active: bool | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class BrokerResponse(BaseModel):
+    """Broker as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    tenant_id: UUID | None = None
+    name: str
+    license_number: str
+    jurisdiction: str = ""
+    contact_email: str = ""
+    contact_phone: str | None = None
+    default_commission_pct: Decimal = Decimal("0")
+    kyc_status: str = "pending"
+    kyc_verified_at: datetime | None = None
+    active: bool = True
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, validation_alias="metadata_"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+# ── Commission structure (discriminated union) ─────────────────────────
+
+
+class FlatCommissionStructure(BaseModel):
+    """Single fixed amount in a given currency."""
+
+    type: Literal["flat"] = "flat"
+    amount: Decimal = Field(..., ge=0)
+    currency: str = Field(..., min_length=3, max_length=3)
+
+
+class PercentCommissionStructure(BaseModel):
+    """Single percentage of the base amount."""
+
+    type: Literal["percent"] = "percent"
+    pct: Decimal = Field(..., ge=0, le=100)
+
+
+class LadderTier(BaseModel):
+    """One tier in a ladder commission structure."""
+
+    threshold: Decimal = Field(..., ge=0)
+    pct: Decimal = Field(..., ge=0, le=100)
+
+
+class LadderCommissionStructure(BaseModel):
+    """Tiered commission: highest threshold whose ``base >= threshold`` wins."""
+
+    type: Literal["ladder"] = "ladder"
+    tiers: list[LadderTier] = Field(..., min_length=1)
+
+
+# ── CommissionAgreement ────────────────────────────────────────────────
+
+
+class CommissionAgreementCreate(BaseModel):
+    """Create a CommissionAgreement.
+
+    ``structure`` is a free-form JSON shape; the explicit ``structure_type``
+    field tells us which validator to apply when reading it back. We
+    validate the shape via :meth:`_check_structure`.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    broker_id: UUID
+    development_id: UUID | None = None
+    specific_plot_ids: list[UUID] | None = None
+    structure_type: str = Field(..., pattern=r"^(flat|percent|ladder)$")
+    structure: dict[str, Any] = Field(default_factory=dict)
+    accrual_trigger: str = Field(
+        default="spa_signed",
+        pattern=r"^(lead_qualified|reservation_paid|spa_signed|handover_complete)$",
+    )
+    payout_terms: str = Field(
+        default="net30",
+        pattern=r"^(immediate|net30|net60|per_milestone)$",
+    )
+    withholding_tax_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    currency: str = Field(..., min_length=3, max_length=8)
+    effective_from: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    effective_to: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    status: str = Field(
+        default="draft", pattern=r"^(draft|active|expired|cancelled)$"
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_structure(self) -> "CommissionAgreementCreate":
+        """Validate the JSONB structure with plain-Python checks.
+
+        We *don't* delegate to PercentCommissionStructure.model_validate
+        here: when Pydantic raises in a nested validator, the resulting
+        ValidationError carries Decimal-typed ``input`` values that
+        FastAPI's default JSON serialiser refuses to emit (the 422
+        response then 500s with ``Decimal is not JSON serializable``).
+        Manual validation keeps every error value as a JSON-safe string.
+        """
+        try:
+            if self.structure_type == "flat":
+                amount = self.structure.get("amount")
+                currency = self.structure.get("currency")
+                if amount is None or currency is None:
+                    raise ValueError(
+                        "flat structure requires {amount, currency}"
+                    )
+                amt_dec = Decimal(str(amount))
+                if amt_dec < 0:
+                    raise ValueError("amount must be >= 0")
+                if not isinstance(currency, str) or len(currency) != 3:
+                    raise ValueError("currency must be a 3-letter ISO code")
+            elif self.structure_type == "percent":
+                pct = self.structure.get("pct")
+                if pct is None:
+                    raise ValueError("percent structure requires {pct}")
+                pct_dec = Decimal(str(pct))
+                if pct_dec < 0 or pct_dec > 100:
+                    raise ValueError("pct must be between 0 and 100")
+            elif self.structure_type == "ladder":
+                tiers = self.structure.get("tiers")
+                if not tiers or not isinstance(tiers, list):
+                    raise ValueError(
+                        "ladder structure requires non-empty tiers[]"
+                    )
+                for tier in tiers:
+                    t = Decimal(str(tier.get("threshold", 0)))
+                    p = Decimal(str(tier.get("pct", 0)))
+                    if t < 0:
+                        raise ValueError("tier.threshold must be >= 0")
+                    if p < 0 or p > 100:
+                        raise ValueError("tier.pct must be between 0 and 100")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid {self.structure_type!r} commission structure: {exc}"
+            ) from exc
+        _validate_iso_date_order(
+            self.effective_from, self.effective_to,
+            field_pair="commission_agreement",
+        )
+        return self
+
+
+class CommissionAgreementUpdate(BaseModel):
+    """Partial update for a CommissionAgreement."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    development_id: UUID | None = None
+    specific_plot_ids: list[UUID] | None = None
+    structure_type: str | None = Field(default=None, pattern=r"^(flat|percent|ladder)$")
+    structure: dict[str, Any] | None = None
+    accrual_trigger: str | None = Field(
+        default=None,
+        pattern=r"^(lead_qualified|reservation_paid|spa_signed|handover_complete)$",
+    )
+    payout_terms: str | None = Field(
+        default=None, pattern=r"^(immediate|net30|net60|per_milestone)$"
+    )
+    withholding_tax_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    currency: str | None = Field(default=None, min_length=3, max_length=8)
+    effective_from: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    effective_to: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    status: str | None = Field(
+        default=None, pattern=r"^(draft|active|expired|cancelled)$"
+    )
+    metadata: dict[str, Any] | None = None
+
+
+class CommissionAgreementResponse(BaseModel):
+    """CommissionAgreement as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    broker_id: UUID
+    development_id: UUID | None = None
+    specific_plot_ids: list[Any] | None = None
+    structure_type: str = "percent"
+    structure: dict[str, Any] = Field(default_factory=dict)
+    accrual_trigger: str = "spa_signed"
+    payout_terms: str = "net30"
+    withholding_tax_pct: Decimal = Decimal("0")
+    currency: str = ""
+    effective_from: str = ""
+    effective_to: str | None = None
+    status: str = "draft"
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, validation_alias="metadata_"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+# ── CommissionAccrual ───────────────────────────────────────────────────
+
+
+class CommissionAccrualResponse(BaseModel):
+    """CommissionAccrual as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    agreement_id: UUID
+    broker_id: UUID
+    trigger_event: str = ""
+    trigger_entity_type: str = ""
+    trigger_entity_id: UUID | None = None
+    base_amount: Decimal = Decimal("0")
+    commission_amount: Decimal = Decimal("0")
+    currency: str = ""
+    state: str = "accrued"
+    accrued_at: datetime | None = None
+    approved_at: datetime | None = None
+    paid_at: datetime | None = None
+    payment_ref: str | None = None
+    withholding_amount: Decimal = Decimal("0")
+    net_payable: Decimal = Decimal("0")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, validation_alias="metadata_"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+class CommissionAccrualPayRequest(BaseModel):
+    """Payload for /commission-accruals/{id}/pay."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    payment_ref: str = Field(..., min_length=1, max_length=255)
+
+
+# ── EscrowAccount ───────────────────────────────────────────────────────
+
+
+class EscrowAccountCreate(BaseModel):
+    """Create a regulator-supervised EscrowAccount."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    development_id: UUID
+    regulator_ref: str = Field(..., pattern=_REGULATOR_REF_PATTERN)
+    regulator_account_number: str = Field(default="", max_length=120)
+    bank_name: str = Field(default="", max_length=255)
+    iban: str = Field(default="", max_length=40)
+    swift_bic: str = Field(default="", max_length=16)
+    currency: str = Field(..., min_length=3, max_length=8)
+    opened_at: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    is_active: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("iban")
+    @classmethod
+    def _iban_format(cls, v: str) -> str:
+        return _validate_iban(v)
+
+
+class EscrowAccountUpdate(BaseModel):
+    """Partial update for an EscrowAccount."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    regulator_account_number: str | None = Field(default=None, max_length=120)
+    bank_name: str | None = Field(default=None, max_length=255)
+    iban: str | None = Field(default=None, max_length=40)
+    swift_bic: str | None = Field(default=None, max_length=16)
+    closed_at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    is_active: bool | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("iban")
+    @classmethod
+    def _iban_format(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return _validate_iban(v)
+
+
+class EscrowAccountResponse(BaseModel):
+    """EscrowAccount as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    development_id: UUID
+    regulator_ref: str = "other"
+    regulator_account_number: str = ""
+    bank_name: str = ""
+    iban: str = ""
+    swift_bic: str = ""
+    currency: str = ""
+    opened_at: str = ""
+    closed_at: str | None = None
+    is_active: bool = True
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, validation_alias="metadata_"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+class EscrowBalanceResponse(BaseModel):
+    """Computed balance for an EscrowAccount as of a given date."""
+
+    escrow_account_id: UUID
+    currency: str
+    as_of_date: str | None = None
+    credit_total: Decimal = Decimal("0")
+    debit_total: Decimal = Decimal("0")
+    balance: Decimal = Decimal("0")
+    transaction_count: int = 0
+    unreconciled_count: int = 0
+
+
+# ── EscrowTransaction ───────────────────────────────────────────────────
+
+
+class EscrowTransactionCreate(BaseModel):
+    """Create an EscrowTransaction.
+
+    ``amount`` is typed ``Decimal`` but we run the gt=0 check inside a
+    custom validator so a failing input doesn't end up as a Decimal in
+    the 422 response body (FastAPI's default JSON encoder raises
+    ``TypeError: Decimal is not JSON serializable`` when the error's
+    ``input`` field holds a Decimal). Manual validation keeps the
+    rejected value as the original string.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    escrow_account_id: UUID
+    direction: str = Field(..., pattern=r"^(debit|credit)$")
+    amount: Decimal
+    currency: str = Field(..., min_length=3, max_length=8)
+    source_type: str = Field(
+        ...,
+        pattern=r"^(instalment|refund|draw_request|bank_charge|interest|transfer)$",
+    )
+    source_instalment_id: UUID | None = None
+    source_reference: str = Field(default="", max_length=255)
+    bank_reference: str | None = Field(default=None, max_length=255)
+    transaction_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _amount_positive(cls, v: Any) -> Any:
+        try:
+            d = Decimal(str(v))
+        except (TypeError, ValueError, ArithmeticError) as exc:
+            raise ValueError("amount must be a valid decimal") from exc
+        if d <= 0:
+            raise ValueError("amount must be greater than 0")
+        return d
+
+
+class EscrowTransactionUpdate(BaseModel):
+    """Partial update for an EscrowTransaction."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    source_reference: str | None = Field(default=None, max_length=255)
+    bank_reference: str | None = Field(default=None, max_length=255)
+    metadata: dict[str, Any] | None = None
+
+
+class EscrowTransactionResponse(BaseModel):
+    """EscrowTransaction as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    escrow_account_id: UUID
+    direction: str = "credit"
+    amount: Decimal = Decimal("0")
+    currency: str = ""
+    source_type: str = "instalment"
+    source_instalment_id: UUID | None = None
+    source_reference: str = ""
+    bank_reference: str | None = None
+    transaction_date: str = ""
+    reconciliation_state: str = "unreconciled"
+    reconciled_at: datetime | None = None
+    reconciled_by_user_id: UUID | None = None
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, validation_alias="metadata_"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+class EscrowTransactionReconcileRequest(BaseModel):
+    """Payload for /escrow-transactions/{id}/reconcile."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    bank_reference: str = Field(..., min_length=1, max_length=255)
+
+
+# ── PriceMatrix ─────────────────────────────────────────────────────────
+
+
+_PRICE_MATRIX_FACTOR_TYPES = (
+    "floor",
+    "view",
+    "orientation",
+    "corner",
+    "launch_discount",
+    "phase_escalator",
+)
+
+
+class PriceMatrixRule(BaseModel):
+    """One pricing rule inside a :class:`PriceMatrix`."""
+
+    factor_type: str = Field(
+        ...,
+        pattern=(
+            r"^(floor|view|orientation|corner|launch_discount|phase_escalator)$"
+        ),
+    )
+    condition: dict[str, Any] = Field(default_factory=dict)
+    multiplier: Decimal = Field(..., gt=0)
+
+
+class PriceMatrixCreate(BaseModel):
+    """Create a PriceMatrix."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    development_id: UUID
+    name: str = Field(..., min_length=1, max_length=255)
+    base_price_per_m2: Decimal = Field(..., ge=0)
+    currency: str = Field(..., min_length=3, max_length=8)
+    effective_from: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    effective_to: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    rules: list[PriceMatrixRule] = Field(default_factory=list)
+    status: str = Field(
+        default="draft", pattern=r"^(draft|active|expired|archived)$"
+    )
+    version: int = Field(default=1, ge=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_dates(self) -> "PriceMatrixCreate":
+        _validate_iso_date_order(
+            self.effective_from, self.effective_to, field_pair="price_matrix"
+        )
+        return self
+
+
+class PriceMatrixUpdate(BaseModel):
+    """Partial update for a PriceMatrix."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    base_price_per_m2: Decimal | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=8)
+    effective_from: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    effective_to: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    rules: list[PriceMatrixRule] | None = None
+    status: str | None = Field(
+        default=None, pattern=r"^(draft|active|expired|archived)$"
+    )
+    version: int | None = Field(default=None, ge=1)
+    metadata: dict[str, Any] | None = None
+
+
+class PriceMatrixResponse(BaseModel):
+    """PriceMatrix as returned by the API."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: UUID
+    development_id: UUID
+    name: str
+    base_price_per_m2: Decimal = Decimal("0")
+    currency: str = ""
+    effective_from: str = ""
+    effective_to: str | None = None
+    rules: list[Any] = Field(default_factory=list)
+    status: str = "draft"
+    version: int = 1
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, validation_alias="metadata_"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+class PriceMatrixPreviewResponse(BaseModel):
+    """Pricing breakdown produced by ``service.compute_plot_price``."""
+
+    plot_id: UUID
+    matrix_id: UUID | None = None
+    currency: str = ""
+    base_price_per_m2: Decimal = Decimal("0")
+    area_m2: Decimal = Decimal("0")
+    base_price: Decimal = Decimal("0")
+    applied_rules: list[dict[str, Any]] = Field(default_factory=list)
+    combined_multiplier: Decimal = Decimal("1")
+    final_price: Decimal = Decimal("0")
+
+
+class PriceMatrixBulkRecomputeResponse(BaseModel):
+    """Result of /price-matrices/{id}/bulk-recompute."""
+
+    matrix_id: UUID
+    development_id: UUID
+    plots_updated: int = 0
+    plots_unchanged: int = 0
+
+
+# ── Regulator report ────────────────────────────────────────────────────
+
+
+class RegulatorReportResponse(BaseModel):
+    """JSON envelope returned alongside the generated PDF."""
+
+    development_id: UUID
+    regulator: str
+    quarter: str
+    generated_at: datetime
+    currency: str = ""
+    summary: dict[str, Any] = Field(default_factory=dict)
+    pdf_size_bytes: int = 0
+    pdf_base64: str = ""
+
+
+__all_task_138__ = (
+    "BlockCreate",
+    "BlockResponse",
+    "BlockUpdate",
+    "BrokerCreate",
+    "BrokerResponse",
+    "BrokerUpdate",
+    "CommissionAccrualPayRequest",
+    "CommissionAccrualResponse",
+    "CommissionAgreementCreate",
+    "CommissionAgreementResponse",
+    "CommissionAgreementUpdate",
+    "EscrowAccountCreate",
+    "EscrowAccountResponse",
+    "EscrowAccountUpdate",
+    "EscrowBalanceResponse",
+    "EscrowTransactionCreate",
+    "EscrowTransactionReconcileRequest",
+    "EscrowTransactionResponse",
+    "EscrowTransactionUpdate",
+    "FlatCommissionStructure",
+    "LadderCommissionStructure",
+    "LadderTier",
+    "PercentCommissionStructure",
+    "PhaseCreate",
+    "PhaseResponse",
+    "PhaseUpdate",
+    "PriceMatrixBulkRecomputeResponse",
+    "PriceMatrixCreate",
+    "PriceMatrixPreviewResponse",
+    "PriceMatrixResponse",
+    "PriceMatrixRule",
+    "PriceMatrixUpdate",
+    "RegulatorReportResponse",
+)
