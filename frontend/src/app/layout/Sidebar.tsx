@@ -51,6 +51,10 @@ import {
   Search,
   Pin,
   PinOff,
+  Eye,
+  EyeOff,
+  Pencil,
+  Check,
   Github,
   HardDrive,
   Link2,
@@ -245,12 +249,9 @@ const navGroups: NavGroup[] = [
         icon: Building2,
         advancedOnly: true,
       },
-      {
-        labelKey: 'nav.property_dev_validation_rules',
-        to: '/property-dev/settings/validation-rules',
-        icon: Building2,
-        advancedOnly: true,
-      },
+      // Validation Rules used to sit here but it's a platform-wide
+      // catalogue (BOQ / CAD / tender / takeoff), not PropDev-specific.
+      // It now lives in the admin grid at /admin/validation-rules.
       {
         labelKey: 'nav.property_dev_doc_templates',
         to: '/property-dev/settings/document-templates',
@@ -430,6 +431,11 @@ const adminGridItems: NavItem[] = [
     icon: ShieldCheck,
     roleGate: ['admin', 'manager'],
   },
+  {
+    labelKey: 'sidebar.admin_grid.validation_rules',
+    to: '/admin/validation-rules',
+    icon: ShieldCheck,
+  },
   { labelKey: 'sidebar.admin_grid.modules', to: '/modules', icon: Package },
   { labelKey: 'sidebar.admin_grid.settings', to: '/settings', icon: Settings },
   { labelKey: 'sidebar.admin_grid.about', to: '/about', icon: Info },
@@ -449,6 +455,11 @@ const ALL_NAV_ITEMS: Record<string, NavItem> = (() => {
 // localStorage key for collapsed state
 const COLLAPSED_KEY = 'oe_sidebar_collapsed';
 const PINNED_KEY = 'oe_sidebar_pinned';
+// Per-user menu-editor key: array of NavItem `to` strings that the user
+// has chosen to hide from the sidebar. Read at mount, written only on
+// "Save" inside edit mode. Cancel reverts the in-memory working set
+// back to whatever was persisted.
+const HIDDEN_MODULES_KEY = 'oe.sidebar_hidden_modules';
 
 function readCollapsedState(): Record<string, boolean> {
   try {
@@ -484,6 +495,27 @@ function readPinned(): string[] {
 function writePinned(arr: string[]) {
   try {
     localStorage.setItem(PINNED_KEY, JSON.stringify(arr));
+  } catch {
+    /* ignore */
+  }
+}
+
+function readHiddenModules(): string[] {
+  try {
+    const raw = localStorage.getItem(HIDDEN_MODULES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((p) => typeof p === 'string');
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+function writeHiddenModules(arr: string[]) {
+  try {
+    localStorage.setItem(HIDDEN_MODULES_KEY, JSON.stringify(arr));
   } catch {
     /* ignore */
   }
@@ -626,6 +658,47 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   // pin/unpin via the small icon-button that appears on item hover.
   const [pinned, setPinned] = useState<string[]>(() => readPinned());
 
+  // ── Menu editor state ───────────────────────────────────────────────
+  // `hiddenModules` is the *persisted* set — drives which rows are
+  // filtered out of the rendered nav in normal mode.
+  // `editMode` is the transient "Edit menu" toggle.
+  // `editingHidden` is the in-memory working copy users edit while in
+  // edit mode; only committed to `hiddenModules` + localStorage on Save.
+  const [hiddenModules, setHiddenModules] = useState<string[]>(() =>
+    readHiddenModules(),
+  );
+  const [editMode, setEditMode] = useState(false);
+  const [editingHidden, setEditingHidden] = useState<string[]>([]);
+
+  const enterEditMode = useCallback(() => {
+    setEditingHidden(hiddenModules);
+    setEditMode(true);
+  }, [hiddenModules]);
+
+  const cancelEditMode = useCallback(() => {
+    setEditMode(false);
+    setEditingHidden([]);
+  }, []);
+
+  const saveEditMode = useCallback(() => {
+    setHiddenModules(editingHidden);
+    writeHiddenModules(editingHidden);
+    setEditMode(false);
+    setEditingHidden([]);
+  }, [editingHidden]);
+
+  const toggleItemHidden = useCallback((route: string) => {
+    setEditingHidden((prev) =>
+      prev.includes(route) ? prev.filter((r) => r !== route) : [...prev, route],
+    );
+  }, []);
+
+  // Set used by the render loop to decide whether to hide a row. In edit
+  // mode the user sees EVERYTHING (so they can re-enable items) — only
+  // normal mode actually filters. The visual "muted" state is driven by
+  // `editingHidden` so re-enabled rows visually un-mute immediately.
+  const effectiveHidden = editMode ? [] : hiddenModules;
+
   // Custom-module request dialog — opens from the "Request a custom
   // module" CTA at the bottom of the nav (below the "+ Add module"
   // developer-guide tile). The dialog itself handles community vs
@@ -718,10 +791,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
   // Resolve pinned route strings into full NavItems (skipping any
   // routes that are no longer in the registry — e.g. a module the user
-  // pinned earlier has been disabled).
+  // pinned earlier has been disabled, or hidden via the menu editor).
+  // In edit mode we show the full pinned list so users can also see
+  // them; in normal mode we drop hidden routes.
   const pinnedItems: NavItem[] = pinned
     .map((route) => ALL_NAV_ITEMS[route])
-    .filter((item): item is NavItem => Boolean(item));
+    .filter((item): item is NavItem => Boolean(item))
+    .filter((item) => editMode || !hiddenModules.includes(item.to));
 
   // Pick a single winning route for highlighting. Without this, both
   // `/bim` (parent) and `/bim/rules` (child) would render as "active"
@@ -993,10 +1069,18 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           const visibleItems = allItems.filter(
             (item) =>
               (!item.moduleKey || isModuleEnabled(item.moduleKey)) &&
-              (!item.advancedOnly || isAdvanced),
+              (!item.advancedOnly || isAdvanced) &&
+              // Menu-editor filter — in normal mode, drop user-hidden
+              // rows; in edit mode `effectiveHidden` is empty so every
+              // row renders (muted via the editingHidden state below).
+              !effectiveHidden.includes(item.to),
           );
 
-          // Skip group if no visible items
+          // Skip group if no visible items. In normal mode this means
+          // "every item in this group is user-hidden or unavailable" —
+          // so the group header itself disappears (per spec). In edit
+          // mode `effectiveHidden` is empty, so users can always reach
+          // any group to re-enable rows inside it.
           if (visibleItems.length === 0) return null;
 
           const isCollapsed = collapsed[group.id] ?? false;

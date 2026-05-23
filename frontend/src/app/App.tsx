@@ -24,7 +24,7 @@ import { useModuleRouteElements } from '@/modules/ModuleRoutes';
 import { DatabaseSetupPage } from '@/features/setup';
 import { IntegrationsPage } from '@/features/integrations';
 import { AboutPage } from '@/features/about/AboutPage';
-import { Logo, ShortcutsDialog, CommandPalette, ToastContainer, ErrorBoundary, NotFoundPage, OnboardingTour, OfflineBanner, PWAInstallPrompt } from '@/shared/ui';
+import { Logo, ShortcutsDialog, CommandPalette, ToastContainer, ErrorBoundary, NotFoundPage, OnboardingTour, ProductTour, OfflineBanner, PWAInstallPrompt } from '@/shared/ui';
 import GlobalSearchModal from '@/features/search/GlobalSearchModal';
 import { useGlobalSearchStore } from '@/stores/useGlobalSearchStore';
 import { FloatingQueuePanel } from './layout/FloatingQueuePanel';
@@ -255,7 +255,7 @@ const PropertyDevHouseTypeSettingsPage = lazy(() =>
     default: m.HouseTypeSettingsPage,
   }))
 );
-const PropertyDevValidationRulesSettingsPage = lazy(() =>
+const ValidationRulesSettingsPage = lazy(() =>
   import('@/features/property-dev').then((m) => ({
     default: m.ValidationRulesSettingsPage,
   })),
@@ -579,6 +579,13 @@ export default function App() {
           a click-but-not-completed flow restarted from step 1 on the
           next page. */}
       {isAuthenticated && <OnboardingTour />}
+      {/* First-run product tour — 8-step spotlight walk-through.  Always
+          mounted (for authenticated users) but renders nothing unless
+          active; auto-starts on the dashboard the first time a user logs
+          in (gated by `oe.tour_completed` in localStorage) and listens
+          for the `oe:start-tour` window event so the WhatsNewCard /
+          Help menu can (re-)launch it on demand. */}
+      {isAuthenticated && <ProductTour />}
       <Routes>
         {/* Public share-link landing page — no auth required, no app shell */}
         <Route path="/share/:token" element={<SharePage />} />
@@ -717,6 +724,9 @@ export default function App() {
         <Route path="/users" element={<P title="User Management"><UserManagementPage /></P>} />
         <Route path="/admin/audit-log" element={<P title="Audit Log"><AuditLogPage /></P>} />
         <Route path="/admin/permissions" element={<P title="Permissions Matrix"><PermissionsMatrixPage /></P>} />
+        <Route path="/admin/validation-rules" element={<P title="Validation Rules"><ValidationRulesSettingsPage /></P>} />
+        {/* Legacy redirect — moved 2026-05-23 from PropDev settings to platform-wide admin. */}
+        <Route path="/property-dev/settings/validation-rules" element={<Navigate to="/admin/validation-rules" replace />} />
         <Route path="/modules" element={<P title="Modules"><ModulesPage /></P>} />
         <Route path="/modules/developer-guide" element={<P title="Module Developer Guide"><ModuleDeveloperGuide /></P>} />
 
@@ -761,12 +771,6 @@ export default function App() {
           path="/property-dev/settings/house-types"
           element={
             <P title="House Type Catalogue"><PropertyDevHouseTypeSettingsPage /></P>
-          }
-        />
-        <Route
-          path="/property-dev/settings/validation-rules"
-          element={
-            <P title="Validation Rules"><PropertyDevValidationRulesSettingsPage /></P>
           }
         />
         <Route

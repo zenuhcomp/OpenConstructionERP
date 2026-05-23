@@ -2417,23 +2417,145 @@ export function previewPropDevDocument(
 
 /* ── Document Template catalogue (settings page) ──────────────────────── */
 
+export type CustomDocType =
+  | 'custom'
+  | 'snag_report'
+  | 'invoice'
+  | 'payment_reminder'
+  | 'kyc_checklist'
+  | 'brokerage_commission';
+
+/**
+ * Catalogue entry: either a built-in PropDev PDF generator
+ * (``is_custom: false``) or a tenant-uploaded template
+ * (``is_custom: true``). Both shapes share the metadata fields; only
+ * custom entries carry storage info (id, filename, content_type, …).
+ */
 export interface DocumentTemplateEntry {
-  doc_type: PropDevDocType;
+  doc_type: PropDevDocType | CustomDocType | string;
   title: string;
   description: string;
   trigger: string;
   entity: string;
   pages: string;
+  is_custom?: boolean;
+  // Present only when is_custom === true
+  id?: string;
+  filename?: string;
+  content_type?: string;
+  size_bytes?: number;
+  development_id?: string | null;
+  project_id?: string | null;
+  created_at?: string | null;
+}
+
+export interface DocumentTemplateVariableGroup {
+  group: string;
+  label: string;
+  vars: { key: string; desc: string }[];
+}
+
+export interface DocumentTemplateUploadConfig {
+  allowed_extensions: string[];
+  max_size_mb: number;
 }
 
 export interface DocumentTemplateCatalogue {
   templates: DocumentTemplateEntry[];
   locales: string[];
   regulators: string[];
+  variables?: DocumentTemplateVariableGroup[];
+  upload?: DocumentTemplateUploadConfig;
 }
 
-export function listDocumentTemplates(): Promise<DocumentTemplateCatalogue> {
-  return apiGet<DocumentTemplateCatalogue>(`${BASE}/document-templates/`);
+export function listDocumentTemplates(
+  developmentId?: string,
+): Promise<DocumentTemplateCatalogue> {
+  const qs = developmentId
+    ? `?development_id=${encodeURIComponent(developmentId)}`
+    : '';
+  return apiGet<DocumentTemplateCatalogue>(
+    `${BASE}/document-templates/${qs}`,
+  );
+}
+
+/**
+ * Upload a tenant-owned custom template (.docx / .html / .pdf / .odt / …).
+ *
+ * Multipart form-data. Backend caps file size at 10 MB and validates the
+ * extension server-side.
+ */
+export async function uploadCustomDocumentTemplate(opts: {
+  file: File;
+  name: string;
+  doc_type: string;
+  entity: string;
+  trigger?: string;
+  description?: string;
+  project_id?: string;
+  development_id?: string;
+}): Promise<DocumentTemplateEntry> {
+  const form = new FormData();
+  form.append('file', opts.file);
+  const params = new URLSearchParams();
+  params.set('name', opts.name);
+  params.set('doc_type', opts.doc_type);
+  params.set('entity', opts.entity);
+  if (opts.trigger) params.set('trigger', opts.trigger);
+  if (opts.description) params.set('description', opts.description);
+  if (opts.project_id) params.set('project_id', opts.project_id);
+  if (opts.development_id) params.set('development_id', opts.development_id);
+
+  // Multipart needs the browser to set Content-Type with its own boundary,
+  // so we can't reuse the apiPost JSON wrapper — issue the fetch directly
+  // and attach the JWT manually.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+  const { useAuthStore } = require('@/stores/useAuthStore');
+  const token = useAuthStore.getState().accessToken as string | null;
+  const headers: Record<string, string> = { 'X-DDC-Client': 'OE/1.0' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(
+    `/api/v1/property-dev/document-templates/upload?${params.toString()}`,
+    { method: 'POST', headers, body: form },
+  );
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try {
+      const j = (await res.json()) as { detail?: string };
+      if (j?.detail) detail = j.detail;
+    } catch {
+      try {
+        detail = await res.text();
+      } catch {
+        /* ignore */
+      }
+    }
+    throw new Error(detail);
+  }
+  return (await res.json()) as DocumentTemplateEntry;
+}
+
+export function deleteCustomDocumentTemplate(
+  templateId: string,
+): Promise<void> {
+  return apiDelete<void>(
+    `${BASE}/document-templates/custom/${encodeURIComponent(templateId)}`,
+  );
+}
+
+/**
+ * Absolute download URL for a previously-uploaded custom template. The
+ * endpoint streams the original bytes with the original filename in
+ * Content-Disposition. RBAC + project-ownership gated, so an
+ * unauthorised browser tab will hit 401 / 404.
+ */
+export function customDocumentTemplateDownloadUrl(
+  templateId: string,
+): string {
+  return `/api/v1/property-dev/document-templates/custom/${encodeURIComponent(
+    templateId,
+  )}/download`;
 }
 
 export interface SampleDocumentPreview extends PropDevDocPreview {

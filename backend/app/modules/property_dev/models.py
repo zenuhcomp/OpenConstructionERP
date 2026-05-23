@@ -1645,6 +1645,69 @@ class PropertyDevHouseType(Base):
         )
 
 
+class PropertyDevCustomTemplate(Base):
+    """User-uploaded document template (.docx / .html / .pdf).
+
+    Settings page entry alongside the six built-in PDF generators in
+    :mod:`app.modules.property_dev.document_templates`. The actual
+    template file is written to ``uploads/property_dev/custom_templates/``
+    by the upload endpoint; the row carries only metadata.
+
+    Scoping: ``project_id`` is the owning project (and matches every
+    other property_dev row). ``development_id`` is optional — populated
+    when the operator wants a template available only inside a
+    specific development context (the settings page's "set default
+    for current development" toggle persists this client-side).
+
+    ``doc_type`` is intentionally a free string: tenants may want to
+    introduce types beyond the six built-ins ("brokerage_commission",
+    "kyc_checklist", "payment_reminder", "snag_report", "invoice", ...).
+    Validation lives in the upload endpoint (length + allowed
+    characters), not at the database layer.
+    """
+
+    __tablename__ = "oe_property_dev_custom_template"
+
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("oe_projects_project.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # Optional development scope (no FK — same convention as the rest
+    # of property_dev cross-table refs).
+    development_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    doc_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="custom", server_default="custom",
+        index=True,
+    )
+    entity: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="custom", server_default="custom"
+    )
+    trigger: Mapped[str] = mapped_column(
+        String(200), nullable=False, default="manual", server_default="manual"
+    )
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), nullable=True, index=True
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<PropertyDevCustomTemplate {self.name} "
+            f"({self.doc_type}, {self.filename})>"
+        )
+
+
 __all__ = [
     "Block",
     "Broker",
@@ -1669,6 +1732,7 @@ __all__ = [
     "Phase",
     "Plot",
     "PriceMatrix",
+    "PropertyDevCustomTemplate",
     "PropertyDevHouseType",
     "Reservation",
     "SalesContract",

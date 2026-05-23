@@ -3862,29 +3862,500 @@ _DOC_TEMPLATE_CATALOGUE: list[dict[str, Any]] = [
 ]
 
 
+_CUSTOM_TEMPLATES_DIR = Path("uploads/property_dev/custom_templates")
+_CUSTOM_TEMPLATE_MAX_MB = 10
+_CUSTOM_TEMPLATE_MAX_BYTES = _CUSTOM_TEMPLATE_MAX_MB * 1024 * 1024
+_ALLOWED_CUSTOM_TEMPLATE_EXTENSIONS: tuple[str, ...] = (
+    ".docx", ".html", ".htm", ".pdf", ".odt", ".md", ".txt",
+)
+_ALLOWED_CUSTOM_DOC_TYPES: tuple[str, ...] = (
+    "custom",
+    "reservation_receipt",
+    "sales_contract",
+    "payment_receipt",
+    "handover_certificate",
+    "warranty_certificate",
+    "noc",
+    "snag_report",
+    "invoice",
+    "payment_reminder",
+    "kyc_checklist",
+    "brokerage_commission",
+)
+_ALLOWED_CUSTOM_ENTITIES: tuple[str, ...] = (
+    "custom", "reservation", "sales_contract", "instalment", "handover",
+    "snag", "broker", "buyer", "plot", "development",
+)
+_CUSTOM_TEMPLATE_LOG = logging.getLogger(__name__ + ".custom_templates")
+
+
+# Documentation block for the "{i} Variables" modal in the settings
+# page. Kept in code (not a YAML file) because it mirrors the public
+# fields of the ORM models below — they move together at refactor time.
+_TEMPLATE_VARIABLES_DOCUMENTATION: list[dict[str, Any]] = [
+    {
+        "group": "development",
+        "label": "Development",
+        "vars": [
+            {"key": "{development.name}", "desc": "Development name"},
+            {"key": "{development.code}", "desc": "Short development code"},
+            {"key": "{development.country_code}", "desc": "ISO-3166 alpha-2"},
+            {"key": "{development.dev_type}", "desc": "residential, mixed_use, …"},
+            {"key": "{development.total_area_m2}", "desc": "Total m²"},
+            {"key": "{development.currency}", "desc": "ISO-4217 (e.g. EUR)"},
+            {"key": "{development.developer_name}", "desc": "Developer entity"},
+        ],
+    },
+    {
+        "group": "plot",
+        "label": "Plot",
+        "vars": [
+            {"key": "{plot.plot_number}", "desc": "Plot number / ID"},
+            {"key": "{plot.area_m2}", "desc": "Plot area in m²"},
+            {"key": "{plot.house_type_label}", "desc": "House-type display label"},
+            {"key": "{plot.phase_code}", "desc": "Phase code (metadata)"},
+            {"key": "{plot.block_code}", "desc": "Block code (metadata)"},
+            {"key": "{plot.currency}", "desc": "Plot's pricing currency"},
+        ],
+    },
+    {
+        "group": "buyer",
+        "label": "Buyer",
+        "vars": [
+            {"key": "{buyer.full_name}", "desc": "Full legal name"},
+            {"key": "{buyer.email}", "desc": "Primary contact email"},
+            {"key": "{buyer.party_role}", "desc": "primary / secondary"},
+            {"key": "{buyer.ownership_pct}", "desc": "Ownership percentage"},
+        ],
+    },
+    {
+        "group": "reservation",
+        "label": "Reservation",
+        "vars": [
+            {"key": "{reservation.reservation_number}", "desc": "RES-YYYY-NNNN"},
+            {"key": "{reservation.deposit_amount}", "desc": "Deposit paid"},
+            {"key": "{reservation.expires_at}", "desc": "Reservation expiry"},
+            {"key": "{reservation.cooling_off_until}", "desc": "Cooling-off date"},
+        ],
+    },
+    {
+        "group": "contract",
+        "label": "Sales Contract",
+        "vars": [
+            {"key": "{contract.contract_number}", "desc": "SPA-YYYY-NNNN"},
+            {"key": "{contract.total_value}", "desc": "Total contract value"},
+            {"key": "{contract.currency}", "desc": "Contract currency"},
+            {"key": "{contract.status}", "desc": "draft / signed / executed"},
+            {"key": "{contract.signing_date}", "desc": "ISO date"},
+            {"key": "{contract.place}", "desc": "Place of signing"},
+        ],
+    },
+    {
+        "group": "handover",
+        "label": "Handover",
+        "vars": [
+            {"key": "{handover.scheduled_at}", "desc": "Planned handover date"},
+            {"key": "{handover.completed_at}", "desc": "Actual handover date"},
+            {"key": "{handover.keys_handed_over_at}", "desc": "Keys-handed-over date"},
+            {"key": "{handover.snag_count}", "desc": "Open snags at handover"},
+        ],
+    },
+    {
+        "group": "instalment",
+        "label": "Instalment",
+        "vars": [
+            {"key": "{instalment.sequence}", "desc": "Sequence number"},
+            {"key": "{instalment.milestone_label}", "desc": "Milestone label"},
+            {"key": "{instalment.due_date}", "desc": "Due date (ISO)"},
+            {"key": "{instalment.amount}", "desc": "Instalment amount"},
+            {"key": "{instalment.amount_paid}", "desc": "Amount paid"},
+        ],
+    },
+]
+
+
 @router.get("/document-templates/")
 async def list_document_templates(
-    _user_payload: CurrentUserPayload,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    development_id: uuid.UUID | None = Query(default=None),
     _perm: None = Depends(RequirePermission("property_dev.read")),
 ) -> dict[str, Any]:
-    """List built-in property-development document templates.
+    """List property-development document templates.
 
-    Returns the six PDF generators shipped with the platform plus the
-    supported locales and jurisdictions. Templates themselves are
-    source-of-truth code (``document_templates.py``); this endpoint
-    exposes their metadata so the settings UI can render a real
-    catalogue with previews instead of an empty stub.
+    Returns the six built-in PDF generators shipped with the platform
+    plus any tenant-uploaded custom templates owned by the calling
+    user's projects. Also returns the supported locales / jurisdictions
+    and a documentation block describing the variables custom
+    templates may interpolate.
+
+    Built-in templates themselves are source-of-truth code in
+    ``document_templates.py``; this endpoint exposes their metadata so
+    the settings UI can render a real catalogue with previews instead
+    of an empty stub. Custom templates land in
+    ``oe_property_dev_custom_template`` with their files under
+    ``uploads/property_dev/custom_templates/``.
     """
+    from sqlalchemy import select
+
     from app.modules.property_dev.document_templates import (
         SUPPORTED_LOCALES,
         SUPPORTED_REGULATORS,
     )
+    from app.modules.property_dev.models import PropertyDevCustomTemplate
+
+    # Resolve owning project IDs for the calling user. Admins see every
+    # uploaded template; everyone else sees only templates from projects
+    # they own. The query is bounded by RBAC + the explicit list of
+    # owned project IDs — no cross-tenant leakage.
+    is_admin = user_payload.get("role") == "admin"
+    user_id = user_payload.get("sub") or user_payload.get("user_id")
+
+    stmt = select(PropertyDevCustomTemplate).order_by(
+        PropertyDevCustomTemplate.created_at.desc()
+    )
+    if not is_admin and user_id is not None:
+        from app.modules.projects.models import Project
+
+        proj_stmt = select(Project.id).where(Project.owner_id == user_id)
+        owned_ids = (await session.execute(proj_stmt)).scalars().all()
+        if not owned_ids:
+            stmt = stmt.where(PropertyDevCustomTemplate.id == uuid.UUID(int=0))
+        else:
+            stmt = stmt.where(
+                PropertyDevCustomTemplate.project_id.in_(owned_ids)
+            )
+
+    if development_id is not None:
+        stmt = stmt.where(
+            (PropertyDevCustomTemplate.development_id == development_id)
+            | (PropertyDevCustomTemplate.development_id.is_(None))
+        )
+
+    rows = (await session.execute(stmt)).scalars().all()
+    custom_entries: list[dict[str, Any]] = []
+    for row in rows:
+        custom_entries.append({
+            "id": str(row.id),
+            "doc_type": row.doc_type,
+            "title": row.name,
+            "description": row.description or "",
+            "trigger": row.trigger,
+            "entity": row.entity,
+            "pages": "—",
+            "is_custom": True,
+            "filename": row.filename,
+            "content_type": row.content_type,
+            "size_bytes": row.size_bytes,
+            "development_id": (
+                str(row.development_id) if row.development_id else None
+            ),
+            "project_id": str(row.project_id) if row.project_id else None,
+            "created_at": row.created_at.isoformat()
+            if row.created_at else None,
+        })
+
+    builtin_entries = [
+        {**tpl, "is_custom": False} for tpl in _DOC_TEMPLATE_CATALOGUE
+    ]
 
     return {
-        "templates": _DOC_TEMPLATE_CATALOGUE,
+        "templates": builtin_entries + custom_entries,
         "locales": list(SUPPORTED_LOCALES),
         "regulators": list(SUPPORTED_REGULATORS),
+        "variables": _TEMPLATE_VARIABLES_DOCUMENTATION,
+        "upload": {
+            "allowed_extensions": list(_ALLOWED_CUSTOM_TEMPLATE_EXTENSIONS),
+            "max_size_mb": _CUSTOM_TEMPLATE_MAX_MB,
+        },
     }
+
+
+def _validate_custom_template_metadata(
+    name: str,
+    doc_type: str,
+    entity: str,
+    trigger: str,
+) -> tuple[str, str, str, str]:
+    """Validate + normalise the upload's text metadata.
+
+    Raises 422 on any field that's empty, too long, or carries
+    characters that wouldn't make sense as a doc_type / entity.
+    """
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Template name is required",
+        )
+    if len(name) > 200:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Template name must be 200 characters or fewer",
+        )
+    doc_type = (doc_type or "custom").strip().lower()
+    if doc_type not in _ALLOWED_CUSTOM_DOC_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Unknown doc_type '{doc_type}'. Allowed: "
+                f"{', '.join(_ALLOWED_CUSTOM_DOC_TYPES)}"
+            ),
+        )
+    entity = (entity or "custom").strip().lower()
+    if entity not in _ALLOWED_CUSTOM_ENTITIES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Unknown entity '{entity}'. Allowed: "
+                f"{', '.join(_ALLOWED_CUSTOM_ENTITIES)}"
+            ),
+        )
+    trigger = (trigger or "manual").strip()
+    if len(trigger) > 200:
+        trigger = trigger[:200]
+    return name, doc_type, entity, trigger
+
+
+@router.post("/document-templates/upload", status_code=201)
+async def upload_custom_document_template(
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    file: UploadFile = File(...),
+    name: str = "",
+    doc_type: str = "custom",
+    entity: str = "custom",
+    trigger: str = "manual",
+    description: str = "",
+    project_id: uuid.UUID | None = None,
+    development_id: uuid.UUID | None = None,
+    _perm: None = Depends(RequirePermission("property_dev.create")),
+) -> dict[str, Any]:
+    """Upload a tenant-owned custom document template.
+
+    Accepts .docx / .html / .htm / .pdf / .odt / .md / .txt up to 10 MB.
+    The file lands in ``uploads/property_dev/custom_templates/`` with a
+    UUID-prefixed basename so two uploads with the same original
+    filename don't collide. Metadata is persisted to
+    ``oe_property_dev_custom_template`` and the row appears alongside
+    built-in templates on the settings page.
+    """
+    from sqlalchemy import select
+
+    from app.modules.projects.models import Project
+    from app.modules.property_dev.models import PropertyDevCustomTemplate
+
+    name, doc_type, entity, trigger = _validate_custom_template_metadata(
+        name, doc_type, entity, trigger,
+    )
+
+    raw_filename = file.filename or "template.bin"
+    ext = Path(raw_filename).suffix.lower()
+    if ext not in _ALLOWED_CUSTOM_TEMPLATE_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                f"Unsupported extension '{ext}'. Allowed: "
+                f"{', '.join(_ALLOWED_CUSTOM_TEMPLATE_EXTENSIONS)}"
+            ),
+        )
+
+    try:
+        content = await file.read()
+    except Exception:
+        _CUSTOM_TEMPLATE_LOG.exception("Unable to read template upload")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to read uploaded template",
+        )
+
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Uploaded file is empty",
+        )
+    if len(content) > _CUSTOM_TEMPLATE_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"Template exceeds {_CUSTOM_TEMPLATE_MAX_MB} MB limit"
+            ),
+        )
+
+    is_admin = user_payload.get("role") == "admin"
+    user_id_raw = user_payload.get("sub") or user_payload.get("user_id")
+    if user_id_raw is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        user_id = uuid.UUID(str(user_id_raw))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid user id")
+
+    resolved_project_id: uuid.UUID | None = None
+    if project_id is not None:
+        proj = await session.get(Project, project_id)
+        if proj is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if not is_admin and str(proj.owner_id) != str(user_id):
+            raise HTTPException(status_code=404, detail="Project not found")
+        resolved_project_id = project_id
+    else:
+        first_proj = (
+            await session.execute(
+                select(Project.id)
+                .where(Project.owner_id == user_id)
+                .limit(1),
+            )
+        ).scalar_one_or_none()
+        if first_proj is None and not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "No project found for current user. Create a project "
+                    "before uploading templates."
+                ),
+            )
+        resolved_project_id = first_proj
+
+    _CUSTOM_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    template_id = uuid.uuid4()
+    safe_basename = Path(raw_filename).name
+    stored_filename = f"{template_id.hex}_{safe_basename}"
+    filepath = _CUSTOM_TEMPLATES_DIR / stored_filename
+
+    try:
+        filepath.write_bytes(content)
+    except Exception:
+        _CUSTOM_TEMPLATE_LOG.exception("Unable to save template upload")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save template — storage error",
+        )
+
+    row = PropertyDevCustomTemplate(
+        id=template_id,
+        project_id=resolved_project_id,
+        development_id=development_id,
+        name=name,
+        doc_type=doc_type,
+        entity=entity,
+        trigger=trigger,
+        description=description.strip() or None,
+        filename=safe_basename,
+        storage_path=str(filepath.as_posix()),
+        content_type=file.content_type or "application/octet-stream",
+        size_bytes=len(content),
+        created_by=user_id,
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+
+    return {
+        "id": str(row.id),
+        "doc_type": row.doc_type,
+        "title": row.name,
+        "description": row.description or "",
+        "trigger": row.trigger,
+        "entity": row.entity,
+        "pages": "—",
+        "is_custom": True,
+        "filename": row.filename,
+        "content_type": row.content_type,
+        "size_bytes": row.size_bytes,
+        "development_id": (
+            str(row.development_id) if row.development_id else None
+        ),
+        "project_id": (
+            str(row.project_id) if row.project_id else None
+        ),
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+@router.delete("/document-templates/custom/{template_id}", status_code=204)
+async def delete_custom_document_template(
+    template_id: uuid.UUID,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> Response:
+    """Delete a tenant-uploaded custom template (file + row).
+
+    404s — never 403s — when the row is owned by a different tenant so
+    the endpoint can't be turned into a UUID-existence oracle.
+    """
+    from app.modules.projects.repository import ProjectRepository
+    from app.modules.property_dev.models import PropertyDevCustomTemplate
+
+    row = await session.get(PropertyDevCustomTemplate, template_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    is_admin = user_payload.get("role") == "admin"
+    user_id = user_payload.get("sub") or user_payload.get("user_id")
+    if not is_admin and row.project_id is not None:
+        proj = await ProjectRepository(session).get_by_id(row.project_id)
+        if proj is None or str(proj.owner_id) != str(user_id):
+            raise HTTPException(status_code=404, detail="Template not found")
+
+    try:
+        path = Path(row.storage_path)
+        if path.exists():
+            path.unlink()
+    except Exception:
+        _CUSTOM_TEMPLATE_LOG.warning(
+            "Could not unlink custom template file at %s", row.storage_path,
+            exc_info=True,
+        )
+
+    await session.delete(row)
+    await session.commit()
+    return Response(status_code=204)
+
+
+@router.get("/document-templates/custom/{template_id}/download")
+async def download_custom_document_template(
+    template_id: uuid.UUID,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> Response:
+    """Stream a previously-uploaded custom template back to the client.
+
+    Same ownership check as the delete endpoint — 404 (not 403) when
+    the caller doesn't own the row.
+    """
+    from app.modules.projects.repository import ProjectRepository
+    from app.modules.property_dev.models import PropertyDevCustomTemplate
+
+    row = await session.get(PropertyDevCustomTemplate, template_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    is_admin = user_payload.get("role") == "admin"
+    user_id = user_payload.get("sub") or user_payload.get("user_id")
+    if not is_admin and row.project_id is not None:
+        proj = await ProjectRepository(session).get_by_id(row.project_id)
+        if proj is None or str(proj.owner_id) != str(user_id):
+            raise HTTPException(status_code=404, detail="Template not found")
+
+    path = Path(row.storage_path)
+    if not path.exists():
+        raise HTTPException(
+            status_code=410,
+            detail="Template file missing from storage",
+        )
+    data = path.read_bytes()
+    return Response(
+        content=data,
+        media_type=row.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{row.filename}"'
+            ),
+        },
+    )
 
 
 @router.post("/document-templates/{doc_type}/sample-preview")

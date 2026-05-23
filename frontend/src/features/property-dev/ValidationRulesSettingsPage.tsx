@@ -20,11 +20,14 @@
  */
 
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertOctagon,
   AlertTriangle,
+  ArrowRight,
+  BookOpen,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -89,13 +92,9 @@ export function ValidationRulesSettingsPage() {
     <div className="space-y-4">
       <Breadcrumb
         items={[
-          { label: t('nav.settings', { defaultValue: 'Settings' }) },
+          { label: t('nav.group_admin', { defaultValue: 'Admin' }) },
           {
-            label: t('nav.property_dev', { defaultValue: 'Property Development' }),
-            to: '/property-dev',
-          },
-          {
-            label: t('property_dev.validation_rules.title', {
+            label: t('validation_rules.title', {
               defaultValue: 'Validation rules',
             }),
           },
@@ -106,16 +105,50 @@ export function ValidationRulesSettingsPage() {
           <div className="flex-1 min-w-[260px]">
             <h1 className="flex items-center gap-2 text-lg font-semibold text-content-primary">
               <ShieldCheck size={18} className="text-oe-blue" />
-              {t('property_dev.validation_rules.title', {
+              {t('validation_rules.title', {
                 defaultValue: 'Validation rule catalogue',
               })}
             </h1>
-            <p className="mt-1 text-xs text-content-tertiary">
-              {t('property_dev.validation_rules.subtitle', {
-                defaultValue:
-                  'Every rule the engine registered at boot. Severity, standard and category are part of each rule\'s identity — change them in code, redeploy, then they appear here. Per-project rule selection happens when a validation run is triggered (via the ``rule_sets`` argument).',
-              })}
-            </p>
+            <div className="mt-1 space-y-1.5 text-xs text-content-tertiary">
+              <p>
+                {t('validation_rules.intro_1', {
+                  defaultValue:
+                    'All validation rules built into OpenConstructionERP. Use this catalogue to see what gets checked on every import (BOQs, CAD models, tender data, takeoff results).',
+                })}
+              </p>
+              <p>
+                {t('validation_rules.intro_2', {
+                  defaultValue:
+                    'Browse by severity (errors block, warnings flag, info suggests), by standard (DIN 276 / GAEB / NRM / MasterFormat), or search by name.',
+                })}
+              </p>
+              <p>
+                {t('validation_rules.intro_3', {
+                  defaultValue:
+                    'Per-project rule selection is configured during the import workflow — open a project, go to its Validation tab, and pick which rule sets apply.',
+                })}
+              </p>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+              <Link
+                to="/validation"
+                className="inline-flex items-center gap-1 font-medium text-oe-blue hover:underline"
+              >
+                <ArrowRight size={12} aria-hidden="true" />
+                {t('validation_rules.cta_open_runs', {
+                  defaultValue: 'Open validation runs',
+                })}
+              </Link>
+              <Link
+                to="/modules/developer-guide"
+                className="inline-flex items-center gap-1 font-medium text-content-secondary hover:text-oe-blue hover:underline"
+              >
+                <BookOpen size={12} aria-hidden="true" />
+                {t('validation_rules.cta_add_custom', {
+                  defaultValue: 'How to add a custom rule',
+                })}
+              </Link>
+            </div>
           </div>
           <input
             type="search"
