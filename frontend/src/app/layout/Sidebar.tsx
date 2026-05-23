@@ -274,6 +274,11 @@ const navGroups: NavGroup[] = [
     items: [
       { labelKey: 'nav.property_dev', to: '/property-dev', icon: Building2 },
       {
+        labelKey: 'nav.accommodation',
+        to: '/accommodation',
+        icon: Building2,
+      },
+      {
         labelKey: 'nav.property_dev_dashboards',
         to: '/property-dev/dashboards',
         icon: BarChart3,
@@ -541,6 +546,7 @@ const PRODUCT_TOUR_NAV_TESTIDS: Record<string, string> = {
   '/boq': 'sidebar-nav-boq',
   '/bim': 'sidebar-nav-bim',
   '/property-dev': 'sidebar-nav-property-dev',
+  '/accommodation': 'sidebar-nav-accommodation',
   '/geo': 'sidebar-nav-geo-hub',
 };
 

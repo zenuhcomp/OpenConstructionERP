@@ -250,6 +250,16 @@ const CarbonPage = lazy(() =>
 const PropertyDevPage = lazy(() =>
   import('@/features/property-dev').then((m) => ({ default: m.PropertyDevPage }))
 );
+const AccommodationListPage = lazy(() =>
+  import('@/features/accommodation').then((m) => ({
+    default: m.AccommodationListPage,
+  })),
+);
+const AccommodationDetailPage = lazy(() =>
+  import('@/features/accommodation').then((m) => ({
+    default: m.AccommodationDetailPage,
+  })),
+);
 const PropertyDevHouseTypeSettingsPage = lazy(() =>
   import('@/features/property-dev').then((m) => ({
     default: m.HouseTypeSettingsPage,
@@ -780,6 +790,8 @@ export default function App() {
           }
         />
         <Route path="/property-dev/dashboards/:key" element={<P title="Property Development Dashboard"><PropertyDevDashboardFullView /></P>} />
+        <Route path="/accommodation" element={<P title="Accommodation"><AccommodationListPage /></P>} />
+        <Route path="/accommodation/:id" element={<P title="Accommodation"><AccommodationDetailPage /></P>} />
         <Route path="/supplier-catalogs" element={<P title="Supplier Catalogs"><SupplierCatalogsPage /></P>} />
 
         {/* Geo Hub — Cesium 3D Tiles + cross-module geo. */}
