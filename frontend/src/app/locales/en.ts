@@ -2272,6 +2272,12 @@ const resource = {
     "audit.col_preview": "Preview",
     "audit.export_json": "Export JSON",
     "nav.architecture": "Architecture Map",
+    "nav.architecture_map": "Architecture Map",
+    "nav.boq_templates": "BOQ Templates",
+    "nav.eir_matrix": "EIR Matrix (ISO 19650)",
+    "nav.snapshots": "Snapshots",
+    "nav.reporting_dashboards": "Reporting Dashboards",
+    "nav.property_dev_dashboards": "Developer Dashboards",
     "nav.ai_advisor": "AI Cost Advisor",
     "nav.project_intelligence": "Project Intelligence",
     "nav.estimation_dashboard": "Estimation Dashboard",
@@ -6606,6 +6612,14 @@ const resource = {
     "header.subscribe.service_offline": "The subscribe service isn't reachable right now — email us instead.",
     "header.subscribe.mailto_fallback": "Email us instead →",
     // --- /Header: newsletter ---
+    // --- CountryCombobox (shared/ui) ---
+    "country_combobox.placeholder": "Pick a country",
+    "country_combobox.search_aria": "Search countries",
+    "country_combobox.no_match": "No country matches \"{{query}}\". Switch to",
+    "country_combobox.global_none": "Global / no country",
+    "country_combobox.custom_region": "Custom region (free text)",
+    "country_combobox.footer_hint": "{{count}} countries · ↑↓ to navigate · ↵ to pick",
+    // --- /CountryCombobox ---
   }
 } as { translation: Record<string, string> };
 

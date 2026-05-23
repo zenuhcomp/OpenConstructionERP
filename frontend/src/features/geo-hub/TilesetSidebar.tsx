@@ -22,6 +22,7 @@ import {
   Eye,
   EyeOff,
   ChevronRight,
+  ChevronLeft,
   type LucideIcon,
   Cuboid,
   Building,
@@ -42,6 +43,17 @@ interface TilesetSidebarProps {
   focusedId: string | null;
   onToggleVisibility: (tilesetId: string) => void;
   onFocus: (tileset: Tileset) => void;
+  /**
+   * ``overlay`` (default) anchors the panel ``absolute top-3 left-3``
+   * over the Cesium canvas with translucent chrome + a 60vh cap so the
+   * map stays mostly visible. ``rail`` keeps the legacy full-height
+   * left rail for callers that want the old chrome (none currently).
+   */
+  variant?: 'rail' | 'overlay';
+  /** When true, render the collapsed pill instead of the full panel. */
+  collapsed?: boolean;
+  /** Toggles ``collapsed`` — required when ``collapsed`` is supplied. */
+  onToggleCollapsed?: () => void;
 }
 
 const SOURCE_ICON: Record<GeoSourceKind, LucideIcon> = {
@@ -182,21 +194,73 @@ export function TilesetSidebar({
   focusedId,
   onToggleVisibility,
   onFocus,
+  variant = 'overlay',
+  collapsed = false,
+  onToggleCollapsed,
 }: TilesetSidebarProps) {
   const { t } = useTranslation();
 
   const readyCount = (tilesets ?? []).filter((ts) => ts.status === 'ready').length;
   const failedCount = (tilesets ?? []).filter((ts) => ts.status === 'failed').length;
   const procCount = (tilesets ?? []).filter((ts) => ts.status === 'generating').length;
+  const totalCount = tilesets?.length ?? 0;
+
+  // Collapsed → slim pill so the user can hide the panel entirely and
+  // see the full map. Only valid in overlay variant — the legacy rail
+  // chrome is never collapsible since it is not absolutely positioned.
+  if (variant === 'overlay' && collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        className={[
+          'absolute top-3 left-3 z-20 inline-flex items-center gap-2',
+          'rounded-full border border-white/15 bg-slate-900/85 px-3 py-1.5',
+          'text-xs font-medium text-white shadow-lg shadow-black/20 backdrop-blur-md',
+          'ring-1 ring-white/5 transition hover:bg-slate-800/90',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue',
+        ].join(' ')}
+        aria-expanded={false}
+        aria-label={t('geo_hub.sidebar.expand', { defaultValue: 'Show tilesets' })}
+        title={t('geo_hub.sidebar.expand', { defaultValue: 'Show tilesets' })}
+      >
+        <Layers size={13} strokeWidth={2} className="text-emerald-300" />
+        <span className="tabular-nums">{isLoading ? '…' : totalCount}</span>
+        <ChevronRight size={13} strokeWidth={2.25} className="text-white/70" />
+      </button>
+    );
+  }
+
+  const isOverlay = variant === 'overlay';
+  // Shared chrome between overlay + legacy rail variants. The overlay
+  // variant adds absolute positioning + translucent dark plate; the
+  // rail variant keeps the old full-height left rail (unused by current
+  // callers but preserved for non-Cesium future surfaces).
+  const containerClasses = isOverlay
+    ? [
+        'absolute top-3 left-3 z-20 flex w-72 max-w-[calc(100vw-1.5rem)] flex-col',
+        'rounded-xl border border-white/15 bg-white/95 dark:bg-slate-900/90',
+        'shadow-lg shadow-black/20 ring-1 ring-black/5 backdrop-blur-md',
+        // Hide on phone-width — the collapsed pill takes its place when
+        // the user opens the panel from the toggle button.
+        'hidden md:flex',
+      ].join(' ')
+    : [
+        'flex w-72 shrink-0 flex-col border-r border-border bg-surface-secondary',
+      ].join(' ');
 
   return (
     <aside
-      className={[
-        'flex w-72 shrink-0 flex-col border-r border-border bg-surface-secondary',
-      ].join(' ')}
+      className={containerClasses}
       aria-label={t('geo_hub.sidebar.aria', { defaultValue: 'Tileset rail' })}
     >
-      <header className="border-b border-border px-3 py-2.5">
+      <header
+        className={
+          isOverlay
+            ? 'border-b border-black/5 px-3 py-2.5 dark:border-white/10'
+            : 'border-b border-border px-3 py-2.5'
+        }
+      >
         <div className="flex items-center gap-1.5">
           <Layers size={13} className="text-content-tertiary" />
           <h2 className="text-2xs font-semibold uppercase tracking-[0.14em] text-content-secondary">
@@ -206,6 +270,26 @@ export function TilesetSidebar({
             <span className="ml-auto text-2xs font-medium text-content-tertiary">
               {tilesets.length}
             </span>
+          )}
+          {isOverlay && onToggleCollapsed && (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              className={[
+                'inline-flex h-6 w-6 items-center justify-center rounded-md',
+                'text-content-tertiary hover:bg-surface-secondary hover:text-content-primary',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue',
+              ].join(' ')}
+              aria-expanded={true}
+              aria-label={t('geo_hub.sidebar.collapse', {
+                defaultValue: 'Hide tilesets',
+              })}
+              title={t('geo_hub.sidebar.collapse', {
+                defaultValue: 'Hide tilesets',
+              })}
+            >
+              <ChevronLeft size={13} strokeWidth={2} />
+            </button>
           )}
         </div>
         {tilesets && tilesets.length > 0 && (
@@ -229,7 +313,15 @@ export function TilesetSidebar({
           </div>
         )}
       </header>
-      <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+      {/* Self-sized in overlay variant — caps at 60vh so it never spans
+          the full canvas. Rail variant keeps the legacy flex-1 stretch. */}
+      <div
+        className={
+          isOverlay
+            ? 'max-h-[60vh] overflow-y-auto p-2 space-y-1.5'
+            : 'flex-1 overflow-y-auto p-2 space-y-1.5'
+        }
+      >
         {isLoading && (
           <>
             <SkeletonCard />

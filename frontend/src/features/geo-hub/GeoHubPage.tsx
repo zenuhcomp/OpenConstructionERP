@@ -5,12 +5,14 @@
  * Lazy-loaded; this is the first module page so Suspense is the only
  * boundary needed.
  *
- * Chrome layout matches the project / development pages:
+ * Chrome layout:
  *
  * * Top toolbar with title + scope segmented control + live counter.
- * * Left rail listing anchored projects (clickable → fly camera).
- * * Cesium canvas with HUD overlay (cursor lat/lon, altitude, scale bar,
- *   north arrow).
+ * * Full-width Cesium canvas — no fixed side rail.
+ * * Floating overlay panel (top-left) listing anchored projects,
+ *   self-sized to its content (caps at 60vh) and collapsible to a slim
+ *   pill so the user can reveal the full globe with one click.
+ * * HUD overlay (cursor lat/lon, altitude, scale bar, north arrow).
  * * Glass-panel empty state when no projects are anchored anywhere — so
  *   the user is never left staring at a blank globe wondering what to
  *   do next.
@@ -21,7 +23,7 @@
  * map config to load.
  */
 
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -34,6 +36,9 @@ import {
   Loader2,
   Info,
   ServerCrash,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
 } from 'lucide-react';
 
 import { ApiError } from '@/shared/lib/api';
@@ -116,21 +121,42 @@ function GlobalNoProjectsEmpty() {
   );
 }
 
+// Persisted across reloads so users who collapse the panel stay
+// uncovered on next visit. Versioned (`v1`) so a future incompatible
+// rename never resurrects with stale boolean semantics.
+const PANEL_COLLAPSED_LS_KEY = 'oe.geo_hub.global_panel_collapsed.v1';
+
+function readPanelCollapsed(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(PANEL_COLLAPSED_LS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Left rail of the global Geo Hub — lists every anchored project with
- * coords. Clicking ``Focus`` flies the viewer's camera; ``Open`` deep
- * links into the project-scoped map.
+ * Floating overlay panel — lists every anchored project with coords.
+ * Self-sized vertical height (caps inner scroller at 60vh) so it never
+ * spans the full canvas. Collapses to a slim pill on click, persisted
+ * to localStorage. Click ``Focus`` to fly the viewer's camera;
+ * ``Open`` deep links into the project-scoped map.
+ *
+ * Anchored to ``top-3 left-3`` over the Cesium canvas; the page
+ * promotes the canvas to full width when this panel is overlay-mounted.
  *
  * Status rendering covers loading, error and empty cases so the user
- * always knows why the rail is showing what it is.
+ * always knows why the panel is showing what it is.
  */
-function AnchoredProjectsRail({
+function AnchoredProjectsOverlay({
   projects,
   isLoading,
   isError,
   onRetry,
   focusedProjectId,
   onFocus,
+  collapsed,
+  onToggleCollapsed,
 }: {
   projects: AnchoredProject[];
   isLoading: boolean;
@@ -138,20 +164,59 @@ function AnchoredProjectsRail({
   onRetry: () => void;
   focusedProjectId: string | null;
   onFocus: (project: AnchoredProject) => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   const { t } = useTranslation();
+
+  // Collapsed → slim pill that shows just the count + an expand chevron.
+  // Drops the panel chrome entirely so the map below is fully visible.
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        className={[
+          'absolute top-3 left-3 z-20 inline-flex items-center gap-2',
+          'rounded-full border border-white/15 bg-slate-900/85 px-3 py-1.5',
+          'text-xs font-medium text-white shadow-lg shadow-black/20 backdrop-blur-md',
+          'ring-1 ring-white/5 transition hover:bg-slate-800/90',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400',
+        ].join(' ')}
+        aria-expanded={false}
+        aria-label={t('geo_hub.rail.expand', {
+          defaultValue: 'Show anchored projects',
+        })}
+        title={t('geo_hub.rail.expand', {
+          defaultValue: 'Show anchored projects',
+        })}
+      >
+        <Layers size={13} strokeWidth={2} className="text-emerald-300" />
+        <span className="tabular-nums">
+          {isLoading ? '…' : isError ? '!' : projects.length}
+        </span>
+        <ChevronRight size={13} strokeWidth={2.25} className="text-white/70" />
+      </button>
+    );
+  }
+
   return (
     <aside
       className={[
-        'flex w-72 shrink-0 flex-col border-r border-border',
-        'bg-surface-primary',
+        // Floating overlay — never claims the full map height.
+        'absolute top-3 left-3 z-20 flex w-72 max-w-[calc(100vw-1.5rem)] flex-col',
+        'rounded-xl border border-white/15 bg-white/95 dark:bg-slate-900/90',
+        'shadow-lg shadow-black/20 ring-1 ring-black/5 backdrop-blur-md',
+        // Hide on phone-width so it doesn't cover the whole map; users
+        // get the collapsed pill instead (rendered when toggled).
+        'hidden md:flex',
       ].join(' ')}
       aria-label={t('geo_hub.rail.aria', {
         defaultValue: 'Anchored projects',
       })}
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <div>
+      <div className="flex items-center justify-between gap-2 border-b border-black/5 px-3 py-2.5 dark:border-white/10">
+        <div className="min-w-0">
           <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-content-secondary">
             {t('geo_hub.rail.title', { defaultValue: 'Anchored projects' })}
           </h2>
@@ -168,27 +233,48 @@ function AnchoredProjectsRail({
                   })}
           </p>
         </div>
-        {isError && (
+        <div className="flex shrink-0 items-center gap-1">
+          {isError && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className={[
+                'inline-flex items-center gap-1 rounded-md border border-border px-2 py-1',
+                'text-2xs font-medium text-content-secondary',
+                'hover:bg-surface-secondary hover:text-content-primary',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue',
+              ].join(' ')}
+              aria-label={t('common.retry', { defaultValue: 'Retry' })}
+            >
+              <RefreshCw size={12} strokeWidth={2} />
+              {t('common.retry', { defaultValue: 'Retry' })}
+            </button>
+          )}
           <button
             type="button"
-            onClick={onRetry}
+            onClick={onToggleCollapsed}
             className={[
-              'inline-flex items-center gap-1 rounded-md border border-border px-2 py-1',
-              'text-2xs font-medium text-content-secondary',
-              'hover:bg-surface-secondary hover:text-content-primary',
+              'inline-flex h-7 w-7 items-center justify-center rounded-md',
+              'text-content-tertiary hover:bg-surface-secondary hover:text-content-primary',
               'focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue',
             ].join(' ')}
-            aria-label={t('common.retry', { defaultValue: 'Retry' })}
+            aria-expanded={true}
+            aria-label={t('geo_hub.rail.collapse', {
+              defaultValue: 'Hide anchored projects',
+            })}
+            title={t('geo_hub.rail.collapse', {
+              defaultValue: 'Hide anchored projects',
+            })}
           >
-            <RefreshCw size={12} strokeWidth={2} />
-            {t('common.retry', { defaultValue: 'Retry' })}
+            <ChevronLeft size={14} strokeWidth={2} />
           </button>
-        )}
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      {/* Self-sized — caps at 60vh, never spans the full canvas. */}
+      <div className="max-h-[60vh] overflow-y-auto">
         {isLoading && (
-          <div className="flex items-center justify-center gap-2 px-4 py-8 text-2xs text-content-tertiary">
+          <div className="flex items-center justify-center gap-2 px-4 py-6 text-2xs text-content-tertiary">
             <Loader2 size={14} className="animate-spin" />
             <span>
               {t('geo_hub.rail.loading_long', {
@@ -218,7 +304,7 @@ function AnchoredProjectsRail({
           </div>
         )}
         {!isLoading && !isError && projects.length === 0 && (
-          <div className="px-4 py-8 text-center text-2xs text-content-tertiary">
+          <div className="px-4 py-6 text-center text-2xs text-content-tertiary">
             {t('geo_hub.rail.empty_inline', {
               defaultValue:
                 'No anchored projects yet. The empty-state card on the globe explains how to add one.',
@@ -315,6 +401,22 @@ export function GeoHubPage() {
   const [focusedProjectId, setFocusedProjectId] = useState<string | null>(
     null,
   );
+  // Read lazily so SSR + tests don't blow up on `window`. Persisted to
+  // localStorage so the user's preferred chrome density survives reloads.
+  const [panelCollapsed, setPanelCollapsed] = useState<boolean>(
+    readPanelCollapsed,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        PANEL_COLLAPSED_LS_KEY,
+        panelCollapsed ? '1' : '0',
+      );
+    } catch {
+      /* localStorage disabled / quota full — UX still works in-memory */
+    }
+  }, [panelCollapsed]);
 
   // One pin per anchored project the user can access — degrades to an
   // empty list on backend failure so the globe still renders. The
@@ -462,64 +564,67 @@ export function GeoHubPage() {
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
-        <AnchoredProjectsRail
-          projects={projects}
-          isLoading={projectsQuery.isLoading}
-          isError={projectsQuery.isError}
-          onRetry={() => projectsQuery.refetch()}
-          focusedProjectId={focusedProjectId}
-          onFocus={(p) => setFocusedProjectId(p.project_id)}
-        />
-        <main className="relative flex-1 overflow-hidden bg-slate-900">
-          <Suspense
-            fallback={
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-300">
-                <Loader2 size={20} className="animate-spin text-emerald-300" />
-                <span className="font-medium">
-                  {t('geo_hub.loading_viewer_title', {
-                    defaultValue: 'Loading 3D globe runtime',
-                  })}
-                </span>
-                <span className="text-xs text-slate-400">
-                  {t('geo_hub.loading_viewer_hint', {
-                    defaultValue: 'Streaming Cesium chunks (~3 MB) — first load only.',
-                  })}
-                </span>
-              </div>
+      {/* Full-width canvas — the project list is overlay-mounted on top
+          (via CesiumViewer's ``overlay`` slot) so the globe always gets
+          the full viewport width. */}
+      <main className="relative flex-1 overflow-hidden bg-slate-900">
+        <Suspense
+          fallback={
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-300">
+              <Loader2 size={20} className="animate-spin text-emerald-300" />
+              <span className="font-medium">
+                {t('geo_hub.loading_viewer_title', {
+                  defaultValue: 'Loading 3D globe runtime',
+                })}
+              </span>
+              <span className="text-xs text-slate-400">
+                {t('geo_hub.loading_viewer_hint', {
+                  defaultValue: 'Streaming Cesium chunks (~3 MB) — first load only.',
+                })}
+              </span>
+            </div>
+          }
+        >
+          <CesiumViewer
+            mode="global"
+            pins={pins}
+            focusedProject={
+              focusedProjectId
+                ? projects.find((p) => p.project_id === focusedProjectId) ?? null
+                : null
             }
-          >
-            <CesiumViewer
-              mode="global"
-              pins={pins}
-              focusedProject={
-                focusedProjectId
-                  ? projects.find((p) => p.project_id === focusedProjectId) ?? null
-                  : null
-              }
-              onMouseMove={setCursorCoords}
-              onCameraChange={setCameraState}
-              overlay={
-                <>
-                  <GeoOverlayHud
-                    cursorLat={cursorCoords?.lat ?? null}
-                    cursorLon={cursorCoords?.lon ?? null}
-                    altitudeM={cameraState?.cameraAltitudeM ?? null}
-                    headingDeg={cameraState?.headingDeg ?? null}
-                    active
-                  />
-                  {/* Empty-state card only when the fetch succeeded and we
-                      really do have zero anchored projects — never on
-                      error, never while loading. */}
-                  {!projectsQuery.isLoading &&
-                    !projectsQuery.isError &&
-                    projects.length === 0 && <GlobalNoProjectsEmpty />}
-                </>
-              }
-            />
-          </Suspense>
-        </main>
-      </div>
+            onMouseMove={setCursorCoords}
+            onCameraChange={setCameraState}
+            overlay={
+              <>
+                <GeoOverlayHud
+                  cursorLat={cursorCoords?.lat ?? null}
+                  cursorLon={cursorCoords?.lon ?? null}
+                  altitudeM={cameraState?.cameraAltitudeM ?? null}
+                  headingDeg={cameraState?.headingDeg ?? null}
+                  active
+                />
+                <AnchoredProjectsOverlay
+                  projects={projects}
+                  isLoading={projectsQuery.isLoading}
+                  isError={projectsQuery.isError}
+                  onRetry={() => projectsQuery.refetch()}
+                  focusedProjectId={focusedProjectId}
+                  onFocus={(p) => setFocusedProjectId(p.project_id)}
+                  collapsed={panelCollapsed}
+                  onToggleCollapsed={() => setPanelCollapsed((v) => !v)}
+                />
+                {/* Empty-state card only when the fetch succeeded and we
+                    really do have zero anchored projects — never on
+                    error, never while loading. */}
+                {!projectsQuery.isLoading &&
+                  !projectsQuery.isError &&
+                  projects.length === 0 && <GlobalNoProjectsEmpty />}
+              </>
+            }
+          />
+        </Suspense>
+      </main>
     </div>
   );
 }

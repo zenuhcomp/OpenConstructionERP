@@ -3981,8 +3981,52 @@ _CUSTOM_TEMPLATES_DIR = Path("uploads/property_dev/custom_templates")
 _CUSTOM_TEMPLATE_MAX_MB = 10
 _CUSTOM_TEMPLATE_MAX_BYTES = _CUSTOM_TEMPLATE_MAX_MB * 1024 * 1024
 _ALLOWED_CUSTOM_TEMPLATE_EXTENSIONS: tuple[str, ...] = (
-    ".docx", ".html", ".htm", ".pdf", ".odt", ".md", ".txt",
+    ".docx", ".html", ".htm", ".pdf", ".odt", ".md", ".txt", ".xlsx",
 )
+
+_BINARY_EXT_TO_SIG: dict[str, frozenset[str]] = {
+    ".docx": frozenset({"zip"}),
+    ".xlsx": frozenset({"zip"}),
+    ".odt": frozenset({"zip"}),
+    ".pdf": frozenset({"pdf"}),
+    ".html": frozenset({"xml"}),
+    ".htm": frozenset({"xml"}),
+}
+_TEXT_EXTENSIONS: frozenset[str] = frozenset({".md", ".txt"})
+_TEXT_NULL_SCAN_BYTES = 1024
+
+
+def _validate_custom_template_magic(ext: str, content: bytes, filename: str) -> None:
+    if ext in _BINARY_EXT_TO_SIG:
+        try:
+            require_signature(
+                content[:SIGNATURE_BYTES_REQUIRED],
+                _BINARY_EXT_TO_SIG[ext],
+                filename=filename,
+            )
+        except FileSignatureMismatch as exc:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=str(exc),
+            ) from exc
+        return
+    if ext in _TEXT_EXTENSIONS:
+        if b"\x00" in content[:_TEXT_NULL_SCAN_BYTES]:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=(
+                    f"File '{filename}' looks binary but the extension '{ext}' "
+                    "expects plain text."
+                ),
+            )
+        return
+    raise HTTPException(
+        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        detail=(
+            f"Unsupported extension '{ext}'. Allowed: "
+            f"{', '.join(_ALLOWED_CUSTOM_TEMPLATE_EXTENSIONS)}"
+        ),
+    )
 _ALLOWED_CUSTOM_DOC_TYPES: tuple[str, ...] = (
     "custom",
     "reservation_receipt",
@@ -4296,6 +4340,8 @@ async def upload_custom_document_template(
                 f"Template exceeds {_CUSTOM_TEMPLATE_MAX_MB} MB limit"
             ),
         )
+
+    _validate_custom_template_magic(ext, content, raw_filename)
 
     is_admin = user_payload.get("role") == "admin"
     user_id_raw = user_payload.get("sub") or user_payload.get("user_id")

@@ -1764,9 +1764,11 @@ const PRICE_MATRIX_STATUS_VARIANT: Record<
 export function PriceMatrixTab({
   developmentId,
   plots,
+  defaultCurrency,
 }: {
   developmentId: string;
   plots: Plot[];
+  defaultCurrency?: string;
 }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -2038,6 +2040,7 @@ export function PriceMatrixTab({
       {createOpen && (
         <PriceMatrixFormModal
           developmentId={developmentId}
+          defaultCurrency={defaultCurrency}
           onClose={() => setCreateOpen(false)}
           onSaved={() =>
             qc.invalidateQueries({
@@ -2049,6 +2052,7 @@ export function PriceMatrixTab({
       {editing && (
         <PriceMatrixFormModal
           developmentId={developmentId}
+          defaultCurrency={defaultCurrency}
           matrix={editing}
           onClose={() => setEditing(null)}
           onSaved={() =>
@@ -2090,11 +2094,13 @@ export function PriceMatrixTab({
 function PriceMatrixFormModal({
   developmentId,
   matrix,
+  defaultCurrency,
   onClose,
   onSaved,
 }: {
   developmentId: string;
   matrix?: PriceMatrix;
+  defaultCurrency?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -2107,7 +2113,7 @@ function PriceMatrixFormModal({
       matrix?.base_price_per_m2 != null
         ? String(matrix.base_price_per_m2)
         : '0',
-    currency: matrix?.currency ?? 'EUR',
+    currency: matrix?.currency ?? defaultCurrency ?? '',
     effective_from: matrix?.effective_from ?? todayIso(),
     effective_to: matrix?.effective_to ?? '',
     status: (matrix?.status ?? 'draft') as PriceMatrixStatus,
@@ -2553,7 +2559,13 @@ function PriceMatrixPreviewModal({
 
 /* ───────────────────────────── Escrow ───────────────────────────── */
 
-export function EscrowTab({ developmentId }: { developmentId: string }) {
+export function EscrowTab({
+  developmentId,
+  defaultCurrency,
+}: {
+  developmentId: string;
+  defaultCurrency?: string;
+}) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
@@ -2652,6 +2664,7 @@ export function EscrowTab({ developmentId }: { developmentId: string }) {
       {createOpen && (
         <EscrowAccountFormModal
           developmentId={developmentId}
+          defaultCurrency={defaultCurrency}
           onClose={() => setCreateOpen(false)}
           onSaved={() =>
             qc.invalidateQueries({
@@ -2663,6 +2676,7 @@ export function EscrowTab({ developmentId }: { developmentId: string }) {
       {editing && (
         <EscrowAccountFormModal
           developmentId={developmentId}
+          defaultCurrency={defaultCurrency}
           account={editing}
           onClose={() => setEditing(null)}
           onSaved={() =>
@@ -2823,11 +2837,13 @@ function EscrowAccountCard({
 function EscrowAccountFormModal({
   developmentId,
   account,
+  defaultCurrency,
   onClose,
   onSaved,
 }: {
   developmentId: string;
   account?: EscrowAccount;
+  defaultCurrency?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -2840,7 +2856,7 @@ function EscrowAccountFormModal({
     bank_name: account?.bank_name ?? '',
     iban: account?.iban ?? '',
     swift_bic: account?.swift_bic ?? '',
-    currency: account?.currency ?? 'EUR',
+    currency: account?.currency ?? defaultCurrency ?? '',
     opened_at: account?.opened_at ?? todayIso(),
     is_active: account?.is_active ?? true,
   });

@@ -23,6 +23,7 @@
 //     {country_code: null, region_label: <custom>} payload pair.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -54,7 +55,9 @@ export interface CountryComboboxProps {
   allowEmpty?: boolean;
   /** Show the "Custom region (free text)" option at the bottom. */
   allowCustom?: boolean;
-  /** Placeholder for the trigger when no value is set. */
+  /** Placeholder for the trigger when no value is set. Defaults to a
+   *  translated "Pick a country" via the i18n key
+   *  `country_combobox.placeholder`. */
   placeholder?: string;
   /** id wired up to the trigger button for <label htmlFor=...> a11y. */
   id?: string;
@@ -75,11 +78,15 @@ export function CountryCombobox({
   onCustomChange,
   allowEmpty = false,
   allowCustom = true,
-  placeholder = 'Pick a country',
+  placeholder,
   id,
   disabled = false,
   className,
 }: CountryComboboxProps) {
+  const { t } = useTranslation();
+  const resolvedPlaceholder =
+    placeholder ??
+    t('country_combobox.placeholder', { defaultValue: 'Pick a country' });
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -191,7 +198,8 @@ export function CountryCombobox({
           ✱
         </span>
         <span className="truncate text-content-primary">
-          {customValue || 'Custom region (free text)'}
+          {customValue ||
+            t('country_combobox.custom_region', { defaultValue: 'Custom region (free text)' })}
         </span>
       </span>
     );
@@ -206,7 +214,7 @@ export function CountryCombobox({
       </span>
     );
   } else {
-    triggerInner = <span className="text-content-tertiary">{placeholder}</span>;
+    triggerInner = <span className="text-content-tertiary">{resolvedPlaceholder}</span>;
   }
 
   return (
@@ -254,7 +262,7 @@ export function CountryCombobox({
               onKeyDown={handleKey}
               placeholder="Search country (English or local script)…"
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-content-tertiary"
-              aria-label="Search countries"
+              aria-label={t('country_combobox.search_aria', { defaultValue: 'Search countries' })}
             />
             {query && (
               <button
@@ -275,7 +283,10 @@ export function CountryCombobox({
           >
             {options.length === 0 ? (
               <li className="px-3 py-3 text-center text-xs text-content-tertiary">
-                No country matches "{query}". Switch to{' '}
+                {t('country_combobox.no_match', {
+                  defaultValue: 'No country matches "{{query}}". Switch to',
+                  query,
+                })}{' '}
                 <button
                   type="button"
                   onClick={() => {
@@ -312,7 +323,9 @@ export function CountryCombobox({
                         ✕
                       </span>
                       <span className="flex-1 text-content-secondary italic">
-                        Global / no country
+                        {t('country_combobox.global_none', {
+                          defaultValue: 'Global / no country',
+                        })}
                       </span>
                       {selected && <Check size={14} className="text-oe-blue" />}
                     </li>
@@ -337,7 +350,9 @@ export function CountryCombobox({
                         ✱
                       </span>
                       <span className="flex-1 text-content-primary">
-                        Custom region (free text)
+                        {t('country_combobox.custom_region', {
+                          defaultValue: 'Custom region (free text)',
+                        })}
                       </span>
                       {selected && <Check size={14} className="text-oe-blue" />}
                     </li>
@@ -375,7 +390,10 @@ export function CountryCombobox({
             )}
           </ul>
           <div className="border-t border-border-light/60 bg-surface-secondary px-3 py-1.5 text-[10px] text-content-tertiary">
-            {sortedCountries().length} countries · ↑↓ to navigate · ↵ to pick
+            {t('country_combobox.footer_hint', {
+              defaultValue: '{{count}} countries · ↑↓ to navigate · ↵ to pick',
+              count: sortedCountries().length,
+            })}
           </div>
         </div>
       )}

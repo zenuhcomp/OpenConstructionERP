@@ -88,6 +88,7 @@ import { getModuleNavItems } from '@/modules/_registry';
 import { APP_VERSION } from '@/shared/lib/version';
 import { useSidebarBadges } from '@/shared/hooks/useSidebarBadges';
 import { useModulePresence } from '@/shared/hooks/useModulePresence';
+import { useHiddenModules } from '@/shared/hooks/useHiddenModules';
 import { useIsRTL } from '@/shared/hooks/useIsRTL';
 import {
   useSidebarCollapseStore,
@@ -129,9 +130,20 @@ interface NavGroup {
   separator?: boolean;
 }
 
-// Navigation groups — collapsible sections
+// Navigation groups — collapsible sections.
+//
+// Source-of-truth audit (2026-05-23): every `to` here is cross-checked
+// against `App.tsx` <Route path="…"/> entries — no broken links. New
+// surfaces that already had routes but were never reachable from the
+// sidebar (Architecture Map, EIR Matrix, Reporting Dashboards, Property
+// Dev Dashboards, BOQ Templates, Snapshots, Integrations) are now
+// surfaced in the most relevant group. Old `descriptionKey`s are kept
+// where the locale already has the translated string so we don't churn
+// 20 locale files; new groups skip `descriptionKey` (it isn't rendered).
 const navGroups: NavGroup[] = [
-  // ── CORE (always visible) ──────────────────────────────────────────
+  // ── OVERVIEW (always visible) ──────────────────────────────────────
+  // The few entry points every user touches every session: dashboard,
+  // project list, the unified file manager.
   {
     id: 'overview',
     labelKey: 'nav.group_overview',
@@ -139,17 +151,14 @@ const navGroups: NavGroup[] = [
     items: [
       { labelKey: 'nav.dashboard', to: '/', icon: LayoutDashboard },
       { labelKey: 'projects.title', to: '/projects', icon: FolderOpen, tourId: 'projects' },
-      // Files lives in Overview because it's the unified entry point
-      // into a project's documents, photos, BIM and DWG — users land
-      // here to pick what to work on, just like the dashboard.
       { labelKey: 'nav.project_files', to: '/files', icon: HardDrive },
     ],
   },
   // ── ESTIMATING ─────────────────────────────────────────────────────
-  // The project's actual cost work-product: BOQ, AI-driven estimate,
-  // and the BIM↔catalogue link that powers both. Catalogues themselves
-  // live in the next group ("Catalogues & Reference") so they don't
-  // crowd the day-to-day estimating surface.
+  // The project's actual cost work-product: BOQ + templates, AI-driven
+  // estimate, and the BIM↔catalogue link that powers both. Catalogues
+  // themselves live in the next group so they don't crowd the day-to-day
+  // estimating surface.
   {
     id: 'estimation',
     labelKey: 'nav.group_estimation',
@@ -157,15 +166,22 @@ const navGroups: NavGroup[] = [
     defaultOpen: true,
     items: [
       { labelKey: 'boq.title', to: '/boq', icon: Table2, tourId: 'boq' },
+      // BOQ Templates — was reachable only via deep-link before; surface
+      // it here so estimators discover the reusable starting points.
+      {
+        labelKey: 'nav.boq_templates',
+        to: '/templates',
+        icon: FileText,
+        advancedOnly: true,
+      },
       { labelKey: 'nav.match_elements', to: '/match-elements', icon: Link2, badge: 'BETA' },
       { labelKey: 'nav.ai_estimate', to: '/ai-estimate', icon: Sparkles, badge: 'BETA' },
       { labelKey: 'nav.estimation_dashboard', to: '/project-intelligence', icon: BrainCircuit, badge: 'BETA' },
     ],
   },
   // ── CATALOGUES & REFERENCE ─────────────────────────────────────────
-  // Cross-project reference data: cost databases, regional catalogues
-  // and assembly templates. Live next to Estimating but separate so
-  // database curators have their own home.
+  // Cross-project reference data: cost databases, regional catalogues,
+  // assembly templates.
   {
     id: 'catalogues',
     labelKey: 'nav.group_catalogues',
@@ -178,6 +194,10 @@ const navGroups: NavGroup[] = [
       { labelKey: 'nav.assembly_library', to: '/assemblies/library', icon: Library, badge: 'BETA' },
     ],
   },
+  // ── TAKEOFF ────────────────────────────────────────────────────────
+  // Quantity extraction from drawings + 3D models. CAD-BIM Explorer
+  // (data view of CAD imports) moved here from CAD-BIM Analytics — it
+  // is a takeoff-adjacent surface, not a coordination surface.
   {
     id: 'takeoff',
     labelKey: 'nav.group_takeoff',
@@ -185,32 +205,39 @@ const navGroups: NavGroup[] = [
     items: [
       { labelKey: 'nav.pdf_measurements', to: '/takeoff?tab=measurements', icon: Ruler },
       { labelKey: 'nav.dwg_takeoff', to: '/dwg-takeoff', icon: PencilRuler },
-      { labelKey: 'nav.cad_bim_explorer', to: '/data-explorer', icon: TableProperties },
       { labelKey: 'nav.bim_viewer', to: '/bim', icon: Box },
+      { labelKey: 'nav.cad_bim_explorer', to: '/data-explorer', icon: TableProperties, advancedOnly: true },
     ],
   },
-  // ── CAD-BIM ANALYTICS ──────────────────────────────────────────────
-  // Coordinated multi-model analyses live in their own group so users
-  // who only need quantity takeoff don't have to scroll past clash
-  // detection / federations / rule packs every time.
+  // ── MODEL COORDINATION ─────────────────────────────────────────────
+  // Multi-model BIM/CAD analyses: federations, clash detection, rule
+  // packs, EIR matrix, geo overlays. Distinct from Takeoff so users
+  // who only quantify a model don't have to scroll past coordination
+  // every time.
   {
     id: 'cad_bim_analytics',
     labelKey: 'nav.group_cad_bim_analytics',
     descriptionKey: 'nav.group_cad_bim_analytics_desc',
-    defaultOpen: true,
+    defaultOpen: false,
     items: [
       { labelKey: 'nav.coordination_hub', to: '/coordination', icon: LayoutDashboard, badge: 'NEW' },
       { labelKey: 'nav.bim_federations', to: '/bim/federations', icon: Layers, badge: 'NEW' },
       { labelKey: 'nav.clash_detection', to: '/clash', icon: Radar, badge: 'BETA' },
       { labelKey: 'nav.bim_rules', to: '/bim/rules?mode=requirements', icon: SlidersHorizontal, badge: 'BETA' },
-      // Geo Hub — Cesium 3D Tiles + cross-module geo overlays.
+      // EIR Matrix (ISO 19650) — was orphan; surface it here next to
+      // BIM Rules where it logically belongs.
+      {
+        labelKey: 'nav.eir_matrix',
+        to: '/requirements/matrix',
+        icon: FileCheck,
+        advancedOnly: true,
+      },
       { labelKey: 'sidebar.geo_hub', to: '/geo', icon: Globe, badge: 'NEW' },
     ],
   },
   // ── AI & TOOLS ─────────────────────────────────────────────────────
-  // AI agents, advisor, project intelligence and ERP chat. AI Estimate
-  // moved to the Estimating group above (it's estimation work, not
-  // a standalone tool).
+  // AI agents, advisor, ERP chat. AI Estimate lives in Estimating
+  // (it produces estimation work, not standalone chat output).
   {
     id: 'ai',
     labelKey: 'nav.group_ai_estimation',
@@ -224,13 +251,8 @@ const navGroups: NavGroup[] = [
     ],
   },
   // ── COMMERCIAL ─────────────────────────────────────────────────────
-  // Commercial pipeline — CRM lead → contract award → variations,
-  // subcontractor management, bid management, supplier catalogs.
-  // Moved up to sit next to Estimating because it's the same
-  // "before-construction" phase: sales, bidding, commit. Property
-  // Development used to live here too but it's a discipline of its
-  // own (B2C real-estate sales, plots, handovers, warranties) and
-  // now has its own sibling group below.
+  // Pre-construction commercial pipeline — CRM lead → contract award →
+  // variations, subcontractor management, bid management, suppliers.
   {
     id: 'commercial',
     labelKey: 'nav.group_commercial',
@@ -242,20 +264,16 @@ const navGroups: NavGroup[] = [
       { labelKey: 'nav.contracts', to: '/contracts', icon: FileSignature },
       { labelKey: 'nav.subcontractors', to: '/subcontractors', icon: HardHat },
       { labelKey: 'nav.bid_management', to: '/bid-management', icon: Scale },
+      { labelKey: 'tendering.title', to: '/tendering', icon: FileText, moduleKey: 'tendering', advancedOnly: true },
       { labelKey: 'nav.variations', to: '/variations', icon: GitBranch },
       { labelKey: 'nav.supplier_catalogs', to: '/supplier-catalogs', icon: ShoppingCart },
     ],
   },
-  // ── PROPERTY / REAL ESTATE DEVELOPMENT ─────────────────────────────
-  // Dedicated home for real-estate developer workflows: plots, buyers,
-  // leads, reservations, sales contracts, payment schedules, brokers,
-  // price matrix, escrow, handovers, warranties. Most of those live
-  // as tabs inside /property-dev; the sidebar only surfaces the main
-  // entry plus the two long-lived settings catalogues (house types
-  // and document templates). Sits right after Commercial because it
-  // shares the "before-construction" sales/commit phase but warrants
-  // its own collapsible header so developer-shaped tenants can pin
-  // just this section and skip the rest.
+  // ── REAL ESTATE DEVELOPMENT ────────────────────────────────────────
+  // Dedicated home for developer workflows: plots, buyers, reservations,
+  // SPAs, handovers, warranties (mostly tabs inside /property-dev) plus
+  // the two long-lived settings catalogues. Now also exposes the
+  // dashboards landing page that was previously orphan.
   {
     id: 'property',
     labelKey: 'nav.group_property',
@@ -265,23 +283,26 @@ const navGroups: NavGroup[] = [
     items: [
       { labelKey: 'nav.property_dev', to: '/property-dev', icon: Building2 },
       {
+        labelKey: 'nav.property_dev_dashboards',
+        to: '/property-dev/dashboards',
+        icon: BarChart3,
+        advancedOnly: true,
+      },
+      {
         labelKey: 'nav.property_dev_house_types',
         to: '/property-dev/settings/house-types',
         icon: Building2,
         advancedOnly: true,
       },
-      // Validation Rules used to sit here but it's a platform-wide
-      // catalogue (BOQ / CAD / tender / takeoff), not PropDev-specific.
-      // It now lives in the admin grid at /admin/validation-rules.
       {
         labelKey: 'nav.property_dev_doc_templates',
         to: '/property-dev/settings/document-templates',
-        icon: Building2,
+        icon: FileText,
         advancedOnly: true,
       },
     ],
   },
-  // ── PLANNING & CONTROL (advanced) ──────────────────────────────────
+  // ── SCHEDULING & COST CONTROL ──────────────────────────────────────
   // After the deal closes: schedule, tasks, 5D cost model, risk.
   {
     id: 'planning',
@@ -294,14 +315,12 @@ const navGroups: NavGroup[] = [
       { labelKey: 'nav.schedule_advanced', to: '/schedule-advanced', icon: LineChart, advancedOnly: true },
       { labelKey: 'tasks.title', to: '/tasks', icon: ClipboardList },
       { labelKey: 'nav.5d_cost_model', to: '/5d', icon: TrendingUp, moduleKey: '5d', advancedOnly: true },
-      // Requirements merged into /bim/rules — sidebar entry removed
       { labelKey: 'nav.risk_register', to: '/risks', icon: ShieldAlert, advancedOnly: true },
     ],
   },
   // ── FIELD OPERATIONS ───────────────────────────────────────────────
-  // Day-to-day site operations: service tickets, equipment, diary,
-  // sub portal, resources, and the physical assets register. Most
-  // useful to PMs, site engineers, and field supervisors.
+  // Day-to-day site operations: diary, equipment, crew, sub portal,
+  // service tickets, the physical assets register.
   {
     id: 'operations',
     labelKey: 'nav.group_operations',
@@ -315,46 +334,14 @@ const navGroups: NavGroup[] = [
       { labelKey: 'nav.resources', to: '/resources', icon: Users },
       { labelKey: 'nav.service', to: '/service', icon: Wrench },
       { labelKey: 'nav.portal', to: '/portal', icon: Globe },
-      // Assets live here (not Documents) — they're physical inventory,
-      // not paperwork. The /assets page already mirrors equipment-style
-      // detail views, not a document viewer.
       { labelKey: 'nav.assets', to: '/assets', icon: Package, badge: 'BETA' },
-    ],
-  },
-  // ── COMMUNICATION ──────────────────────────────────────────────────
-  {
-    id: 'communication',
-    labelKey: 'nav.group_communication',
-    defaultOpen: false,
-    hideInSimple: true,
-    items: [
-      { labelKey: 'contacts.title', to: '/contacts', icon: Users },
-      { labelKey: 'meetings.title', to: '/meetings', icon: CalendarDays },
-      { labelKey: 'rfi.title', to: '/rfi', icon: HelpCircle, advancedOnly: true },
-      { labelKey: 'submittals.title', to: '/submittals', icon: FileCheck, advancedOnly: true },
-      { labelKey: 'transmittals.title', to: '/transmittals', icon: Send, advancedOnly: true },
-      { labelKey: 'correspondence.title', to: '/correspondence', icon: Mail, advancedOnly: true },
-    ],
-  },
-  // ── DOCUMENTS ──────────────────────────────────────────────────────
-  // Paperwork: CDE binder, project photos, drawing markups. Assets
-  // moved up to Field Operations (they're physical things, not docs).
-  {
-    id: 'documentation',
-    labelKey: 'nav.group_documentation',
-    defaultOpen: false,
-    hideInSimple: true,
-    items: [
-      { labelKey: 'cde.title', to: '/cde', icon: Database },
-      { labelKey: 'nav.photos', to: '/photos', icon: Camera },
-      { labelKey: 'nav.markups', to: '/markups', icon: PenTool },
     ],
   },
   // ── QUALITY ────────────────────────────────────────────────────────
   // Validation, inspections, NCR, QMS, punchlist — anything that
-  // certifies "the work passes". Safety/HSE/ESG is split into its own
-  // sibling group below so site supervisors don't have to scroll past
-  // QA paperwork to log a hazard.
+  // certifies "the work passes". Safety/HSE/ESG is a sibling group
+  // below so safety officers don't have to scroll past QA paperwork
+  // to log a hazard.
   {
     id: 'quality',
     labelKey: 'nav.group_quality',
@@ -370,9 +357,6 @@ const navGroups: NavGroup[] = [
     ],
   },
   // ── SAFETY & HSE ───────────────────────────────────────────────────
-  // Site safety, HSE management, carbon/sustainability tracking. Lives
-  // next to Quality but its own collapsible header so HSE officers can
-  // bookmark just this group.
   {
     id: 'safety',
     labelKey: 'nav.group_safety',
@@ -384,10 +368,41 @@ const navGroups: NavGroup[] = [
       { labelKey: 'nav.carbon', to: '/carbon', icon: Leaf, advancedOnly: true },
     ],
   },
+  // ── COMMUNICATION ──────────────────────────────────────────────────
+  // Contacts + outbound paperwork (RFI / submittals / transmittals /
+  // correspondence) + meetings.
+  {
+    id: 'communication',
+    labelKey: 'nav.group_communication',
+    defaultOpen: false,
+    hideInSimple: true,
+    items: [
+      { labelKey: 'contacts.title', to: '/contacts', icon: Users },
+      { labelKey: 'meetings.title', to: '/meetings', icon: CalendarDays },
+      { labelKey: 'rfi.title', to: '/rfi', icon: HelpCircle, advancedOnly: true },
+      { labelKey: 'submittals.title', to: '/submittals', icon: FileCheck, advancedOnly: true },
+      { labelKey: 'transmittals.title', to: '/transmittals', icon: Send, advancedOnly: true },
+      { labelKey: 'correspondence.title', to: '/correspondence', icon: Mail, advancedOnly: true },
+    ],
+  },
+  // ── DOCUMENTS ──────────────────────────────────────────────────────
+  // Paperwork that lives outside the unified file-manager: the CDE
+  // binder, project photos, drawing markups. Assets moved to Field
+  // Operations (physical inventory, not paperwork).
+  {
+    id: 'documentation',
+    labelKey: 'nav.group_documentation',
+    defaultOpen: false,
+    hideInSimple: true,
+    items: [
+      { labelKey: 'cde.title', to: '/cde', icon: Database },
+      { labelKey: 'nav.photos', to: '/photos', icon: Camera },
+      { labelKey: 'nav.markups', to: '/markups', icon: PenTool },
+    ],
+  },
   // ── FINANCE & PROCUREMENT ──────────────────────────────────────────
-  // Money roll-up: finance, procurement, tendering, change orders.
-  // Sits near the bottom because it's the close-out / accounting view
-  // of work done elsewhere — not the daily action surface.
+  // Money roll-up: finance, procurement, change orders. Tendering moved
+  // to Commercial (it's the bid-collection phase, not accounting).
   {
     id: 'finance',
     labelKey: 'nav.group_finance',
@@ -396,13 +411,13 @@ const navGroups: NavGroup[] = [
     items: [
       { labelKey: 'finance.title', to: '/finance', icon: Wallet, advancedOnly: true },
       { labelKey: 'procurement.title', to: '/procurement', icon: Package, advancedOnly: true },
-      { labelKey: 'tendering.title', to: '/tendering', icon: FileText, moduleKey: 'tendering', advancedOnly: true },
       { labelKey: 'nav.change_orders', to: '/changeorders', icon: FileEdit, advancedOnly: true },
     ],
   },
   // ── ANALYTICS & REPORTS ────────────────────────────────────────────
-  // Cross-module reporting + BI. End of the lifecycle: everything else
-  // has happened, this is where you look at the result.
+  // Cross-module reporting, dashboards, snapshots, BI, architecture
+  // map. End of the lifecycle: everything else has happened — this is
+  // where you look at the result.
   {
     id: 'analytics',
     labelKey: 'nav.group_analytics',
@@ -412,12 +427,17 @@ const navGroups: NavGroup[] = [
     items: [
       { labelKey: 'nav.reports', to: '/reports', icon: FileBarChart, advancedOnly: true },
       { labelKey: 'nav.bi_dashboards', to: '/bi-dashboards', icon: BarChart3, advancedOnly: true },
+      // Newly surfaced: Snapshots, Reporting Dashboards, Architecture Map.
+      // All three already routed in App.tsx but were unreachable from
+      // the sidebar before this redesign.
+      { labelKey: 'nav.snapshots', to: '/dashboards', icon: TrendingUp, advancedOnly: true },
+      { labelKey: 'nav.reporting_dashboards', to: '/reporting', icon: BarChart3, advancedOnly: true },
+      { labelKey: 'nav.architecture_map', to: '/architecture', icon: GitBranch, advancedOnly: true },
     ],
   },
   // ── REGIONAL EXCHANGE (setup-only, dynamic) ────────────────────────
-  // A visual separator marks the boundary between the project-work
-  // surface (Overview … Analytics) and reference/setup surfaces (this
-  // group + Modules + Settings in the admin grid below).
+  // Visual separator marks the boundary between project-work surfaces
+  // above and reference/setup surfaces below.
   {
     id: 'regional',
     labelKey: 'modules.cat_regional',
@@ -476,11 +496,11 @@ const ALL_NAV_ITEMS: Record<string, NavItem> = (() => {
 // localStorage key for collapsed state
 const COLLAPSED_KEY = 'oe_sidebar_collapsed';
 const PINNED_KEY = 'oe_sidebar_pinned';
-// Per-user menu-editor key: array of NavItem `to` strings that the user
-// has chosen to hide from the sidebar. Read at mount, written only on
-// "Save" inside edit mode. Cancel reverts the in-memory working set
-// back to whatever was persisted.
-const HIDDEN_MODULES_KEY = 'oe.sidebar_hidden_modules';
+// Hidden-modules persistence is owned by `useHiddenModules()` — it stores
+// the per-user list server-side under `metadata_.sidebar_hidden_modules`
+// with localStorage as instant cache + offline fallback. The legacy global
+// key `oe.sidebar_hidden_modules` was per-browser, leaked across user
+// switches in the same browser, and is no longer read or written here.
 
 function readCollapsedState(): Record<string, boolean> {
   try {
@@ -516,27 +536,6 @@ function readPinned(): string[] {
 function writePinned(arr: string[]) {
   try {
     localStorage.setItem(PINNED_KEY, JSON.stringify(arr));
-  } catch {
-    /* ignore */
-  }
-}
-
-function readHiddenModules(): string[] {
-  try {
-    const raw = localStorage.getItem(HIDDEN_MODULES_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.filter((p) => typeof p === 'string');
-    }
-  } catch {
-    /* ignore */
-  }
-  return [];
-}
-
-function writeHiddenModules(arr: string[]) {
-  try {
-    localStorage.setItem(HIDDEN_MODULES_KEY, JSON.stringify(arr));
   } catch {
     /* ignore */
   }
@@ -693,13 +692,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
   // ── Menu editor state ───────────────────────────────────────────────
   // `hiddenModules` is the *persisted* set — drives which rows are
-  // filtered out of the rendered nav in normal mode.
+  // filtered out of the rendered nav in normal mode. Persistence is
+  // owned by `useHiddenModules()`: server-side per-user with localStorage
+  // as instant cache + offline fallback (multi-device safe).
   // `editMode` is the transient "Edit menu" toggle.
   // `editingHidden` is the in-memory working copy users edit while in
-  // edit mode; only committed to `hiddenModules` + localStorage on Save.
-  const [hiddenModules, setHiddenModules] = useState<string[]>(() =>
-    readHiddenModules(),
-  );
+  // edit mode; only committed to `hiddenModules` on Save.
+  const { hiddenModules, setHiddenModules } = useHiddenModules();
   const [editMode, setEditMode] = useState(false);
   const [editingHidden, setEditingHidden] = useState<string[]>([]);
 
@@ -715,10 +714,9 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
   const saveEditMode = useCallback(() => {
     setHiddenModules(editingHidden);
-    writeHiddenModules(editingHidden);
     setEditMode(false);
     setEditingHidden([]);
-  }, [editingHidden]);
+  }, [editingHidden, setHiddenModules]);
 
   const toggleItemHidden = useCallback((route: string) => {
     setEditingHidden((prev) =>
@@ -1497,25 +1495,55 @@ function NavGroupSection({
       </div>
     );
   }
+  // Expanded sidebar — render a clear section header with a subtle dot
+  // glyph on the leading edge (Linear-style "rest" indicator) so the
+  // grouping reads as a list, not a wall of indistinguishable rows.
+  // Header is a real button so the entire row toggles the section, and
+  // keyboard focus shows a clean ring without bleeding outside the
+  // padded box.
   return (
-    <div className="mb-0.5">
+    <div className="mt-3 mb-0.5">
       <button
         onClick={onToggle}
         aria-expanded={!isCollapsed}
-        aria-label={isCollapsed ? t('common.expand_section', { defaultValue: 'Expand {{label}}', label }) : t('common.collapse_section', { defaultValue: 'Collapse {{label}}', label })}
-        className="mt-3 mb-0.5 flex w-full items-center justify-between px-2.5 group cursor-pointer"
+        aria-label={
+          isCollapsed
+            ? t('common.expand_section', { defaultValue: 'Expand {{label}}', label })
+            : t('common.collapse_section', { defaultValue: 'Collapse {{label}}', label })
+        }
+        className={clsx(
+          'mb-0.5 flex w-full items-center justify-between gap-2 rounded-md',
+          'px-2 py-1 group cursor-pointer text-left',
+          'hover:bg-surface-secondary/60 focus-visible:outline-none',
+          'focus-visible:ring-1 focus-visible:ring-oe-blue/40',
+          'transition-colors duration-150',
+        )}
       >
-        <span className="text-2xs font-medium uppercase tracking-wider text-content-tertiary group-hover:text-content-secondary transition-colors">
-          {label}
+        <span className="flex items-center gap-1.5 min-w-0">
+          {/* Small leading dot — provides a calm visual rhythm down the
+              sidebar so users can pick out group starts at a glance. */}
+          <span
+            className={clsx(
+              'h-1 w-1 rounded-full shrink-0 transition-colors duration-150',
+              isCollapsed
+                ? 'bg-content-quaternary/45 group-hover:bg-content-tertiary'
+                : 'bg-oe-blue/55 group-hover:bg-oe-blue',
+            )}
+            aria-hidden
+          />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.085em] text-content-tertiary group-hover:text-content-secondary transition-colors truncate">
+            {label}
+          </span>
         </span>
         <ChevronDown
-          size={12}
+          size={11}
           strokeWidth={2}
           className={clsx(
-            'text-content-quaternary group-hover:text-content-secondary',
+            'shrink-0 text-content-quaternary group-hover:text-content-secondary',
             'transition-transform duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
             isCollapsed && '-rotate-90',
           )}
+          aria-hidden
         />
       </button>
       {!isCollapsed && children}

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   FolderPlus, FolderOpen, ArrowRight, MoreHorizontal, Copy, Trash2, Archive, ArchiveRestore, ExternalLink,
   Search, ChevronDown, ArrowUpDown, Star, Map as MapIcon, CloudSun,
@@ -804,7 +804,7 @@ function ProjectCard({
       onClick={() => navigate(`/projects/${project.id}`)}
     >
       {mapEnabled && project.address && (
-        <div onClick={(e) => e.stopPropagation()}>
+        <div className="relative" onClick={(e) => e.stopPropagation()}>
           <ProjectMap
             variant="card"
             lat={project.address?.lat ?? null}
@@ -818,6 +818,29 @@ function ProjectCard({
             className="rounded-none border-none"
             onResolved={setCardCoords}
           />
+          {/* Geo Hub overlay CTA — only when coords are resolved so we
+              never ship a deeplink to an unanchored project. Sits over
+              the map (top-right) with a glass pill so the underlying
+              tiles remain visible. */}
+          {cardCoords && (
+            <Link
+              to={`/projects/${project.id}/geo`}
+              onClick={(e) => e.stopPropagation()}
+              className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 rounded-full border border-white/40 bg-white/85 px-2.5 py-1 text-2xs font-semibold text-oe-blue shadow-sm backdrop-blur-md transition-all hover:bg-white hover:shadow-md hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/60 dark:border-white/10 dark:bg-slate-900/70 dark:text-sky-300 dark:hover:bg-slate-900/90"
+              title={t('projects.card.fly_to_on_map', {
+                defaultValue: 'Fly camera to {{name}} on the globe',
+                name: project.name,
+              })}
+              aria-label={t('projects.card.fly_to_on_map', {
+                defaultValue: 'Fly camera to {{name}} on the globe',
+                name: project.name,
+              })}
+              data-testid="project-card-view-on-map"
+            >
+              <Globe2 size={11} strokeWidth={2.25} />
+              {t('projects.card.view_on_map', { defaultValue: 'On map' })}
+            </Link>
+          )}
         </div>
       )}
       <div className="p-5">
@@ -964,6 +987,28 @@ function ProjectCard({
               <MapPin size={11} strokeWidth={2.25} />
               {project.address.city}
             </span>
+          )}
+          {/* Inline fallback: when the map widget is OFF we still want a
+              discoverable jump-to-Geo affordance on geo-anchored projects.
+              Hidden when the overlay version is already shown above. */}
+          {!mapEnabled && cardCoords && (
+            <Link
+              to={`/projects/${project.id}/geo`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 rounded-full border border-oe-blue/30 bg-oe-blue-subtle px-2 py-0.5 text-2xs font-semibold text-oe-blue transition-all hover:bg-oe-blue hover:text-white hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/60"
+              title={t('projects.card.fly_to_on_map', {
+                defaultValue: 'Fly camera to {{name}} on the globe',
+                name: project.name,
+              })}
+              aria-label={t('projects.card.fly_to_on_map', {
+                defaultValue: 'Fly camera to {{name}} on the globe',
+                name: project.name,
+              })}
+              data-testid="project-card-view-on-map-inline"
+            >
+              <Globe2 size={11} strokeWidth={2.25} />
+              {t('projects.card.view_on_map', { defaultValue: 'On map' })}
+            </Link>
           )}
           {fileTypes && fileTypes.length > 0 && (
             <div className="ml-auto">

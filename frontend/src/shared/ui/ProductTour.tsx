@@ -39,6 +39,8 @@ import { useTranslation } from 'react-i18next';
 import { X, ArrowLeft, ArrowRight, MapPin, Check } from 'lucide-react';
 import clsx from 'clsx';
 
+import { ConfirmDialog } from './ConfirmDialog';
+
 /* ── Constants ──────────────────────────────────────────────────────────── */
 
 /** Tour completion flag.  Tested against the literal string `'true'`. */
@@ -270,6 +272,7 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
   const [currentStep, setCurrentStep] = useState(0);
   const [spotlight, setSpotlight] = useState<SpotlightRect | null>(null);
   const [tooltipCoords, setTooltipCoords] = useState<TooltipCoords>(() => centerOfViewport());
+  const [confirmExitOpen, setConfirmExitOpen] = useState(false);
   // Track which missing-target warnings we've already emitted so we don't
   // spam the console on resize/recompute.
   const warnedRef = useRef<Set<string>>(new Set());
@@ -373,24 +376,17 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
     if (!active) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if (confirmExitOpen) return;
+      const otherDialog = document.querySelector(
+        '[role=dialog]:not([data-product-tour]), [role=alertdialog]:not([data-product-tour])',
+      );
+      if (otherDialog) return;
       e.preventDefault();
-      // Light-weight confirm via browser dialog.  Falls back to
-      // "always close on Esc" if confirm is suppressed.
-      let proceed = true;
-      try {
-        proceed = window.confirm(
-          t('tour.confirm_skip', {
-            defaultValue: 'Skip the product tour? You can re-launch it from the Help menu.',
-          }),
-        );
-      } catch {
-        /* confirm blocked — close anyway */
-      }
-      if (proceed) completeTour();
+      setConfirmExitOpen(true);
     };
     document.addEventListener('keydown', handler, { capture: true });
     return () => document.removeEventListener('keydown', handler, { capture: true });
-  }, [active, completeTour, t]);
+  }, [active, confirmExitOpen]);
 
   /* ── External trigger: `oe:start-tour` window event ──────────────────── */
   useEffect(() => {
@@ -477,6 +473,7 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
           accepts pointer events so the user has to engage with the modal. */}
       <div
         data-testid="product-tour-overlay"
+        data-product-tour="overlay"
         className={clsx(
           'fixed inset-0 z-[9000]',
           spotlight ? 'pointer-events-none' : 'pointer-events-auto bg-black/35',
@@ -508,6 +505,7 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
         aria-modal="false"
         aria-labelledby="product-tour-title"
         data-testid="product-tour-tooltip"
+        data-product-tour="tooltip"
         style={{
           position: 'fixed',
           top: tooltipCoords.top,
@@ -617,6 +615,22 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmExitOpen}
+        onCancel={() => setConfirmExitOpen(false)}
+        onConfirm={() => {
+          setConfirmExitOpen(false);
+          completeTour();
+        }}
+        variant="warning"
+        title={t('tour.confirm_skip_title', { defaultValue: 'Exit tour?' })}
+        message={t('tour.confirm_skip', {
+          defaultValue: 'Skip the product tour? You can re-launch it from the Help menu.',
+        })}
+        confirmLabel={t('tour.confirm_skip_confirm', { defaultValue: 'Exit tour' })}
+        cancelLabel={t('tour.confirm_skip_cancel', { defaultValue: 'Keep going' })}
+      />
     </>
   );
 }

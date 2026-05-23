@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -220,6 +220,10 @@ const WARRANTY_VARIANT: Record<WarrantyStatus, 'neutral' | 'blue' | 'success' | 
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
+const inputErrCls =
+  'h-9 w-full rounded-lg border border-semantic-error bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-semantic-error/30';
+
+const ISO_CURRENCY_RE = /^[A-Z]{3}$/;
 
 // labelCls is still used by a couple of small inline modals (e.g.
 // BuyerContract date-pair) that were not migrated to WideModal because
@@ -504,109 +508,88 @@ export function PropertyDevPage() {
         ]}
       />
 
-      {/* Tabs — compact icon-button grid grouped into 3 lifecycle rows.
-          Each tab is a square (~64px) with icon on top + label below.
-          Active tab gets a solid accent fill; tooltip exposes a 1-line
-          description for clarity. Order within each group is unchanged. */}
-      <div className="rounded-2xl border border-border-light bg-white/60 backdrop-blur-sm px-3 py-3 space-y-3">
-        {(
-          [
-            {
-              key: 'master_data',
-              label: t('propdev.tab_group.master_data', { defaultValue: 'Master data' }),
-              items: [
-                { id: 'overview', label: t('propdev.overview', { defaultValue: 'Overview' }), icon: Home, tip: t('propdev.tab.overview.tooltip', { defaultValue: 'Portfolio KPIs and pipeline snapshot' }) },
-                { id: 'developments', label: t('propdev.developments', { defaultValue: 'Developments' }), icon: Building2, tip: t('propdev.tab.developments.tooltip', { defaultValue: 'Top-level real-estate projects' }) },
-                { id: 'phases', label: t('propdev.phases', { defaultValue: 'Phases' }), icon: Layers, tip: t('propdev.tab.phases.tooltip', { defaultValue: 'Construction & sales phases within a development' }) },
-                { id: 'blocks', label: t('propdev.blocks', { defaultValue: 'Blocks' }), icon: LayoutGrid, tip: t('propdev.tab.blocks.tooltip', { defaultValue: 'Building blocks / towers per phase' }) },
-                { id: 'plots', label: t('propdev.plots', { defaultValue: 'Plots' }), icon: MapPin, tip: t('propdev.tab.plots.tooltip', { defaultValue: 'Inventory of sellable units' }) },
-                { id: 'house_types', label: t('propdev.house_types', { defaultValue: 'House Types' }), icon: House, tip: t('propdev.tab.house_types.tooltip', { defaultValue: 'Reusable unit templates and variants' }) },
-              ],
-            },
-            {
-              key: 'sales',
-              label: t('propdev.tab_group.sales', { defaultValue: 'Sales lifecycle' }),
-              items: [
-                { id: 'leads', label: t('propdev.leads', { defaultValue: 'Leads' }), icon: UserPlus, tip: t('propdev.tab.leads.tooltip', { defaultValue: 'Inbound prospects before becoming buyers' }) },
-                { id: 'buyers', label: t('propdev.buyers', { defaultValue: 'Buyers' }), icon: Users, tip: t('propdev.tab.buyers.tooltip', { defaultValue: 'Qualified buyers and KYC records' }) },
-                { id: 'reservations', label: t('propdev.reservations', { defaultValue: 'Reservations' }), icon: BookmarkCheck, tip: t('propdev.tab.reservations.tooltip', { defaultValue: 'Unit holds and deposit reservations' }) },
-                { id: 'spa', label: t('propdev.spa', { defaultValue: 'Sales Contracts' }), icon: FileSignature, tip: t('propdev.tab.spa.tooltip', { defaultValue: 'Sale & Purchase Agreements (SPAs)' }) },
-                { id: 'payment_schedule', label: t('propdev.payment_schedule', { defaultValue: 'Payment Schedules' }), icon: CalendarClock, tip: t('propdev.tab.payment_schedule.tooltip', { defaultValue: 'Milestone-based buyer installments' }) },
-              ],
-            },
-            {
-              key: 'operations',
-              label: t('propdev.tab_group.operations', { defaultValue: 'Operations' }),
-              items: [
-                { id: 'brokers', label: t('propdev.brokers', { defaultValue: 'Brokers' }), icon: Briefcase, tip: t('propdev.tab.brokers.tooltip', { defaultValue: 'External agents and commission tracking' }) },
-                { id: 'price_matrix', label: t('propdev.price_matrix', { defaultValue: 'Price Matrix' }), icon: Grid3X3, tip: t('propdev.tab.price_matrix.tooltip', { defaultValue: 'Floor / view / orientation price factors' }) },
-                { id: 'escrow', label: t('propdev.escrow', { defaultValue: 'Escrow' }), icon: Lock, tip: t('propdev.tab.escrow.tooltip', { defaultValue: 'Trust accounts and released funds' }) },
-                { id: 'handovers', label: t('propdev.handovers', { defaultValue: 'Handovers' }), icon: Key, tip: t('propdev.tab.handovers.tooltip', { defaultValue: 'Unit handover events and snags' }) },
-                { id: 'warranty', label: t('propdev.warranty', { defaultValue: 'Warranty Claims' }), icon: ShieldAlert, tip: t('propdev.tab.warranty.tooltip', { defaultValue: 'Post-handover defect claims' }) },
-              ],
-            },
-          ] as {
-            key: string;
-            label: string;
-            items: { id: Tab; label: string; icon: React.ElementType; tip: string }[];
-          }[]
-        ).map((group) => (
-          <div key={group.key}>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-content-tertiary mb-1.5 px-1">
-              {group.label}
-            </div>
-            <nav
-              className="flex flex-wrap gap-1.5"
-              aria-label={group.label}
-              role="tablist"
-            >
-              {group.items.map((tabItem) => {
-                const Icon = tabItem.icon;
-                const active = tab === tabItem.id;
-                return (
-                  <button
-                    key={tabItem.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    aria-label={tabItem.label}
-                    title={`${tabItem.label} — ${tabItem.tip}`}
-                    onClick={() => {
-                      setTab(tabItem.id);
-                      setSearch('');
-                    }}
+      {/* Tabs — all 16 icon buttons in a single wrap row. Group boundaries
+          shown via a thin vertical divider so the master-data → sales →
+          operations lifecycle is still discoverable without consuming
+          three separate rows on wide screens. */}
+      <div className="rounded-2xl border border-border-light bg-white/60 backdrop-blur-sm px-3 py-3">
+        <nav
+          className="flex flex-wrap items-stretch gap-1.5"
+          aria-label={t('propdev.tabs_aria', { defaultValue: 'Property development sections' })}
+          role="tablist"
+        >
+          {(
+            [
+              { id: 'overview',         group: 'master_data', label: t('propdev.overview',         { defaultValue: 'Overview' }),         icon: Home,           tip: t('propdev.tab.overview.tooltip',         { defaultValue: 'Portfolio KPIs and pipeline snapshot' }) },
+              { id: 'developments',     group: 'master_data', label: t('propdev.developments',     { defaultValue: 'Developments' }),     icon: Building2,      tip: t('propdev.tab.developments.tooltip',     { defaultValue: 'Top-level real-estate projects' }) },
+              { id: 'phases',           group: 'master_data', label: t('propdev.phases',           { defaultValue: 'Phases' }),           icon: Layers,         tip: t('propdev.tab.phases.tooltip',           { defaultValue: 'Construction & sales phases within a development' }) },
+              { id: 'blocks',           group: 'master_data', label: t('propdev.blocks',           { defaultValue: 'Blocks' }),           icon: LayoutGrid,     tip: t('propdev.tab.blocks.tooltip',           { defaultValue: 'Building blocks / towers per phase' }) },
+              { id: 'plots',            group: 'master_data', label: t('propdev.plots',            { defaultValue: 'Plots' }),            icon: MapPin,         tip: t('propdev.tab.plots.tooltip',            { defaultValue: 'Inventory of sellable units' }) },
+              { id: 'house_types',      group: 'master_data', label: t('propdev.house_types',      { defaultValue: 'House Types' }),      icon: House,          tip: t('propdev.tab.house_types.tooltip',      { defaultValue: 'Reusable unit templates and variants' }) },
+              { id: 'leads',            group: 'sales',       label: t('propdev.leads',            { defaultValue: 'Leads' }),            icon: UserPlus,       tip: t('propdev.tab.leads.tooltip',            { defaultValue: 'Inbound prospects before becoming buyers' }) },
+              { id: 'buyers',           group: 'sales',       label: t('propdev.buyers',           { defaultValue: 'Buyers' }),           icon: Users,          tip: t('propdev.tab.buyers.tooltip',           { defaultValue: 'Qualified buyers and KYC records' }) },
+              { id: 'reservations',     group: 'sales',       label: t('propdev.reservations',     { defaultValue: 'Reservations' }),     icon: BookmarkCheck,  tip: t('propdev.tab.reservations.tooltip',     { defaultValue: 'Unit holds and deposit reservations' }) },
+              { id: 'spa',              group: 'sales',       label: t('propdev.spa',              { defaultValue: 'Sales Contracts' }),  icon: FileSignature,  tip: t('propdev.tab.spa.tooltip',              { defaultValue: 'Sale & Purchase Agreements (SPAs)' }) },
+              { id: 'payment_schedule', group: 'sales',       label: t('propdev.payment_schedule', { defaultValue: 'Payment Schedules' }), icon: CalendarClock, tip: t('propdev.tab.payment_schedule.tooltip', { defaultValue: 'Milestone-based buyer installments' }) },
+              { id: 'brokers',          group: 'operations',  label: t('propdev.brokers',          { defaultValue: 'Brokers' }),          icon: Briefcase,      tip: t('propdev.tab.brokers.tooltip',          { defaultValue: 'External agents and commission tracking' }) },
+              { id: 'price_matrix',     group: 'operations',  label: t('propdev.price_matrix',     { defaultValue: 'Price Matrix' }),     icon: Grid3X3,        tip: t('propdev.tab.price_matrix.tooltip',     { defaultValue: 'Floor / view / orientation price factors' }) },
+              { id: 'escrow',           group: 'operations',  label: t('propdev.escrow',           { defaultValue: 'Escrow' }),           icon: Lock,           tip: t('propdev.tab.escrow.tooltip',           { defaultValue: 'Trust accounts and released funds' }) },
+              { id: 'handovers',        group: 'operations',  label: t('propdev.handovers',        { defaultValue: 'Handovers' }),        icon: Key,            tip: t('propdev.tab.handovers.tooltip',        { defaultValue: 'Unit handover events and snags' }) },
+              { id: 'warranty',         group: 'operations',  label: t('propdev.warranty',         { defaultValue: 'Warranty Claims' }),  icon: ShieldAlert,    tip: t('propdev.tab.warranty.tooltip',         { defaultValue: 'Post-handover defect claims' }) },
+            ] as { id: Tab; group: string; label: string; icon: React.ElementType; tip: string }[]
+          ).map((tabItem, idx, arr) => {
+            const Icon = tabItem.icon;
+            const active = tab === tabItem.id;
+            const showDividerBefore = idx > 0 && arr[idx - 1]?.group !== tabItem.group;
+            return (
+              <Fragment key={tabItem.id}>
+                {showDividerBefore && (
+                  <div
+                    aria-hidden="true"
+                    className="self-stretch w-px bg-border-light/80 mx-0.5"
+                  />
+                )}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-label={tabItem.label}
+                  title={`${tabItem.label} — ${tabItem.tip}`}
+                  onClick={() => {
+                    setTab(tabItem.id);
+                    setSearch('');
+                  }}
+                  className={clsx(
+                    'group relative flex flex-col items-center justify-center gap-1',
+                    'h-[64px] w-[64px] md:h-[68px] md:w-[72px]',
+                    'rounded-xl border text-center transition-all duration-150',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/60 focus-visible:ring-offset-1',
+                    active
+                      ? 'border-oe-blue bg-oe-blue text-white shadow-sm shadow-oe-blue/30'
+                      : 'border-transparent bg-white/50 text-content-secondary hover:bg-white hover:text-content-primary hover:border-border-light hover:-translate-y-px',
+                  )}
+                >
+                  <Icon
+                    size={20}
                     className={clsx(
-                      'group relative flex flex-col items-center justify-center gap-1',
-                      'h-[64px] w-[64px] md:h-[68px] md:w-[72px]',
-                      'rounded-xl border text-center transition-all duration-150',
-                      'focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/60 focus-visible:ring-offset-1',
-                      active
-                        ? 'border-oe-blue bg-oe-blue text-white shadow-sm shadow-oe-blue/30'
-                        : 'border-transparent bg-white/50 text-content-secondary hover:bg-white hover:text-content-primary hover:border-border-light hover:-translate-y-px',
+                      'transition-colors',
+                      active ? 'text-white' : 'text-content-secondary group-hover:text-oe-blue',
+                    )}
+                    aria-hidden="true"
+                  />
+                  <span
+                    className={clsx(
+                      'text-[10px] leading-tight font-medium line-clamp-2 px-1',
+                      active ? 'text-white' : 'text-content-secondary group-hover:text-content-primary',
                     )}
                   >
-                    <Icon
-                      size={20}
-                      className={clsx(
-                        'transition-colors',
-                        active ? 'text-white' : 'text-content-secondary group-hover:text-oe-blue',
-                      )}
-                      aria-hidden="true"
-                    />
-                    <span
-                      className={clsx(
-                        'text-[10px] leading-tight font-medium line-clamp-2 px-1',
-                        active ? 'text-white' : 'text-content-secondary group-hover:text-content-primary',
-                      )}
-                    >
-                      {tabItem.label}
-                    </span>
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-        ))}
+                    {tabItem.label}
+                  </span>
+                </button>
+              </Fragment>
+            );
+          })}
+        </nav>
       </div>
 
       {/* Filters */}
@@ -766,9 +749,20 @@ export function PropertyDevPage() {
           onJumpToSpa={() => setTab('spa')}
         />
       ) : tab === 'price_matrix' ? (
-        <PriceMatrixTab developmentId={selectedDevId} plots={allPlots} />
+        <PriceMatrixTab
+          developmentId={selectedDevId}
+          plots={allPlots}
+          defaultCurrency={
+            developments.find((d) => d.id === selectedDevId)?.currency
+          }
+        />
       ) : tab === 'escrow' ? (
-        <EscrowTab developmentId={selectedDevId} />
+        <EscrowTab
+          developmentId={selectedDevId}
+          defaultCurrency={
+            developments.find((d) => d.id === selectedDevId)?.currency
+          }
+        />
       ) : tab === 'handovers' ? (
         <HandoversTab plots={allPlots} buyers={allBuyers} />
       ) : (
@@ -2863,7 +2857,10 @@ function ConvertLeadModal({
       addToast({ type: 'error', title: getErrorMessage(err) }),
   });
 
-  const disabled = !form.plot_id || mut.isPending;
+  const disabled =
+    !form.plot_id ||
+    mut.isPending ||
+    !ISO_CURRENCY_RE.test(form.currency);
 
   return (
     <WideModal
@@ -2943,13 +2940,30 @@ function ConvertLeadModal({
           <WideModalField
             label={t('propdev.currency', { defaultValue: 'Currency (ISO)' })}
             required
+            error={
+              form.currency && !ISO_CURRENCY_RE.test(form.currency)
+                ? t('propdev.currency_invalid', {
+                    defaultValue: 'Currency must be a 3-letter ISO code (e.g. EUR)',
+                  })
+                : undefined
+            }
           >
             <input
-              className={inputCls}
+              className={
+                form.currency && !ISO_CURRENCY_RE.test(form.currency)
+                  ? inputErrCls
+                  : inputCls
+              }
               value={form.currency}
               maxLength={3}
               onChange={(e) =>
-                setForm({ ...form, currency: e.target.value.toUpperCase() })
+                setForm({
+                  ...form,
+                  currency: e.target.value
+                    .toUpperCase()
+                    .replace(/[^A-Z]/g, '')
+                    .slice(0, 3),
+                })
               }
             />
           </WideModalField>
@@ -3524,7 +3538,11 @@ function ConvertReservationModal({
             variant="primary"
             icon={mut.isPending ? <Loader2 size={14} /> : <ArrowRightCircle size={14} />}
             loading={mut.isPending}
-            disabled={!form.total_value || !form.signing_date}
+            disabled={
+              !form.total_value ||
+              !form.signing_date ||
+              !ISO_CURRENCY_RE.test(form.currency)
+            }
             onClick={() => mut.mutate()}
           >
             {t('propdev.create_spa', { defaultValue: 'Create Sales Contract' })}
@@ -3551,11 +3569,33 @@ function ConvertReservationModal({
             className={inputCls}
           />
         </WideModalField>
-        <WideModalField label={t('propdev.currency', { defaultValue: 'Currency' })} required>
+        <WideModalField
+          label={t('propdev.currency', { defaultValue: 'Currency' })}
+          required
+          error={
+            form.currency && !ISO_CURRENCY_RE.test(form.currency)
+              ? t('propdev.currency_invalid', {
+                  defaultValue: 'Currency must be a 3-letter ISO code (e.g. EUR)',
+                })
+              : undefined
+          }
+        >
           <input
             value={form.currency}
-            onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
-            className={inputCls}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                currency: e.target.value
+                  .toUpperCase()
+                  .replace(/[^A-Z]/g, '')
+                  .slice(0, 3),
+              })
+            }
+            className={
+              form.currency && !ISO_CURRENCY_RE.test(form.currency)
+                ? inputErrCls
+                : inputCls
+            }
             maxLength={3}
           />
         </WideModalField>
@@ -7127,7 +7167,7 @@ function CreateModal({
           bathrooms: Number(plotForm.bathrooms) || 0,
           parking_spaces: Number(plotForm.parking_spaces) || 0,
           sun_exposure_hours: optNum(plotForm.sun_exposure_hours),
-          price_base: Number(plotForm.price_base) || 0,
+          price_base: plotForm.price_base.trim() || '0',
           currency: plotForm.currency,
         });
         addToast({ type: 'success', title: t('propdev.plot_created', { defaultValue: 'Plot created' }) });
@@ -7141,7 +7181,7 @@ function CreateModal({
           name: htForm.name,
           bedrooms: htForm.bedrooms,
           total_area_m2: Number(htForm.total_area_m2) || 0,
-          base_price: Number(htForm.base_price) || 0,
+          base_price: htForm.base_price.trim() || '0',
           currency: htForm.currency,
         });
         addToast({ type: 'success', title: t('propdev.house_type_created', { defaultValue: 'House type created' }) });

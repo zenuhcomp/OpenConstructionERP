@@ -3344,6 +3344,7 @@ export function CadDataExplorerPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const sessionId = searchParams.get('session') || '';
 
@@ -3842,6 +3843,27 @@ export function CadDataExplorerPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Round-trip with /bim. Sessions materialised from a BIM model carry
+              a `bim:<modelId>` filename (see takeoff router from-bim-model);
+              parse it back so the button deeplinks to the same model in the
+              3D viewer. Hidden when the session has no linked model. */}
+          {describe?.filename?.startsWith('bim:') && (
+            <button
+              onClick={() => {
+                const modelId = describe.filename.slice(4);
+                if (modelId) navigate(`/bim/${encodeURIComponent(modelId)}`);
+              }}
+              data-testid="explorer-open-in-bim-btn"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary"
+              title={t('explorer.open_in_bim_title', { defaultValue: 'View 3D model' })}
+              aria-label={t('explorer.open_in_bim', { defaultValue: 'Open in BIM viewer' })}
+            >
+              <Box size={13} />
+              <span className="hidden sm:inline">
+                {t('explorer.open_in_bim', { defaultValue: 'Open in BIM viewer' })}
+              </span>
+            </button>
+          )}
           <button
             onClick={handleSaveView}
             data-testid="explorer-save-view-btn"

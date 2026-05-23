@@ -53,6 +53,7 @@ const textAreaCls =
   'min-h-[72px] w-full rounded-lg border border-border bg-surface-primary px-3 py-2 text-sm ' +
   'focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
 
+const ISO_CURRENCY_RE = /^[A-Z]{3}$/;
 const COMMON_CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'PLN', 'RUB', 'TRY', 'JPY', 'CNY', 'AED'];
 const CONSTRUCTION_TYPES = [
   'masonry',
@@ -199,12 +200,19 @@ export function HouseTypeEditModal({
           defaultValue: 'Describe the custom region',
         })
       : '';
+  const currencyErr =
+    touched.currency && form.currency && !ISO_CURRENCY_RE.test(form.currency)
+      ? t('property_dev.house_type.currency_invalid', {
+          defaultValue: 'Currency must be a 3-letter ISO code (e.g. EUR)',
+        })
+      : '';
 
   const formValid =
     !!form.code.trim() &&
     !!form.name.trim() &&
     (isEdit || !!form.project_id) &&
-    (form.countryValue !== CUSTOM_SENTINEL || !!form.customRegion.trim());
+    (form.countryValue !== CUSTOM_SENTINEL || !!form.customRegion.trim()) &&
+    (!form.currency || ISO_CURRENCY_RE.test(form.currency));
 
   // Preview values.
   const previewCountry = useMemo(() => {
@@ -586,15 +594,22 @@ export function HouseTypeEditModal({
               label={t('property_dev.house_type.currency_label', {
                 defaultValue: 'Currency',
               })}
+              error={currencyErr}
             >
               <input
                 type="text"
                 value={form.currency}
-                onChange={(e) => set('currency', e.target.value.toUpperCase())}
+                onChange={(e) =>
+                  set(
+                    'currency',
+                    e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3),
+                  )
+                }
+                onBlur={() => markTouched('currency')}
                 list="house-type-currency-list"
-                maxLength={4}
+                maxLength={3}
                 placeholder="EUR"
-                className={inputCls}
+                className={currencyErr ? inputErrCls : inputCls}
               />
               <datalist id="house-type-currency-list">
                 {COMMON_CURRENCIES.map((c) => (

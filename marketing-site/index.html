@@ -20595,7 +20595,10 @@ manifest = <span class="tok-fn">ModuleManifest</span>(
     var out = {};
     var interests = [];
     fd.forEach(function(v, k){
-      if (k.startsWith('_')) return; // skip any legacy hidden honeypot
+      // Honeypot must be sent through so the server can reject bot submissions.
+      // Other underscore-prefixed keys (legacy/internal) are still stripped.
+      if (k === '_honey') { out._honey = String(v); return; }
+      if (k.startsWith('_')) return; // skip any other legacy hidden field
       if (k === 'interest' || k === 'interests') { interests.push(String(v)); return; }
       if (typeof v === 'string') out[k] = v;
     });

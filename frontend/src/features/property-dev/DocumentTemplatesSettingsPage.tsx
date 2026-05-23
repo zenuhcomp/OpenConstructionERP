@@ -271,7 +271,7 @@ export function DocumentTemplatesSettingsPage() {
         onUploaded={() => dataQ.refetch()}
         allowedExtensions={
           dataQ.data?.upload?.allowed_extensions ?? [
-            '.docx', '.html', '.htm', '.pdf', '.odt', '.md', '.txt',
+            '.docx', '.html', '.htm', '.pdf', '.odt', '.md', '.txt', '.xlsx',
           ]
         }
         maxSizeMb={dataQ.data?.upload?.max_size_mb ?? 10}
@@ -396,6 +396,30 @@ function UploadCustomTemplateForm({
 
   const accept = useMemo(() => allowedExtensions.join(','), [allowedExtensions]);
 
+  const allowedExtSet = useMemo(
+    () => new Set(allowedExtensions.map((e) => e.toLowerCase())),
+    [allowedExtensions],
+  );
+
+  const pickFile = (next: File | null) => {
+    if (next) {
+      const dot = next.name.lastIndexOf('.');
+      const ext = dot >= 0 ? next.name.slice(dot).toLowerCase() : '';
+      if (!allowedExtSet.has(ext)) {
+        addToast({
+          type: 'error',
+          title: t('property_dev.doc_templates.upload_bad_ext', {
+            defaultValue: 'Unsupported file type. Allowed: {{exts}}',
+            exts: allowedExtensions.join(', '),
+          }),
+        });
+        setFile(null);
+        return;
+      }
+    }
+    setFile(next);
+  };
+
   const reset = () => {
     setFile(null);
     setName('');
@@ -476,7 +500,7 @@ function UploadCustomTemplateForm({
           <input
             type="file"
             accept={accept}
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
             className="block w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-oe-blue/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-oe-blue hover:file:bg-oe-blue/20"
             data-testid="custom-upload-file"
           />

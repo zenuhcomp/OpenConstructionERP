@@ -314,6 +314,12 @@ export function CesiumViewer({
         // ion key required. Enterprise customers wire their own ion
         // token via the Terrain admin page; we surface it through
         // the map-config bundle for them.
+        //
+        // ``homeButton`` and ``navigationHelpButton`` are disabled here
+        // because we don't ship Cesium's ``widgets.css`` in the bundle,
+        // which would leave them as unstyled (invisible) toolbar pills.
+        // The lat/lon HUD + altitude readout + our overlay panel cover
+        // every interaction the home button traditionally provides.
         const v = new cesium.Viewer(container, {
           terrainProvider: new cesium.EllipsoidTerrainProvider(),
           baseLayerPicker: false,
@@ -322,7 +328,8 @@ export function CesiumViewer({
           shouldAnimate: false,
           fullscreenButton: false,
           geocoder: false,
-          homeButton: true,
+          homeButton: false,
+          navigationHelpButton: false,
           sceneModePicker: false,
         });
         viewer = v;
@@ -755,6 +762,53 @@ export function CesiumViewer({
 
   return (
     <div className="relative h-full w-full">
+      {/* Scoped style overrides for Cesium widget chrome.
+          The project ships without ``cesium/Build/Cesium/Widgets/widgets.css``
+          in the global CSS pipeline, so any widget that does render
+          (timeline + animation in project/development modes, plus the
+          attribution credit) inherits raw browser defaults — low
+          contrast, often invisible against the dark globe. These rules
+          give every visible Cesium widget a translucent dark plate with
+          light text + a subtle outline so the user can actually see and
+          click them. Constraints kept narrow so we never collide with
+          unrelated app chrome. */}
+      <style>{`
+        .cesium-viewer .cesium-widget-credits {
+          color: rgb(226 232 240 / 0.85);
+          font-size: 10px;
+          background: rgba(15, 23, 42, 0.55);
+          padding: 2px 6px;
+          border-radius: 4px;
+          backdrop-filter: blur(4px);
+        }
+        .cesium-viewer .cesium-widget-credits a,
+        .cesium-viewer .cesium-widget-credits a:visited {
+          color: rgb(165 243 252 / 0.95);
+        }
+        .cesium-viewer .cesium-viewer-toolbar {
+          top: 96px;
+          right: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .cesium-viewer .cesium-viewer-toolbar > * {
+          background: rgba(15, 23, 42, 0.78);
+          color: #f1f5f9;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          border-radius: 6px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        }
+        .cesium-viewer .cesium-viewer-toolbar svg {
+          fill: #f1f5f9;
+        }
+        .cesium-viewer .cesium-viewer-timelineContainer,
+        .cesium-viewer .cesium-viewer-animationContainer {
+          background: rgba(15, 23, 42, 0.78);
+          border-radius: 6px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        }
+      `}</style>
       <div
         ref={containerRef}
         data-testid="geo-hub-cesium-container"

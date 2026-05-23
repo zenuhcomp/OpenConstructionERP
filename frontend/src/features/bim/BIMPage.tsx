@@ -2791,6 +2791,31 @@ export function BIMPage() {
                 </button>
               )}
 
+              {/* Round-trip with /data-explorer. The `?bimModel=<id>` deeplink
+                  is already handled by CadDataExplorerPage which calls
+                  `sessionFromBimModel` server-side (idempotent — reuses an
+                  existing session for the same model). */}
+              {activeModelId && (
+                <button
+                  onClick={() => {
+                    navigate(`/data-explorer?bimModel=${encodeURIComponent(activeModelId)}`);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary"
+                  title={t('bim.open_in_data_explorer_title', {
+                    defaultValue: 'Explore extracted data tables',
+                  })}
+                  aria-label={t('bim.open_in_data_explorer', {
+                    defaultValue: 'Open in Data Explorer',
+                  })}
+                  data-testid="bim-open-in-data-explorer"
+                >
+                  <Database size={13} />
+                  {t('bim.open_in_data_explorer', {
+                    defaultValue: 'Open in Data Explorer',
+                  })}
+                </button>
+              )}
+
               <button
                 onClick={() => setAssetCardEnabled(!assetCardEnabled)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border ${

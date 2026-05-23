@@ -350,7 +350,7 @@ export interface CreateHouseTypePayload {
   bedrooms?: number;
   bathrooms?: number;
   total_area_m2?: number;
-  base_price?: number;
+  base_price?: number | string;
   currency?: string;
 }
 

@@ -179,19 +179,15 @@ export function Header({ title, onMenuClick }: HeaderProps) {
         {/* Hairline divider between Zone 2 and Zone 3. */}
         <div className="hidden sm:block h-4 w-px bg-border-light/70" aria-hidden />
 
-        {/* ── Zone 3 (Notifications + Bug + Help) ──────────────────
-            BugReportMenu is its own button (not buried inside Help) so a
-            user can fire off a report in one click without scanning the
-            help dropdown. The little red dot turns on when errors were
-            captured this session. */}
+        {/* ── Zone 3 (Notifications + Subscribe + Bug + Help) ──────
+            Order: NotificationBell · SupportUs · Subscribe · BugReport · Help.
+            The "ask the user for something" CTAs (Support / Subscribe) stay
+            adjacent; Bug + Help sit on the right edge so a user filing a
+            report doesn't have to scan past the marketing CTAs. */}
         <NotificationBell />
         <SupportUsButton />
-        <BugReportMenu />
-        {/* Subscribe sits just left of Help so the two "ask the user
-            for something light" CTAs (Support / Subscribe) bracket the
-            bug + help buttons. Sky-blue accent distinguishes Subscribe
-            from the neutral Help and amber Support. */}
         <SubscribeButton />
+        <BugReportMenu />
         <HelpMenu />
 
         {/* Hairline divider between Zone 3 and Zone 4. */}

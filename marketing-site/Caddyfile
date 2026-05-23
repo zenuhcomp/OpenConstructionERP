@@ -76,6 +76,14 @@ openconstructionerp.com {
     }
   }
 
+  # Health check for the marketing-forms SMTP service (uptime monitoring).
+  # Must be declared BEFORE the catch-all /api/* below.
+  handle /api/forms-health {
+    reverse_proxy 172.19.0.1:8891 {
+      rewrite /health
+    }
+  }
+
   # ERP App: API calls (absolute /api/ paths from frontend)
   handle /api/* {
     reverse_proxy 172.19.0.1:9090

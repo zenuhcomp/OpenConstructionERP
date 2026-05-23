@@ -275,7 +275,30 @@ LICENSE_DATA_FILE = "/root/clawd/license-requests.jsonl"
 INQUIRY_DATA_FILE = "/root/clawd/contact-requests.jsonl"
 SUBSCRIBE_DATA_FILE = "/root/clawd/newsletter-subscribers.jsonl"
 PARTNERS_DATA_FILE = "/root/clawd/partner-applications.jsonl"
+# Best-effort log of email-delivery failures. A future cron job
+# (or any tail -F watcher) can monitor this to alert when SMTP / Resend
+# falls over. We keep it separate from the lead JSONL files so the
+# operations data stays clean.
+EMAIL_FAILURE_LOG = "/root/clawd/email-delivery-failures.jsonl"
 BASE_URL = os.environ.get("BASE_URL", "https://openconstructionerp.com")
+
+
+def _log_email_failure(endpoint: str, recipient: str, error: str) -> None:
+    """Append one JSON line describing an outbound email delivery failure.
+
+    Swallows its own errors — logging the log failure is not useful and
+    we never want this helper to break the request flow.
+    """
+    try:
+        with open(EMAIL_FAILURE_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "endpoint": endpoint,
+                "recipient": recipient,
+                "error": str(error)[:500],
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 TIER_LABELS = {
     "starter": "Starter (on request)",
@@ -597,6 +620,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"<pre>{admin_text}</pre>", admin_text)
             except Exception as e:
                 print(f"[WARN] Admin email failed: {e}", file=sys.stderr)
+                _log_email_failure("verify:admin", ADMIN_EMAIL, str(e))
             print(f"[VERIFIED] {entry.get('email')}")
             self.send_response(302)
             self.send_header("Location", f"{BASE_URL}/demo?verified=true")
@@ -696,17 +720,42 @@ class Handler(BaseHTTPRequestHandler):
         try:
             html = make_confirmation_email(data, verify_url)
             email_sent = send_email(email, "Confirm your OpenConstructionERP demo access", html)
+            if not email_sent:
+                _log_email_failure("register:confirm", email, "send_email returned False")
         except Exception as e:
             print(f"[ERROR] Email: {e}", file=sys.stderr)
+            _log_email_failure("register:confirm", email, str(e))
         if email_sent:
             self.send_json(200, {"status": "confirmation_sent"})
             print(f"[REG] Confirmation -> {email}")
         else:
-            # Fallback: auto-verify
-            tokens[token]["verified"] = True
-            save_tokens(tokens)
-            self.send_json(200, {"status": "ok"})
-            print(f"[REG] Auto-verified (no email): {email}")
+            # SMTP down / send failed.
+            #
+            # We INTENTIONALLY do NOT auto-verify the token here.
+            #
+            # Auto-verifying on SMTP failure (the previous behaviour) leaks
+            # leads two ways:
+            #   1. The user never receives the confirmation, so they never
+            #      come back to log in -> lead is dead in the JSONL.
+            #   2. The user sees a generic "ok" with no reference id, so
+            #      they can't follow up either.
+            #
+            # The lead is already persisted in DATA_FILE above, so an
+            # operator can reach out manually. The token stays unverified
+            # so when SMTP comes back up the lead can still be re-engaged
+            # by re-sending the confirmation. Do NOT change this back to
+            # auto-verify without first wiring a retry queue.
+            ref_id = data.get("ref_id") or token[:12]
+            self.send_json(200, {
+                "status": "queued_no_email",
+                "ref_id": ref_id,
+                "message": (
+                    "Saved — our email service is temporarily unreachable. "
+                    "An operator will reach out within one business day. "
+                    "Reference: " + ref_id
+                ),
+            })
+            print(f"[REG] Queued, no email (SMTP fail): {email} ref={ref_id}", file=sys.stderr)
 
     # ── Shared marketing-form plumbing ──────────────────────────────
     #
@@ -863,6 +912,7 @@ class Handler(BaseHTTPRequestHandler):
             send_email(ADMIN_EMAIL, admin_subject_fn(data, ref_id), admin_html)
         except Exception as e:
             print(f"[WARN] Admin {kind} email failed: {e}", file=sys.stderr)
+            _log_email_failure(f"{kind}:admin", ADMIN_EMAIL, str(e))
 
         # Customer ack — only if we have an email and the form is not
         # just a newsletter subscribe (subscribe sends its own confirm).
@@ -874,6 +924,7 @@ class Handler(BaseHTTPRequestHandler):
                 send_email(data["email"], customer_subject, customer_html)
         except Exception as e:
             print(f"[WARN] Customer {kind} email failed: {e}", file=sys.stderr)
+            _log_email_failure(f"{kind}:customer", data.get("email", ""), str(e))
 
         print(
             f"[{bucket.upper()}] {ref_id} from {self.client_address[0]} "
@@ -950,6 +1001,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         except Exception as e:
             print(f"[WARN] Subscribe admin email failed: {e}", file=sys.stderr)
+            _log_email_failure("subscribe:admin", ADMIN_EMAIL, str(e))
 
         # Customer confirmation.
         try:
@@ -974,6 +1026,7 @@ class Handler(BaseHTTPRequestHandler):
             send_email(email, "Welcome to OpenConstructionERP updates", html)
         except Exception as e:
             print(f"[WARN] Subscribe ack email failed: {e}", file=sys.stderr)
+            _log_email_failure("subscribe:customer", email, str(e))
 
         print(f"[SUB] {email} source={record['source']}")
         self.send_json(202, {"status": "subscribed"})
@@ -1056,6 +1109,7 @@ class Handler(BaseHTTPRequestHandler):
             send_email(ADMIN_EMAIL, admin_subject, admin_html)
         except Exception as e:
             print(f"[WARN] Admin license email failed: {e}", file=sys.stderr)
+            _log_email_failure("license:admin", ADMIN_EMAIL, str(e))
 
         # Customer acknowledgement. Best-effort: any failure here is
         # logged but doesn't affect the user-facing success state.
@@ -1068,6 +1122,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         except Exception as e:
             print(f"[WARN] Customer license email failed: {e}", file=sys.stderr)
+            _log_email_failure("license:customer", data.get("email", ""), str(e))
 
         print(
             f"[LIC] {ref_id} tier={data.get('tier')} "

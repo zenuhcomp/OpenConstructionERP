@@ -8,10 +8,12 @@
  * ```
  *   ┌──── header (title · anchor · scope picker) ──────┐
  *   │                                                  │
- *   │  ┌── tileset rail ──┐┌── Cesium canvas ──────┐   │
- *   │  │ status / counts  ││  HUD overlay + empty  │   │
- *   │  │ per-tileset card ││  state when needed    │   │
- *   │  └──────────────────┘└───────────────────────┘   │
+ *   │  ┌─ Cesium canvas (full width) ────────────────┐ │
+ *   │  │ ┌─ tileset overlay (top-left, self-sized, │ │ │
+ *   │  │ │ collapsible) ─┐                         │ │ │
+ *   │  │ └────────────────┘                        │ │ │
+ *   │  │ HUD + empty state + Cesium controls       │ │ │
+ *   │  └─────────────────────────────────────────────┘ │
  *   └──────────────────────────────────────────────────┘
  * ```
  *
@@ -19,7 +21,7 @@
  * Cesium viewer stays oblivious of project semantics.
  */
 
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -43,6 +45,20 @@ import type { GeoPinBundle, Tileset } from './types';
 const CesiumViewer = lazy(() =>
   import('./CesiumViewer').then((m) => ({ default: m.CesiumViewer })),
 );
+
+// Persisted across reloads so the user's preferred chrome density
+// survives navigation. Versioned (`v1`) so a future incompatible rename
+// never resurrects with stale boolean semantics.
+const TILESETS_COLLAPSED_LS_KEY = 'oe.geo_hub.tilesets_collapsed.v1';
+
+function readTilesetsCollapsed(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(TILESETS_COLLAPSED_LS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Decide which "empty" overlay should paint over the canvas, if any.
@@ -114,6 +130,20 @@ export function ProjectGeoPage() {
 
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [panelCollapsed, setPanelCollapsed] = useState<boolean>(
+    readTilesetsCollapsed,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        TILESETS_COLLAPSED_LS_KEY,
+        panelCollapsed ? '1' : '0',
+      );
+    } catch {
+      /* localStorage disabled / quota full — UX still works in-memory */
+    }
+  }, [panelCollapsed]);
   // Live HUD state, fed by ``CesiumViewer`` via ``onMouseMove`` /
   // ``onCameraChange``. ``null`` cursor → HUD shows em-dashes; ``null``
   // camera → north arrow stays at 0°.
@@ -253,90 +283,95 @@ export function ProjectGeoPage() {
           <GeoModePicker current="project" projectId={projectId} />
         </div>
       </header>
-      <div className="flex flex-1 overflow-hidden">
-        <TilesetSidebar
-          tilesets={tilesets}
-          isLoading={isLoading}
-          hiddenIds={hiddenIds}
-          focusedId={focusedId}
-          onToggleVisibility={(id) =>
-            setHiddenIds((prev) => {
-              const next = new Set(prev);
-              if (next.has(id)) next.delete(id);
-              else next.add(id);
-              return next;
-            })
-          }
-          onFocus={(ts) => setFocusedId(ts.id)}
-        />
-        <main className="relative flex-1 overflow-hidden bg-slate-900">
-          {error && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center p-6">
-              {isStaleBackend ? (
-                <div className="inline-flex max-w-md items-start gap-3 rounded-lg border border-amber-300/40 bg-amber-950/60 px-4 py-3 text-sm text-amber-100 shadow-md backdrop-blur-md">
-                  <ServerCrash size={16} className="mt-0.5 shrink-0 text-amber-300" />
-                  <span>
-                    {t('geo_hub.project_stale_backend', {
-                      defaultValue:
-                        'The geo service is starting up or out of date. Reload in a moment, or contact your admin to restart the backend.',
-                    })}
-                  </span>
-                </div>
-              ) : (
-                <div className="inline-flex max-w-md items-start gap-3 rounded-lg border border-red-300/40 bg-red-950/60 px-4 py-3 text-sm text-red-100 shadow-md backdrop-blur-md">
-                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-300" />
-                  <span>
-                    {t('geo_hub.load_failed', {
-                      defaultValue: 'Could not load geo data for this project.',
-                    })}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-          {!error && isLoading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center text-xs text-slate-300">
-              {t('geo_hub.loading_config', {
-                defaultValue: 'Loading geo configuration...',
-              })}
-            </div>
-          )}
-          {!error && data && (
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-sm text-slate-300">
-                  {t('geo_hub.loading_viewer', {
-                    defaultValue: 'Loading Cesium viewer (~3 MB)...',
+      {/* Full-width canvas — the tileset rail is overlay-mounted on top
+          (via CesiumViewer's ``overlay`` slot) so the map gets the full
+          viewport width. Empty / loading / error states share that slot
+          so they also paint above the canvas. */}
+      <main className="relative flex-1 overflow-hidden bg-slate-900">
+        {error && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center p-6">
+            {isStaleBackend ? (
+              <div className="inline-flex max-w-md items-start gap-3 rounded-lg border border-amber-300/40 bg-amber-950/60 px-4 py-3 text-sm text-amber-100 shadow-md backdrop-blur-md">
+                <ServerCrash size={16} className="mt-0.5 shrink-0 text-amber-300" />
+                <span>
+                  {t('geo_hub.project_stale_backend', {
+                    defaultValue:
+                      'The geo service is starting up or out of date. Reload in a moment, or contact your admin to restart the backend.',
                   })}
-                </div>
+                </span>
+              </div>
+            ) : (
+              <div className="inline-flex max-w-md items-start gap-3 rounded-lg border border-red-300/40 bg-red-950/60 px-4 py-3 text-sm text-red-100 shadow-md backdrop-blur-md">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-300" />
+                <span>
+                  {t('geo_hub.load_failed', {
+                    defaultValue: 'Could not load geo data for this project.',
+                  })}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+        {!error && isLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center text-xs text-slate-300">
+            {t('geo_hub.loading_config', {
+              defaultValue: 'Loading geo configuration...',
+            })}
+          </div>
+        )}
+        {!error && data && (
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-sm text-slate-300">
+                {t('geo_hub.loading_viewer', {
+                  defaultValue: 'Loading Cesium viewer (~3 MB)...',
+                })}
+              </div>
+            }
+          >
+            <CesiumViewer
+              mode="project"
+              mapConfig={viewerMapConfig}
+              pins={pins}
+              focusedTilesetId={focusedTilesetId}
+              onMouseMove={setCursorCoords}
+              onCameraChange={setCameraState}
+              overlay={
+                <>
+                  <GeoOverlayHud
+                    cursorLat={cursorCoords?.lat ?? null}
+                    cursorLon={cursorCoords?.lon ?? null}
+                    altitudeM={cameraState?.cameraAltitudeM ?? null}
+                    headingDeg={cameraState?.headingDeg ?? null}
+                    active
+                  />
+                  <TilesetSidebar
+                    variant="overlay"
+                    collapsed={panelCollapsed}
+                    onToggleCollapsed={() => setPanelCollapsed((v) => !v)}
+                    tilesets={tilesets}
+                    isLoading={isLoading}
+                    hiddenIds={hiddenIds}
+                    focusedId={focusedId}
+                    onToggleVisibility={(id) =>
+                      setHiddenIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(id)) next.delete(id);
+                        else next.add(id);
+                        return next;
+                      })
+                    }
+                    onFocus={(ts) => setFocusedId(ts.id)}
+                  />
+                  {emptyKind && (
+                    <GeoEmptyState kind={emptyKind} projectId={projectId} />
+                  )}
+                </>
               }
-            >
-              <CesiumViewer
-                mode="project"
-                mapConfig={viewerMapConfig}
-                pins={pins}
-                focusedTilesetId={focusedTilesetId}
-                onMouseMove={setCursorCoords}
-                onCameraChange={setCameraState}
-                overlay={
-                  <>
-                    <GeoOverlayHud
-                      cursorLat={cursorCoords?.lat ?? null}
-                      cursorLon={cursorCoords?.lon ?? null}
-                      altitudeM={cameraState?.cameraAltitudeM ?? null}
-                      headingDeg={cameraState?.headingDeg ?? null}
-                      active
-                    />
-                    {emptyKind && (
-                      <GeoEmptyState kind={emptyKind} projectId={projectId} />
-                    )}
-                  </>
-                }
-              />
-            </Suspense>
-          )}
-        </main>
-      </div>
+            />
+          </Suspense>
+        )}
+      </main>
     </div>
   );
 }

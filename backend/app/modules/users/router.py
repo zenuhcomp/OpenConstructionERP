@@ -16,6 +16,8 @@ Endpoints:
     PATCH /me/preferences         — Update regional preferences
     GET  /me/module-preferences — Get saved module preferences
     PATCH /me/module-preferences — Save module preferences
+    GET  /me/sidebar-preferences — Get sidebar visibility preferences
+    PUT  /me/sidebar-preferences — Save sidebar visibility preferences
     GET  /                      — List users (admin/manager)
     GET  /{id}                  — Get user by ID (admin/manager)
     PATCH /{id}                 — Update user (admin only)
@@ -75,6 +77,18 @@ class CustomUnitsPayload(BaseModel):
     """
 
     units: list[str]
+
+
+class SidebarPreferencesPayload(BaseModel):
+    """Request/response body for the user's sidebar visibility preferences.
+
+    ``hidden_modules`` is the list of NavItem ``to`` routes the user has
+    chosen to hide from the sidebar via the menu editor. Persisted per-user
+    in the ``metadata_`` JSON column so the choice follows the user across
+    browsers and devices, not just a single localStorage bucket.
+    """
+
+    hidden_modules: list[str]
 
 
 router = APIRouter()
@@ -404,6 +418,57 @@ async def save_module_preferences(
     metadata["module_preferences"] = data.modules
     await service.update_profile(uuid.UUID(user_id), metadata_=metadata)
     return ModulePreferencesPayload(modules=data.modules)
+
+
+# ── Sidebar Preferences ───────────────────────────────────────────────────
+
+
+@router.get("/me/sidebar-preferences/", response_model=SidebarPreferencesPayload)
+async def get_sidebar_preferences(
+    user_id: CurrentUserId,
+    service: UserService = Depends(_get_service),
+) -> SidebarPreferencesPayload:
+    """Get the current user's sidebar visibility preferences.
+
+    Returns an empty list when the user has never customised the sidebar.
+    """
+    user = await service.get_user(uuid.UUID(user_id))
+    metadata: dict[str, Any] = user.metadata_ or {}
+    raw = metadata.get("sidebar_hidden_modules", [])
+    hidden = [str(r) for r in raw if isinstance(r, str) and r.strip()]
+    return SidebarPreferencesPayload(hidden_modules=hidden)
+
+
+@router.put("/me/sidebar-preferences/", response_model=SidebarPreferencesPayload)
+async def save_sidebar_preferences(
+    data: SidebarPreferencesPayload,
+    user_id: CurrentUserId,
+    service: UserService = Depends(_get_service),
+) -> SidebarPreferencesPayload:
+    """Upsert sidebar visibility preferences for the current user.
+
+    Stores the hidden-route list in the user's ``metadata_`` JSON column under
+    key ``sidebar_hidden_modules``. Sanitises the payload: trims whitespace,
+    drops empties / duplicates, caps each route at 128 chars and the list at
+    500 entries so a runaway client can't bloat the JSON column.
+    """
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for raw in data.hidden_modules:
+        if not isinstance(raw, str):
+            continue
+        route = raw.strip()[:128]
+        if route and route not in seen:
+            seen.add(route)
+            cleaned.append(route)
+        if len(cleaned) >= 500:
+            break
+
+    user = await service.get_user(uuid.UUID(user_id))
+    metadata: dict[str, Any] = dict(user.metadata_ or {})
+    metadata["sidebar_hidden_modules"] = cleaned
+    await service.update_profile(uuid.UUID(user_id), metadata_=metadata)
+    return SidebarPreferencesPayload(hidden_modules=cleaned)
 
 
 # ── Custom Units ──────────────────────────────────────────────────────────

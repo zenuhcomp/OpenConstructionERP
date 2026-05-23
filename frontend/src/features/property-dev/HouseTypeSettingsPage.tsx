@@ -20,6 +20,7 @@ import {
   Breadcrumb,
   Button,
   Card,
+  ConfirmDialog,
   CountryFlag,
   EmptyState,
   SkeletonTable,
@@ -76,6 +77,7 @@ export function HouseTypeSettingsPage() {
   const [filterProject, setFilterProject] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<HouseTypeCatalogueEntry | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<HouseTypeCatalogueEntry | null>(null);
 
   const projectsQ = useQuery({
     queryKey: ['propdev', 'house-type-settings', 'projects-lite'],
@@ -276,18 +278,7 @@ export function HouseTypeSettingsPage() {
                             size="sm"
                             variant="ghost"
                             icon={<Trash2 size={12} />}
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  t('property_dev.house_type.confirm_delete', {
-                                    defaultValue:
-                                      'Delete this house type? Plots already using it keep their stored label.',
-                                  }),
-                                )
-                              ) {
-                                deleteMu.mutate(entry.id);
-                              }
-                            }}
+                            onClick={() => setPendingDelete(entry)}
                           >
                             {t('common.delete', { defaultValue: 'Delete' })}
                           </Button>
@@ -359,6 +350,26 @@ export function HouseTypeSettingsPage() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        loading={deleteMu.isPending}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          const id = pendingDelete.id;
+          setPendingDelete(null);
+          deleteMu.mutate(id);
+        }}
+        title={t('property_dev.house_type.confirm_delete_title', {
+          defaultValue: 'Delete house type "{{name}}"?',
+          name: pendingDelete?.name ?? '',
+        })}
+        message={t('property_dev.house_type.confirm_delete', {
+          defaultValue:
+            'Delete this house type? Plots already using it keep their stored label. This cannot be undone.',
+        })}
+      />
     </div>
   );
 }
