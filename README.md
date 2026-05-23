@@ -15,7 +15,7 @@ Professional BOQ, 4D/5D planning, AI-powered estimation, CAD/BIM takeoff — all
 [![Stars](https://img.shields.io/github/stars/datadrivenconstruction/OpenConstructionERP?style=flat&logo=github)](https://github.com/datadrivenconstruction/OpenConstructionERP/stargazers)
 <br/>
 [![Last commit](https://img.shields.io/github/last-commit/datadrivenconstruction/OpenConstructionERP?color=informational)](https://github.com/datadrivenconstruction/OpenConstructionERP/commits/main)
-![Languages](https://img.shields.io/badge/languages-24-orange)
+![Languages](https://img.shields.io/badge/languages-27-orange)
 ![Cost Items](https://img.shields.io/badge/cost_items-55%2C000%2B-red)
 
 <img src="docs/screenshots/hero-overview.jpg" alt="OpenConstructionERP — Dashboard Overview" width="800" />
@@ -26,7 +26,7 @@ Professional BOQ, 4D/5D planning, AI-powered estimation, CAD/BIM takeoff — all
 
 <sub>🎬 <b>1-minute teaser above</b> · for the full 12-minute walkthrough → <a href="https://www.youtube.com/watch?v=X06cIaroAeI"><b>watch on YouTube</b></a> · onboarding → BoQ → BIM → DWG → PDF → AI → dashboard</sub>
 
-*100% open source · 55,000+ cost items · AI estimation · 24 languages · Self-hosted*
+*100% open source · 55,000+ cost items · AI estimation · 27 languages · 110 modules · Self-hosted*
 
 </div>
 
@@ -134,43 +134,53 @@ Star OpenConstructionERP on GitHub and be instantly notified of new releases.
 
 ---
 
-## ✨ What's New in v4.0.0 — Stable Major
+## ✨ What's New in v4.5.0 — PropDev complete + Geo Hub + WhatsNew tour
 
-The **v4.x stable line** — milestone **v4.0.0** marks the platform as production-ready across the full estimation → takeoff → BIM → BOQ → tender → reporting workflow. **103 modules** ship in the box, the `/api/v1/*` surface is now a public contract, and the multi-tenant security pass is complete.
+The **v4.5.0** wave deepens the property-development lifecycle end-to-end, introduces a 3D-globe **Geo Hub** built on Cesium 3D Tiles, and adds in-app onboarding via WhatsNewCard + ProductTour. **110 modules** ship in the box; the `/api/v1/*` surface remains the public contract.
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
-**🏗️ 103 modules · full pro-grade depth**
-- **BOQ pro-grade** — bulk multiply rate/qty/classification, per-cell field-history restore, Ctrl+D fill-down, 8-deep hierarchy, reusable/linked positions, FX-correct CSV/Excel exports.
-- **BIM Hub pro-grade** — Site Compass cube, Solo Mode, Trait Lens (color-by-property), Element Bundles, viewpoint state (camera + filter + clip + thumbnail), serve-time magic-byte validation.
-- **Clash Detection** — DBSCAN engine + FP mining, severity/discipline-pair/MTTR KPIs, rule editor with suggestions.
-- **Takeoff** — PDF + DWG measurements, PaddleOCR + YOLO symbol detection, jsPDF/exceljs exports with subtotals.
-- **Match Elements** — 7-stage visible pipeline (Convert → Load → Schema → Filter → Group → Match → Rollup) with per-stage adjust, vector + lexical + resource matchers, currency-aware rollup, catalogue + display-currency picker.
+**🏢 PropDev complete — Lead → Reservation → SPA → Handover → Warranty**
+- Full clickflow with auto-creation of ContractParty on SPA conversion, Payment Schedule FSM, SnagsBlock per handover with photo upload + promote-to-warranty.
+- **House Type catalogue** with ISO 3166-1 picker (180+ countries) + Custom region — new CountryCombobox + HouseTypeEditModal.
+- **Sub-entity tabs**: Phases · Blocks · Brokers · Price Matrix · Escrow — one screen for every dev operation.
+- **Contacts↔PropDev bridge** — leads/buyers idempotently tagged as Contacts via `Contact.module_tags`.
 
-**🌍 24 languages · 30+ regional catalogues · CWICR 55k positions**
-Multi-currency BOQ with FX-correct exports, vector search via Qdrant for multilingual semantic match.
+**🌍 Geo Hub (Cesium 3D Tiles 1.1)**
+- Three-mode picker: Global / Project / Development with live HUD (cursor lat/lon, altitude, scale bar).
+- Anchored Projects rail (now a floating overlay panel, collapsible).
+- Deeplinks: `?model=`, `?plot=`, `?dev_id=`, `?phase=`, `?block=`.
+- Pin layers for HSE incidents, Punchlist, Daily Diary. "View on map" CTAs throughout BIM/PropDev/Daily Diary/Projects.
+
+**🐛 BIM Walk capture-phase keyboard fix**
+WASD/Arrows/Space/PageUp/PageDown/Ctrl/Shift are caught at the `window` capture phase with preventDefault — no more accidental page scroll or sidebar move while walking the model.
 
 </td>
 <td width="50%" valign="top">
 
-**🔒 Public API contract + multi-tenant security**
-- Every `/api/v1/*` endpoint shipped in 3.10.x–3.12.x is now part of the **public contract**; breaking changes go to `/v2`; 4.x patches only add fields and endpoints.
-- Cross-category IDOR sweep closed **~73 endpoints** across Planning / Communication / Procurement / Documents.
-- Every project-scoped route enforces `verify_project_access`; every owner-scoped route enforces inline `owner_user_id` with 404-not-403 on mismatch.
+**📥 Converter install progress bar**
+Live progress polling on `/bim` and `/dwg-takeoff` while DDC cad2data converter installs — no more guessing whether it hung.
 
-**📊 BI Dashboards · idempotent starter pack**
-5 role-based dashboards (CEO · CFO · PM · Site · Safety), 14 system KPIs with 12-week history, 3 reports, 2 schedules, 4 alert rules — installed in one click via `POST /api/v1/bi-dashboards/install-starter-pack`.
+**🎓 In-app onboarding**
+- **WhatsNewCard** — compact single-row carousel with 6 chip popovers, dismiss-to-pill.
+- **ProductTour** — 8-step spotlight overlay (auto-pauses when other dialogs open).
+- **Sidebar Menu Editor** — per-user hidden-modules (server-synced via UserPreference).
+- **Subscribe button** in header with own-SMTP routing.
 
-**✅ Validation@Import · GAEB X84 writer**
-DIN 276 + GAEB + NRM + MasterFormat + BOQ-quality + project-completeness rule packs wired into the GAEB / Excel import path; GAEB X84 (Nebenangebot) export writer with round-trip tests.
+**🔒 Cumulative since v4.0.0**
+- v4.1–v4.3 Round 4 + Round 5 security: ~73 IDOR closures across 11 modules (carbon, crm, eac, hse_advanced, projects, qms, rfi, service, subcontractors, submittals, variations).
+- BIM Requirements (IDS/COBie), Coordination Hub, Smart Views, Clash AI Triage, BCF 3.0/OpenCDE.
+- DocumentTemplates with backend magic-byte upload validation (defence-in-depth).
+
+**📡 Latest alembic head**: `v3119` · single-head invariant maintained across every wave.
 
 </td>
 </tr>
 </table>
 
-See the [v4.0.0 release](https://github.com/datadrivenconstruction/OpenConstructionERP/releases/tag/v4.0.0) and the [CHANGELOG](CHANGELOG.md) for the per-release breakdown.
+See the [latest release](https://github.com/datadrivenconstruction/OpenConstructionERP/releases/latest) and the [CHANGELOG](CHANGELOG.md) for the per-release breakdown.
 
 ---
 
@@ -182,8 +192,8 @@ Construction cost estimation software is expensive, closed-source, and locked to
 |-------------|-------------|
 | **Free forever** | AGPL-3.0 license. No subscriptions, no per-seat fees, no vendor lock-in. |
 | **Your data, your server** | Self-hosted. Everything runs on your machine — nothing leaves your network. |
-| **21 languages** | Full UI translation: English, German, French, Spanish, Portuguese, Russian, Chinese, Arabic, Hindi, Japanese, Korean, and 10 more. |
-| **20 regional standards** | DIN 276, NRM 1/2, CSI MasterFormat, GAEB, ГЭСН, DPGF, GB/T 50500, CPWD, and more. |
+| **27 languages** | Full UI translation: English, German, French, Spanish, Portuguese, Russian, Chinese, Arabic, Hindi, Japanese, Korean, and 16 more. |
+| **30+ regional standards** | DIN 276, NRM 1/2, CSI MasterFormat, GAEB, ГЭСН, DPGF, GB/T 50500, CPWD, ÖNORM, Birim Fiyat, Sekisan, SINAPI, and more. |
 | **AI-powered** | Connect any LLM provider (Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek) for smart estimation. |
 | **55,000+ cost items** | CWICR database with 11 regional pricing databases (DACH, UK, US, France, Spain, Brazil, Russia, UAE, China, India, Canada). |
 
@@ -202,8 +212,8 @@ Construction cost estimation software is expensive, closed-source, and locked to
 <tr><td><b>Self-hosted / offline</b></td><td align="center">&#10004;</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#9888; partial</td><td align="center">&#10006;</td></tr>
 <tr><td><b>Price</b></td><td align="center"><b>Free forever</b></td><td align="center">~&#8364;500/mo</td><td align="center">~&#8364;300/mo</td><td align="center">~&#8364;200/mo</td><td align="center">~&#8364;30/mo</td></tr>
 <tr><td><b>AI estimation</b></td><td align="center">&#10004; 7 LLM providers</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#10006;</td></tr>
-<tr><td><b>UI languages</b></td><td align="center"><b>21</b></td><td align="center">5</td><td align="center">3</td><td align="center">2</td><td align="center">8</td></tr>
-<tr><td><b>Regional standards</b></td><td align="center"><b>20</b></td><td align="center">4</td><td align="center">3</td><td align="center">2</td><td align="center">&mdash;</td></tr>
+<tr><td><b>UI languages</b></td><td align="center"><b>27</b></td><td align="center">5</td><td align="center">3</td><td align="center">2</td><td align="center">8</td></tr>
+<tr><td><b>Regional standards</b></td><td align="center"><b>30+</b></td><td align="center">4</td><td align="center">3</td><td align="center">2</td><td align="center">&mdash;</td></tr>
 <tr><td><b>BOQ editor</b></td><td align="center">&#10004;</td><td align="center">&#10004;</td><td align="center">&#10004;</td><td align="center">&#10004;</td><td align="center">&#10006;</td></tr>
 <tr><td><b>CAD/BIM takeoff</b></td><td align="center">&#10004; RVT IFC DWG DGN</td><td align="center">&#10004;</td><td align="center">&#10004;</td><td align="center">&#10006;</td><td align="center">&#10004; PDF only</td></tr>
 <tr><td><b>4D/5D planning</b></td><td align="center">&#10004;</td><td align="center">&#10004;</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#10006;</td></tr>
@@ -214,6 +224,8 @@ Construction cost estimation software is expensive, closed-source, and locked to
 <tr><td><b>Real-time collaboration</b></td><td align="center">&#10004; soft locks + presence</td><td align="center">&#10004;</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#10006;</td></tr>
 <tr><td><b>Open data export</b></td><td align="center">&#10004; GAEB, Excel, CSV, JSON, PDF</td><td align="center">&#9888; limited</td><td align="center">&#9888; limited</td><td align="center">&#9888; limited</td><td align="center">PDF only</td></tr>
 <tr><td><b>BIM requirements (IDS/COBie)</b></td><td align="center">&#10004; import + export</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#10006;</td></tr>
+<tr><td><b>Property development lifecycle</b></td><td align="center">&#10004; Lead→Reservation→SPA→Handover→Warranty</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#10006;</td></tr>
+<tr><td><b>3D globe / geo-anchored projects</b></td><td align="center">&#10004; Cesium 3D Tiles</td><td align="center">&#9888; map only</td><td align="center">&#10006;</td><td align="center">&#10006;</td><td align="center">&#10006;</td></tr>
 </table>
 
 <sub>Comparison reflects typical category capabilities based on publicly available information as of Q1 2026. Pricing is approximate (per-seat, list price) and varies by vendor and region. OpenConstructionERP is an independent open-source project and is not affiliated with any commercial vendor in the categories above.</sub>
@@ -458,7 +470,7 @@ Ensure your estimates meet regulatory standards before submission:
 
 Get productive in under 10 minutes:
 
-1. **Choose language** — Select from 21 languages. The entire UI switches instantly
+1. **Choose language** — Select from 27 languages. The entire UI switches instantly
 2. **Select region** — Determines default cost database, currency, and classification standard
 3. **Load cost database** — One-click import of CWICR pricing data for your region (55,000+ items)
 4. **Import resource catalog** — Materials, labor, equipment, and pre-built assemblies
@@ -558,13 +570,13 @@ Three demo accounts are created automatically on first start. The default passwo
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | Backend | Python 3.12+ / FastAPI | Async API, Pydantic v2 validation, modular architecture |
-| Frontend | React 18 / TypeScript / Vite | SPA with code splitting, 21 language bundles |
+| Frontend | React 18 / TypeScript / Vite | SPA with code splitting, 27 language bundles |
 | Database | PostgreSQL 16+ / SQLite (dev) | OLTP with JSON columns, zero-config SQLite for development |
 | UI | Tailwind CSS / AG Grid | Professional data grid, responsive design, dark mode |
 | AI | Any LLM via REST API | Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek |
 | Vector Search | LanceDB (embedded) / Qdrant | Semantic cost item search, 384d or 3072d embeddings |
 | CAD/BIM | [DDC cad2data](https://github.com/datadrivenconstruction) | RVT, IFC, DWG, DGN → structured quantities |
-| i18n | i18next + 21 language packs | Full RTL support (Arabic), locale-aware formatting |
+| i18n | i18next + 27 language packs | Full RTL support (Arabic), locale-aware formatting |
 
 ## Architecture
 
@@ -592,7 +604,7 @@ This pipeline is the reason OpenConstructionERP can replace several commercial p
 flowchart TB
     UI["Frontend SPA<br>React 18, TypeScript, Vite<br>AG Grid, Tailwind, PDF.js"]
 
-    subgraph Backend ["FastAPI Backend, 88 modules"]
+    subgraph Backend ["FastAPI Backend, 110 modules"]
         CORE["Core<br>Module loader, Event bus, Hooks, RBAC<br>Validation, FSM + audit log"]
         ESTIM["Estimating<br>BOQ, Costs, Catalog, Assemblies<br>Takeoff, BIM Hub, Match-Elements, 5D"]
         FIELD["Field Operations<br>Service, Equipment, Daily Diary<br>Portal, Resources & Crew"]
@@ -645,11 +657,12 @@ flowchart TB
                    │ REST + SSE
 ┌──────────────────┴───────────────────────────────┐
 │  Backend (FastAPI)                               │
-│  60+ auto-discovered modules · Plugin system     │
+│  110 auto-discovered modules · Plugin system     │
 ├──────────────────────────────────────────────────┤
 │  BOQ · Costs · Schedule · 5D · Validation · AI   │
 │  Takeoff · Tendering · Risk · Reports · Catalog  │
 │  Requirements · Markups · Punch List · BIM Hub   │
+│  PropDev · Geo Hub · Coordination · Clash AI     │
 ├──────────────────────────────────────────────────┤
 │  Database (PostgreSQL / SQLite)                  │
 │  Vector DB (LanceDB / Qdrant)                    │
