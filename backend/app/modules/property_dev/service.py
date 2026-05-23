@@ -724,8 +724,166 @@ def _today_iso() -> str:
     return datetime.now(UTC).date().isoformat()
 
 
+# ── Payment-schedule milestone templates ────────────────────────────────
+#
+# Pure data — no DB, no I/O. Each template is a sequence of milestone
+# entries summing to 100 % of contract value. ``offset_days`` is added to
+# the chosen start date to derive ``due_date``. ``milestone_event`` is
+# carried through to ``Instalment.milestone_event`` so downstream
+# automations (handover trigger, fit-out trigger, etc.) can fire the
+# right line. The catalogue is intentionally short; tenants needing
+# more variations should compose them via :class:`PaymentScheduleCreate`
+# + :class:`InstalmentCreate`.
+
+PAYMENT_SCHEDULE_TEMPLATES: dict[str, dict[str, Any]] = {
+    "single_balance": {
+        "label": "Single balance on SPA signing",
+        "description": "One instalment for 100 % at SPA signing.",
+        "milestones": [
+            {
+                "sequence": 1,
+                "pct": Decimal("100"),
+                "label": "Full balance @ SPA signature",
+                "milestone_event": "spa_signed",
+                "offset_days": 0,
+            },
+        ],
+    },
+    "10_40_50": {
+        "label": "10 % / 40 % / 50 %",
+        "description": "10 % deposit, 40 % at top-out, 50 % at handover.",
+        "milestones": [
+            {
+                "sequence": 1,
+                "pct": Decimal("10"),
+                "label": "Deposit",
+                "milestone_event": "spa_signed",
+                "offset_days": 0,
+            },
+            {
+                "sequence": 2,
+                "pct": Decimal("40"),
+                "label": "Top-out",
+                "milestone_event": "construction_top_out",
+                "offset_days": 180,
+            },
+            {
+                "sequence": 3,
+                "pct": Decimal("50"),
+                "label": "Handover",
+                "milestone_event": "handover_complete",
+                "offset_days": 360,
+            },
+        ],
+    },
+    "30_30_40": {
+        "label": "30 % / 30 % / 40 %",
+        "description": "30 % at signing, 30 % at top-out, 40 % at handover.",
+        "milestones": [
+            {
+                "sequence": 1,
+                "pct": Decimal("30"),
+                "label": "Down payment",
+                "milestone_event": "spa_signed",
+                "offset_days": 0,
+            },
+            {
+                "sequence": 2,
+                "pct": Decimal("30"),
+                "label": "Top-out",
+                "milestone_event": "construction_top_out",
+                "offset_days": 180,
+            },
+            {
+                "sequence": 3,
+                "pct": Decimal("40"),
+                "label": "Handover",
+                "milestone_event": "handover_complete",
+                "offset_days": 360,
+            },
+        ],
+    },
+    "20_30_30_20": {
+        "label": "20 % / 30 % / 30 % / 20 %",
+        "description": (
+            "20 % at signing, 30 % at slab, 30 % at top-out, 20 % at handover."
+        ),
+        "milestones": [
+            {
+                "sequence": 1,
+                "pct": Decimal("20"),
+                "label": "Down payment",
+                "milestone_event": "spa_signed",
+                "offset_days": 0,
+            },
+            {
+                "sequence": 2,
+                "pct": Decimal("30"),
+                "label": "Foundation slab",
+                "milestone_event": "construction_slab_poured",
+                "offset_days": 90,
+            },
+            {
+                "sequence": 3,
+                "pct": Decimal("30"),
+                "label": "Top-out",
+                "milestone_event": "construction_top_out",
+                "offset_days": 240,
+            },
+            {
+                "sequence": 4,
+                "pct": Decimal("20"),
+                "label": "Handover",
+                "milestone_event": "handover_complete",
+                "offset_days": 365,
+            },
+        ],
+    },
+    "quarterly_12": {
+        "label": "Equal quarterly over 12 quarters",
+        "description": "12 equal instalments at quarterly intervals.",
+        "milestones": [
+            {
+                "sequence": i + 1,
+                "pct": Decimal("100") / Decimal("12"),
+                "label": f"Quarter {i + 1}",
+                "milestone_event": "scheduled",
+                "offset_days": i * 90,
+            }
+            for i in range(12)
+        ],
+    },
+}
+
+
+def _add_days_iso(start_iso: str, days: int) -> str:
+    """Return ``start_iso`` + ``days`` as a YYYY-MM-DD string."""
+    d = date.fromisoformat(start_iso[:10])
+    return (d + timedelta(days=days)).isoformat()
+
+
 class PropertyDevService:
     """Business logic + workflow orchestration."""
+
+    # Keep the templates discoverable on the class so the router can list
+    # them without importing the module-level constant directly.
+    PAYMENT_SCHEDULE_TEMPLATES = PAYMENT_SCHEDULE_TEMPLATES
+
+    @staticmethod
+    def payment_schedule_template_catalogue() -> list[dict[str, Any]]:
+        """Return a stable, serialisable catalogue of milestone templates."""
+        out: list[dict[str, Any]] = []
+        for key, tmpl in PAYMENT_SCHEDULE_TEMPLATES.items():
+            out.append(
+                {
+                    "key": key,
+                    "label": tmpl["label"],
+                    "description": tmpl["description"],
+                    "milestone_count": len(tmpl["milestones"]),
+                    "splits": [str(m["pct"]) for m in tmpl["milestones"]],
+                }
+            )
+        return out
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -768,14 +926,30 @@ class PropertyDevService:
             project_id=data.project_id,
             code=data.code,
             name=data.name,
+            description=data.description,
+            dev_type=data.dev_type,
             location_address=data.location_address,
+            country_code=data.country_code,
+            latitude=data.latitude,
+            longitude=data.longitude,
             total_plots=data.total_plots,
+            total_area_m2=data.total_area_m2,
+            total_floors=data.total_floors,
             sales_phase=data.sales_phase,
+            start_date=data.start_date,
             launch_date=data.launch_date,
             completion_date=data.completion_date,
             marketing_brief=data.marketing_brief,
             status=data.status,
             units=data.units,
+            sales_target_amount=data.sales_target_amount,
+            currency=data.currency,
+            developer_name=data.developer_name,
+            architect_name=data.architect_name,
+            general_contractor_name=data.general_contractor_name,
+            cover_image_url=data.cover_image_url,
+            brochure_url=data.brochure_url,
+            website_url=data.website_url,
             metadata_=data.metadata,
         )
         return await self.developments.create(obj)
@@ -3026,6 +3200,153 @@ class PropertyDevService:
         )
 
     # ── PaymentSchedule ────────────────────────────────────────────────
+
+    async def generate_payment_schedule_from_template(
+        self,
+        contract_id: uuid.UUID,
+        *,
+        template_key: str,
+        start_date: str | None = None,
+        late_fee_pct: Any = None,
+        grace_period_days: Any = None,
+    ) -> PaymentSchedule:
+        """Create (or rebuild) a payment schedule from a milestone template.
+
+        Used by the "Generate Schedule" CTA on the SPA detail tab. If a
+        schedule already exists for this SPA and is in ``active`` or
+        ``completed`` state, the request fails 409 to avoid clobbering
+        paid lines. A ``suspended``/``cancelled`` schedule is rebuilt in
+        place (its instalments are removed and re-created).
+        """
+        if template_key not in PAYMENT_SCHEDULE_TEMPLATES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Unknown template_key '{template_key}'. Known: "
+                    f"{sorted(PAYMENT_SCHEDULE_TEMPLATES.keys())}"
+                ),
+            )
+        spa = await self.get_spa(contract_id)
+        existing = await self.payment_schedules.get_for_contract(spa.id)
+        if existing is not None and existing.status in {"active", "completed"}:
+            # Refuse to rebuild a live schedule — caller must explicitly
+            # suspend it first or roll a new SPA revision.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"PaymentSchedule in status '{existing.status}' is live —"
+                    " suspend it first or create a new SPA revision."
+                ),
+            )
+
+        tmpl = PAYMENT_SCHEDULE_TEMPLATES[template_key]
+        total_value = Decimal(str(spa.total_value or 0))
+        # Compute per-line amounts. Last line absorbs rounding so the
+        # sum is identical to ``total_value`` to the cent.
+        per_line: list[Decimal] = []
+        running = Decimal("0")
+        for i, m in enumerate(tmpl["milestones"]):
+            pct: Decimal = m["pct"]
+            if i == len(tmpl["milestones"]) - 1:
+                amt = (total_value - running).quantize(Decimal("0.01"))
+            else:
+                amt = (total_value * pct / Decimal("100")).quantize(
+                    Decimal("0.01")
+                )
+                running += amt
+            per_line.append(amt)
+
+        # Resolve start anchor: explicit start_date > spa.signing_date > today.
+        if start_date is None:
+            start_anchor = spa.signing_date or datetime.now(UTC).date().isoformat()
+        else:
+            start_anchor = start_date
+
+        lfp = (
+            Decimal(str(late_fee_pct))
+            if late_fee_pct is not None
+            else Decimal("0")
+        )
+        gpd = int(grace_period_days) if grace_period_days is not None else 0
+
+        # Replace-in-place when a non-live schedule exists; else create.
+        if existing is None:
+            schedule_obj = PaymentSchedule(
+                sales_contract_id=spa.id,
+                tenant_id=spa.tenant_id,
+                currency=spa.currency,
+                total_amount=total_value,
+                late_fee_pct=lfp,
+                grace_period_days=gpd,
+                status="active",
+                metadata_={
+                    "auto_created": True,
+                    "template_key": template_key,
+                    "start_date": start_anchor,
+                },
+            )
+            schedule = await self.payment_schedules.create(schedule_obj)
+        else:
+            # Snapshot every attribute the rest of this block touches BEFORE
+            # any mutation — once update_fields() expires the row, lazy
+            # column reloads under aiosqlite trip MissingGreenlet (same
+            # pattern as convert_reservation_to_spa above).
+            existing_id = existing.id
+            existing_md = dict(existing.metadata_ or {})
+            # Drop every existing instalment row first.
+            rows = await self.instalments.list_for_schedule(existing_id)
+            for r in rows:
+                await self.instalments.delete(r.id)
+            existing_md.update(
+                {
+                    "auto_created": True,
+                    "template_key": template_key,
+                    "start_date": start_anchor,
+                }
+            )
+            await self.payment_schedules.update_fields(
+                existing_id,
+                status="active",
+                total_amount=total_value,
+                currency=spa.currency,
+                late_fee_pct=lfp,
+                grace_period_days=gpd,
+                metadata_=existing_md,
+            )
+            schedule = await self.get_payment_schedule(existing_id)
+
+        for m, amt in zip(tmpl["milestones"], per_line):
+            due_iso: str | None = None
+            try:
+                due_iso = _add_days_iso(start_anchor, int(m["offset_days"]))
+            except (TypeError, ValueError):
+                due_iso = None
+            await self.instalments.create(
+                Instalment(
+                    schedule_id=schedule.id,
+                    sequence=int(m["sequence"]),
+                    milestone_label=str(m["label"]),
+                    milestone_event=str(m["milestone_event"]),
+                    due_date=due_iso,
+                    amount=amt,
+                    status="pending",
+                )
+            )
+
+        # Mark the first pending instalment due so it shows on the
+        # cashflow widgets immediately.
+        await self._mark_first_pending_due(schedule.id)
+        event_bus.publish_detached(
+            "property_dev.payment_schedule.generated",
+            data={
+                "schedule_id": str(schedule.id),
+                "sales_contract_id": str(spa.id),
+                "template_key": template_key,
+                "milestone_count": len(tmpl["milestones"]),
+            },
+            source_module="property_dev",
+        )
+        return schedule
 
     async def create_payment_schedule(
         self, data: PaymentScheduleCreate

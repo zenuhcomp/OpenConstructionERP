@@ -749,6 +749,41 @@ class SalesContractRepository(_BaseRepo):
         stmt = stmt.order_by(SalesContract.created_at.desc())
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_for_development(
+        self,
+        development_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        limit: int = 500,
+    ) -> list[SalesContract]:
+        """Return every SPA whose plot belongs to ``development_id``.
+
+        Used by the top-level "Sales Contracts" tab on PropertyDevPage.
+        Joins SalesContract → Plot to filter without requiring the caller
+        to know individual plot ids upfront.
+        """
+        stmt = (
+            select(SalesContract)
+            .join(Plot, Plot.id == SalesContract.plot_id)
+            .where(Plot.development_id == development_id)
+        )
+        if status is not None:
+            stmt = stmt.where(SalesContract.status == status)
+        stmt = stmt.order_by(SalesContract.created_at.desc()).limit(limit)
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_for_reservation(
+        self,
+        reservation_id: uuid.UUID,
+    ) -> list[SalesContract]:
+        """Return every SPA created off this reservation (usually 0 or 1)."""
+        stmt = (
+            select(SalesContract)
+            .where(SalesContract.reservation_id == reservation_id)
+            .order_by(SalesContract.created_at.desc())
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def next_sequence_for_plot(self, plot_id: uuid.UUID) -> int:
         stmt = (
             select(func.count())
@@ -787,6 +822,32 @@ class PaymentScheduleRepository(_BaseRepo):
             PaymentSchedule.sales_contract_id == contract_id
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_for_development(
+        self,
+        development_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        limit: int = 500,
+    ) -> list[PaymentSchedule]:
+        """Return every PaymentSchedule attached to an SPA in this development.
+
+        Used by the top-level "Payment Schedules" tab. Joins
+        PaymentSchedule → SalesContract → Plot to scope by development.
+        """
+        stmt = (
+            select(PaymentSchedule)
+            .join(
+                SalesContract,
+                SalesContract.id == PaymentSchedule.sales_contract_id,
+            )
+            .join(Plot, Plot.id == SalesContract.plot_id)
+            .where(Plot.development_id == development_id)
+        )
+        if status is not None:
+            stmt = stmt.where(PaymentSchedule.status == status)
+        stmt = stmt.order_by(PaymentSchedule.created_at.desc()).limit(limit)
+        return list((await self.session.execute(stmt)).scalars().all())
 
 
 class InstalmentRepository(_BaseRepo):

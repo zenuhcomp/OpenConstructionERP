@@ -59,11 +59,33 @@ class Development(Base):
     )
     code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Type of development (residential, mixed_use, commercial, ...). Free-form
+    # string at the model layer; the schema layer enforces an enum so future
+    # additions (e.g. ``industrial_park``) don't require a DB migration.
+    dev_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="residential", server_default="residential"
+    )
     location_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ISO-3166 alpha-2 country code (DE, US, UK, ...). Drives the
+    # house-type catalogue picker and the tax engine.
+    country_code: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)
+    # Geo coordinates (WGS84). Stored as Numeric so we don't lose precision
+    # round-tripping through SQLite. Optional — only populated when the
+    # operator pins the development on the map.
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
     total_plots: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_area_m2: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    total_floors: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     sales_phase: Mapped[str] = mapped_column(
         String(40), nullable=False, default="planning", index=True
     )
+    start_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
     launch_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
     completion_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
     marketing_brief: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -71,6 +93,28 @@ class Development(Base):
         String(40), nullable=False, default="active", index=True
     )
     units: Mapped[str] = mapped_column(String(16), nullable=False, default="metric")
+    # Total sales target in ``currency``. Used by the dashboard's progress bar
+    # and by the EAC / cashflow forecasts.
+    sales_target_amount: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, default=Decimal("0"), server_default="0"
+    )
+    # ISO-4217 currency. Empty-string default == "fall back to the parent
+    # project's currency at read time"; the service layer never auto-fills
+    # this with a hard-coded "EUR" (see v3 DB-level EUR-default kill).
+    currency: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="", server_default=""
+    )
+    # People / orgs. Kept as free-form strings instead of FK to Companies
+    # because (a) Companies module is optional and (b) the developer can
+    # often be a JV that doesn't have a tidy row in any directory.
+    developer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    architect_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    general_contractor_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Marketing assets — URLs only. File uploads belong to the Documents
+    # module; this column just stores the canonical link.
+    cover_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    brochure_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    website_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
         "metadata", JSON, nullable=False, default=dict, server_default="{}"
     )

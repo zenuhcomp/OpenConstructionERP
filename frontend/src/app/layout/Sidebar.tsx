@@ -245,6 +245,18 @@ const navGroups: NavGroup[] = [
         icon: Building2,
         advancedOnly: true,
       },
+      {
+        labelKey: 'nav.property_dev_validation_rules',
+        to: '/property-dev/settings/validation-rules',
+        icon: Building2,
+        advancedOnly: true,
+      },
+      {
+        labelKey: 'nav.property_dev_doc_templates',
+        to: '/property-dev/settings/document-templates',
+        icon: Building2,
+        advancedOnly: true,
+      },
     ],
   },
   // ── PLANNING & CONTROL (advanced) ──────────────────────────────────

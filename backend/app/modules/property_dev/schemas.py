@@ -41,6 +41,15 @@ _CONTRACT_NUMBER_PATTERN = r"^SPA-[A-Z0-9-]{1,40}-\d{5}$"
 # ── Development ─────────────────────────────────────────────────────────
 
 
+# Allowed development "types" — kept as a regex pattern (not a Literal) so
+# adding a new value is a single-line change. ``other`` is the catch-all.
+_DEV_TYPE_PATTERN = (
+    r"^(residential|mixed_use|commercial|industrial|hospitality|"
+    r"resort|senior_living|student_housing|retail|office|logistics|other)$"
+)
+_COUNTRY_CODE_PATTERN = r"^[A-Z]{2}$"
+
+
 class DevelopmentCreate(BaseModel):
     """‌⁠‍Create a new development."""
 
@@ -49,17 +58,33 @@ class DevelopmentCreate(BaseModel):
     project_id: UUID
     code: str = Field(..., min_length=1, max_length=50)
     name: str = Field(default="", max_length=255)
+    description: str | None = None
+    dev_type: str = Field(default="residential", pattern=_DEV_TYPE_PATTERN)
     location_address: str | None = None
+    country_code: str | None = Field(default=None, pattern=_COUNTRY_CODE_PATTERN)
+    latitude: Decimal | None = Field(default=None, ge=-90, le=90)
+    longitude: Decimal | None = Field(default=None, ge=-180, le=180)
     total_plots: int = Field(default=0, ge=0)
+    total_area_m2: Decimal = Field(default=Decimal("0"), ge=0)
+    total_floors: int = Field(default=0, ge=0)
     sales_phase: str = Field(
         default="planning",
         pattern=r"^(planning|launch|sales|handover|closed)$",
     )
+    start_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     launch_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     completion_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     marketing_brief: str | None = None
     status: str = Field(default="active", pattern=r"^(active|paused|completed)$")
     units: str = Field(default="metric", pattern=r"^(metric|imperial)$")
+    sales_target_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    currency: str = Field(default="", max_length=8)
+    developer_name: str | None = Field(default=None, max_length=255)
+    architect_name: str | None = Field(default=None, max_length=255)
+    general_contractor_name: str | None = Field(default=None, max_length=255)
+    cover_image_url: str | None = Field(default=None, max_length=1024)
+    brochure_url: str | None = Field(default=None, max_length=1024)
+    website_url: str | None = Field(default=None, max_length=1024)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -69,16 +94,32 @@ class DevelopmentUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+    dev_type: str | None = Field(default=None, pattern=_DEV_TYPE_PATTERN)
     location_address: str | None = None
+    country_code: str | None = Field(default=None, pattern=_COUNTRY_CODE_PATTERN)
+    latitude: Decimal | None = Field(default=None, ge=-90, le=90)
+    longitude: Decimal | None = Field(default=None, ge=-180, le=180)
     total_plots: int | None = Field(default=None, ge=0)
+    total_area_m2: Decimal | None = Field(default=None, ge=0)
+    total_floors: int | None = Field(default=None, ge=0)
     sales_phase: str | None = Field(
         default=None, pattern=r"^(planning|launch|sales|handover|closed)$"
     )
+    start_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     launch_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     completion_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     marketing_brief: str | None = None
     status: str | None = Field(default=None, pattern=r"^(active|paused|completed)$")
     units: str | None = Field(default=None, pattern=r"^(metric|imperial)$")
+    sales_target_amount: Decimal | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, max_length=8)
+    developer_name: str | None = Field(default=None, max_length=255)
+    architect_name: str | None = Field(default=None, max_length=255)
+    general_contractor_name: str | None = Field(default=None, max_length=255)
+    cover_image_url: str | None = Field(default=None, max_length=1024)
+    brochure_url: str | None = Field(default=None, max_length=1024)
+    website_url: str | None = Field(default=None, max_length=1024)
     metadata: dict[str, Any] | None = None
 
 
@@ -91,14 +132,30 @@ class DevelopmentResponse(BaseModel):
     project_id: UUID
     code: str
     name: str = ""
+    description: str | None = None
+    dev_type: str = "residential"
     location_address: str | None = None
+    country_code: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
     total_plots: int = 0
+    total_area_m2: Decimal = Decimal("0")
+    total_floors: int = 0
     sales_phase: str = "planning"
+    start_date: str | None = None
     launch_date: str | None = None
     completion_date: str | None = None
     marketing_brief: str | None = None
     status: str = "active"
     units: str = "metric"
+    sales_target_amount: Decimal = Decimal("0")
+    currency: str = ""
+    developer_name: str | None = None
+    architect_name: str | None = None
+    general_contractor_name: str | None = None
+    cover_image_url: str | None = None
+    brochure_url: str | None = None
+    website_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime

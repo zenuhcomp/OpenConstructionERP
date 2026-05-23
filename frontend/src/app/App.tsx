@@ -255,6 +255,16 @@ const PropertyDevHouseTypeSettingsPage = lazy(() =>
     default: m.HouseTypeSettingsPage,
   }))
 );
+const PropertyDevValidationRulesSettingsPage = lazy(() =>
+  import('@/features/property-dev').then((m) => ({
+    default: m.ValidationRulesSettingsPage,
+  })),
+);
+const PropertyDevDocumentTemplatesSettingsPage = lazy(() =>
+  import('@/features/property-dev').then((m) => ({
+    default: m.DocumentTemplatesSettingsPage,
+  })),
+);
 // ── Geo Hub — Cesium 3D Tiles + cross-module geo. Lazy-loaded because
 // CesiumJS is ~3 MB; this keeps the main bundle untouched.
 const GeoHubPage = lazy(() =>
@@ -751,6 +761,18 @@ export default function App() {
           path="/property-dev/settings/house-types"
           element={
             <P title="House Type Catalogue"><PropertyDevHouseTypeSettingsPage /></P>
+          }
+        />
+        <Route
+          path="/property-dev/settings/validation-rules"
+          element={
+            <P title="Validation Rules"><PropertyDevValidationRulesSettingsPage /></P>
+          }
+        />
+        <Route
+          path="/property-dev/settings/document-templates"
+          element={
+            <P title="Document Templates"><PropertyDevDocumentTemplatesSettingsPage /></P>
           }
         />
         <Route path="/property-dev/dashboards/:key" element={<P title="Property Development Dashboard"><PropertyDevDashboardFullView /></P>} />

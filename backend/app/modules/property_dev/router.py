@@ -2130,13 +2130,40 @@ async def convert_reservation_to_spa(
 async def list_sales_contracts(
     session: SessionDep,
     payload: CurrentUserPayload,
-    plot_id: uuid.UUID = Query(...),
+    plot_id: uuid.UUID | None = Query(default=None),
+    development_id: uuid.UUID | None = Query(default=None),
+    reservation_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
     service: PropertyDevService = Depends(_svc),
     _perm: None = Depends(RequirePermission("property_dev.read")),
 ) -> list[SalesContractResponse]:
-    await _verify_owner_via_plot(session, plot_id, payload)
-    rows = await service.sales_contracts.list_for_plot(plot_id, status=status)
+    """List SPAs by plot, development or reservation.
+
+    Exactly one of ``plot_id`` / ``development_id`` / ``reservation_id``
+    must be supplied. The top-level "Sales Contracts" tab uses
+    ``development_id``; per-plot drawers use ``plot_id``; the reservation
+    detail view uses ``reservation_id`` to surface a converted SPA.
+    """
+    if plot_id is not None:
+        await _verify_owner_via_plot(session, plot_id, payload)
+        rows = await service.sales_contracts.list_for_plot(
+            plot_id, status=status
+        )
+    elif development_id is not None:
+        await _verify_owner_via_development(session, development_id, payload)
+        rows = await service.sales_contracts.list_for_development(
+            development_id, status=status
+        )
+    elif reservation_id is not None:
+        await _verify_owner_via_reservation(session, reservation_id, payload)
+        rows = await service.sales_contracts.list_for_reservation(reservation_id)
+        if status is not None:
+            rows = [r for r in rows if r.status == status]
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="plot_id, development_id or reservation_id required",
+        )
     return [SalesContractResponse.model_validate(r) for r in rows]
 
 
@@ -2321,6 +2348,119 @@ async def quote_sales_contract_taxes(
 
 
 # ── PaymentSchedules ────────────────────────────────────────────────────
+
+
+@router.get(
+    "/payment-schedules/",
+    response_model=list[PaymentScheduleResponse],
+)
+async def list_payment_schedules(
+    session: SessionDep,
+    payload: CurrentUserPayload,
+    sales_contract_id: uuid.UUID | None = Query(default=None),
+    development_id: uuid.UUID | None = Query(default=None),
+    status: str | None = Query(default=None),
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[PaymentScheduleResponse]:
+    """List payment schedules by SPA or by development.
+
+    Backs the top-level "Payment Schedules" tab and the SPA detail panel
+    which both need to enumerate schedules without knowing each id.
+    """
+    if sales_contract_id is not None:
+        await _verify_owner_via_spa(session, sales_contract_id, payload)
+        existing = await service.payment_schedules.get_for_contract(
+            sales_contract_id
+        )
+        rows = [existing] if existing is not None else []
+    elif development_id is not None:
+        await _verify_owner_via_development(session, development_id, payload)
+        rows = await service.payment_schedules.list_for_development(
+            development_id, status=status
+        )
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="sales_contract_id or development_id required",
+        )
+    if status is not None and sales_contract_id is not None:
+        rows = [r for r in rows if r.status == status]
+    return [PaymentScheduleResponse.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/payment-schedules/from-template",
+    response_model=PaymentScheduleResponse,
+    status_code=201,
+)
+async def generate_payment_schedule_from_template(
+    body: dict[str, Any],
+    session: SessionDep,
+    payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(
+        RequirePermission("property_dev.payment_schedule.activate")
+    ),
+) -> PaymentScheduleResponse:
+    """Generate a payment schedule from a milestone template.
+
+    Body schema (validated inline for flexibility):
+        sales_contract_id: UUID                — required.
+        template_key: str                      — one of the keys returned
+                                                 by GET /payment-schedule-templates/.
+                                                 Required.
+        start_date: "YYYY-MM-DD"               — optional, defaults to SPA
+                                                 signing date or today.
+        late_fee_pct: Decimal (0..100)         — optional, default 0.
+        grace_period_days: int                 — optional, default 0.
+
+    Behaviour: if a schedule already exists for this SPA and it is in
+    ``draft``/``suspended``/``cancelled`` state, its instalments are
+    cleared and replaced; if it is ``active``/``completed`` the call
+    fails with 409 to avoid clobbering paid lines.
+    """
+    raw_contract = body.get("sales_contract_id")
+    raw_template = body.get("template_key")
+    if not raw_contract or not raw_template:
+        raise HTTPException(
+            status_code=422,
+            detail="sales_contract_id and template_key are required",
+        )
+    try:
+        contract_id = uuid.UUID(str(raw_contract))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=422, detail="invalid sales_contract_id",
+        ) from exc
+    await _verify_owner_via_spa(session, contract_id, payload)
+
+    template_key = str(raw_template)
+    start_date = body.get("start_date")
+    if start_date is not None:
+        start_date = str(start_date)
+    late_fee_pct = body.get("late_fee_pct")
+    grace_period_days = body.get("grace_period_days")
+    schedule = await service.generate_payment_schedule_from_template(
+        contract_id,
+        template_key=template_key,
+        start_date=start_date,
+        late_fee_pct=late_fee_pct,
+        grace_period_days=grace_period_days,
+    )
+    return PaymentScheduleResponse.model_validate(schedule)
+
+
+@router.get("/payment-schedule-templates/", response_model=list[dict])
+async def list_payment_schedule_templates(
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> list[dict]:
+    """Static catalogue of milestone-based payment schedule templates.
+
+    Templates are pure data — see
+    :data:`PropertyDevService.PAYMENT_SCHEDULE_TEMPLATES`.
+    """
+    return PropertyDevService.payment_schedule_template_catalogue()
 
 
 @router.post(
@@ -3645,6 +3785,317 @@ async def preview_propdev_document(
             doc_type,
             contract_id or reservation_id or handover_id or instalment_id,
         ),
+    }
+
+
+# ── Document-templates settings catalogue ──────────────────────────────
+
+
+_DOC_TEMPLATE_CATALOGUE: list[dict[str, Any]] = [
+    {
+        "doc_type": "reservation_receipt",
+        "title": "Reservation Receipt",
+        "description": (
+            "Issued automatically when a buyer pays the reservation "
+            "deposit. Single A4 page, no watermark."
+        ),
+        "trigger": "POST /reservations/ → deposit recorded",
+        "entity": "reservation",
+        "pages": "1",
+    },
+    {
+        "doc_type": "sales_contract",
+        "title": "Sale-Purchase Agreement (SPA)",
+        "description": (
+            "Multi-page, multi-buyer aware contract. Auto-injects "
+            "jurisdiction clauses (RERA / MAHARERA / 214-FZ / CMA). "
+            "DRAFT watermark until status is signed/executed."
+        ),
+        "trigger": "POST /sales-contracts/ → status transitions",
+        "entity": "sales_contract",
+        "pages": "3+",
+    },
+    {
+        "doc_type": "payment_receipt",
+        "title": "Payment Receipt",
+        "description": (
+            "Issued per paid instalment. Shows outstanding balance and "
+            "milestone reference."
+        ),
+        "trigger": "POST /instalments/{id}/pay",
+        "entity": "instalment",
+        "pages": "1",
+    },
+    {
+        "doc_type": "handover_certificate",
+        "title": "Handover Certificate",
+        "description": (
+            "Signed at completion. Lists open snags + keys-handed-over "
+            "date so the buyer formally accepts the unit."
+        ),
+        "trigger": "POST /handovers/{id}/complete",
+        "entity": "handover",
+        "pages": "1",
+    },
+    {
+        "doc_type": "warranty_certificate",
+        "title": "Warranty Certificate",
+        "description": (
+            "Issued on handover. Default 10y structural + 1y finishing. "
+            "Lists exclusions and the claim procedure."
+        ),
+        "trigger": "GET /documents/warranty_certificate?handover_id=…",
+        "entity": "handover",
+        "pages": "1",
+    },
+    {
+        "doc_type": "noc",
+        "title": "No Objection Certificate",
+        "description": (
+            "Developer's permission for the buyer to resell. Validity "
+            "30 days by default."
+        ),
+        "trigger": "GET /documents/noc?contract_id=…",
+        "entity": "sales_contract",
+        "pages": "1",
+    },
+]
+
+
+@router.get("/document-templates/")
+async def list_document_templates(
+    _user_payload: CurrentUserPayload,
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> dict[str, Any]:
+    """List built-in property-development document templates.
+
+    Returns the six PDF generators shipped with the platform plus the
+    supported locales and jurisdictions. Templates themselves are
+    source-of-truth code (``document_templates.py``); this endpoint
+    exposes their metadata so the settings UI can render a real
+    catalogue with previews instead of an empty stub.
+    """
+    from app.modules.property_dev.document_templates import (
+        SUPPORTED_LOCALES,
+        SUPPORTED_REGULATORS,
+    )
+
+    return {
+        "templates": _DOC_TEMPLATE_CATALOGUE,
+        "locales": list(SUPPORTED_LOCALES),
+        "regulators": list(SUPPORTED_REGULATORS),
+    }
+
+
+@router.post("/document-templates/{doc_type}/sample-preview")
+async def sample_preview_document_template(
+    doc_type: str,
+    body: dict[str, Any],
+    _user_payload: CurrentUserPayload,
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> dict[str, Any]:
+    """Render a synthetic sample of the template (no real entities).
+
+    Useful for previewing the template look-and-feel from the settings
+    page. The generator runs against in-memory stub data so any tenant
+    can preview without owning a contract.
+    """
+    import base64
+    import uuid as _uuid
+    from datetime import UTC, date, datetime, timedelta
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    doc_type = _resolve_doc_type_or_404(doc_type)
+    locale = _normalise_locale(str(body.get("locale", "en")))
+    regulator = str(body.get("regulator", "NONE")).upper()
+
+    # ── Synthetic entities (just enough for each generator) ──
+    now = datetime.now(UTC)
+    today = date.today()
+    development = SimpleNamespace(
+        id=_uuid.uuid4(),
+        name="Sample Riverside Gardens",
+        code="DEV-SAMPLE",
+        metadata_={"regulator": regulator},
+        completion_date=(today + timedelta(days=180)).isoformat(),
+    )
+    plot = SimpleNamespace(
+        id=_uuid.uuid4(),
+        plot_number="P-101",
+        area_m2=Decimal("78.50"),
+        currency="EUR",
+        house_type_label="Modern Townhouse",
+        metadata_={"phase_code": "PH-A", "block_code": "B1"},
+    )
+    buyers = [
+        SimpleNamespace(
+            id=_uuid.uuid4(),
+            full_name="Jane Sample",
+            email="jane.sample@example.com",
+        ),
+        SimpleNamespace(
+            id=_uuid.uuid4(),
+            full_name="John Sample",
+            email="john.sample@example.com",
+        ),
+    ]
+    reservation = SimpleNamespace(
+        id=_uuid.uuid4(),
+        reservation_number="RES-2026-0042",
+        deposit_amount=Decimal("5000.00"),
+        currency="EUR",
+        expires_at=(today + timedelta(days=14)).isoformat(),
+        cooling_off_until=(today + timedelta(days=10)).isoformat(),
+        cooling_off_days=10,
+    )
+    contract = SimpleNamespace(
+        id=_uuid.uuid4(),
+        contract_number="SPA-2026-0017",
+        total_value=Decimal("420000.00"),
+        currency="EUR",
+        status="draft",
+        place="Berlin",
+        signing_date=today.isoformat(),
+        metadata_={
+            "rera_registration_no": "SAMPLE-RERA-001",
+            "escrow_account_no": "DE89-3704-0044-0532-0130-00",
+        },
+    )
+    payment_schedule = SimpleNamespace(currency="EUR")
+    instalments = [
+        SimpleNamespace(
+            sequence=i,
+            milestone_label=label,
+            milestone_event=label,
+            due_date=(today + timedelta(days=30 * i)).isoformat(),
+            amount=Decimal(str(amount)),
+            amount_paid=Decimal("0"),
+        )
+        for i, (label, amount) in enumerate(
+            [
+                ("Booking", 10000),
+                ("Foundation", 84000),
+                ("Structure", 168000),
+                ("Finishing", 105000),
+                ("Handover", 53000),
+            ],
+            start=1,
+        )
+    ]
+    parties = [
+        SimpleNamespace(
+            buyer_id=buyers[0].id,
+            party_role="primary",
+            ownership_pct=Decimal("50"),
+            full_name=buyers[0].full_name,
+            email=buyers[0].email,
+        ),
+        SimpleNamespace(
+            buyer_id=buyers[1].id,
+            party_role="secondary",
+            ownership_pct=Decimal("50"),
+            full_name=buyers[1].full_name,
+            email=buyers[1].email,
+        ),
+    ]
+    handover = SimpleNamespace(
+        id=_uuid.uuid4(),
+        scheduled_at=(today + timedelta(days=120)).isoformat(),
+        completed_at=today.isoformat(),
+        keys_handed_over_at=today.isoformat(),
+    )
+    paid_instalment = SimpleNamespace(
+        sequence=2,
+        milestone_label="Foundation",
+        milestone_event="foundation_complete",
+        amount=Decimal("84000.00"),
+        amount_paid=Decimal("84000.00"),
+        paid_at=now.isoformat(),
+    )
+
+    # ── Dispatch to the right generator ──
+    from app.modules.property_dev.document_templates import (
+        render_handover_certificate_pdf,
+        render_no_objection_certificate_pdf,
+        render_payment_receipt_pdf,
+        render_reservation_receipt_pdf,
+        render_sales_contract_pdf,
+        render_warranty_certificate_pdf,
+    )
+
+    if doc_type == "reservation_receipt":
+        pdf_bytes = render_reservation_receipt_pdf(
+            reservation, plot, development, buyers, locale=locale,
+        )
+    elif doc_type == "sales_contract":
+        pdf_bytes = render_sales_contract_pdf(
+            contract,
+            payment_schedule,
+            instalments,
+            parties,
+            plot,
+            development,
+            locale=locale,
+            buyer_lookup={b.id: b for b in buyers},
+        )
+    elif doc_type == "payment_receipt":
+        pdf_bytes = render_payment_receipt_pdf(
+            paid_instalment,
+            contract,
+            payment_method="bank_transfer",
+            payment_ref="REF-SAMPLE-001",
+            locale=locale,
+            plot=plot,
+            development=development,
+        )
+    elif doc_type == "handover_certificate":
+        pdf_bytes = render_handover_certificate_pdf(
+            handover,
+            contract,
+            snag_count=2,
+            plot=plot,
+            development=development,
+            locale=locale,
+        )
+    elif doc_type == "warranty_certificate":
+        pdf_bytes = render_warranty_certificate_pdf(
+            contract,
+            handover,
+            structural_warranty_years=10,
+            finishing_warranty_years=1,
+            locale=locale,
+            plot=plot,
+            development=development,
+        )
+    else:  # noc
+        pdf_bytes = render_no_objection_certificate_pdf(
+            contract,
+            plot,
+            development,
+            requested_by="Jane Sample (sample)",
+            locale=locale,
+        )
+
+    page_count = 0
+    try:
+        from io import BytesIO as _BIO
+
+        from pypdf import PdfReader as _PdfReader
+
+        page_count = len(_PdfReader(_BIO(pdf_bytes)).pages)
+    except Exception:
+        page_count = max(1, pdf_bytes.count(b"/Type /Page"))
+
+    return {
+        "doc_type": doc_type,
+        "locale": locale,
+        "regulator": regulator,
+        "size_bytes": len(pdf_bytes),
+        "page_count": page_count,
+        "base64": base64.b64encode(pdf_bytes).decode("ascii"),
+        "filename": f"sample-{doc_type}-{locale}.pdf",
+        "sample": True,
     }
 
 

@@ -51,7 +51,7 @@ export interface WideModalProps {
   onClose: () => void;
   title: string;
   /** Optional descriptive subtitle rendered under the title. */
-  subtitle?: string;
+  subtitle?: React.ReactNode;
   /** Maximum width preset — defaults to `lg` (~768px). */
   size?: WideModalSize;
   /** Form body. Use <WideModalSection> for grouped fields. */

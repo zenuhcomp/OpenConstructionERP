@@ -10,6 +10,19 @@ import { apiGet, apiPost, apiPatch, apiDelete } from '@/shared/lib/api';
 
 export type DevelopmentSalesPhase = 'planning' | 'launch' | 'sales' | 'handover' | 'closed';
 export type DevelopmentStatus = 'active' | 'paused' | 'completed';
+export type DevelopmentType =
+  | 'residential'
+  | 'mixed_use'
+  | 'commercial'
+  | 'industrial'
+  | 'hospitality'
+  | 'resort'
+  | 'senior_living'
+  | 'student_housing'
+  | 'retail'
+  | 'office'
+  | 'logistics'
+  | 'other';
 export type PlotStatus =
   | 'planned'
   | 'reserved'
@@ -46,14 +59,30 @@ export interface Development {
   project_id: string;
   code: string;
   name: string;
+  description: string | null;
+  dev_type: DevelopmentType;
   location_address: string | null;
+  country_code: string | null;
+  latitude: number | string | null;
+  longitude: number | string | null;
   total_plots: number;
+  total_area_m2: number | string;
+  total_floors: number;
   sales_phase: DevelopmentSalesPhase;
+  start_date: string | null;
   launch_date: string | null;
   completion_date: string | null;
   marketing_brief: string | null;
   status: DevelopmentStatus;
   units: 'metric' | 'imperial';
+  sales_target_amount: number | string;
+  currency: string;
+  developer_name: string | null;
+  architect_name: string | null;
+  general_contractor_name: string | null;
+  cover_image_url: string | null;
+  brochure_url: string | null;
+  website_url: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -183,9 +212,23 @@ export interface Handover {
   updated_at: string;
 }
 
+export type SnagCategory =
+  | 'cosmetic'
+  | 'functional'
+  | 'structural'
+  | 'mechanical'
+  | 'electrical'
+  | 'plumbing'
+  | 'finishing'
+  | 'exterior'
+  | 'general'
+  | 'safety';
+
 export interface Snag {
   id: string;
   handover_id: string;
+  buyer_id: string | null;
+  category: SnagCategory;
   location_in_plot: string | null;
   severity: SnagSeverity;
   description: string;
@@ -193,6 +236,9 @@ export interface Snag {
   reported_at: string | null;
   fixed_at: string | null;
   fix_notes: string | null;
+  cost_impact: number | string;
+  photos: string[];
+  linked_punch_item_id: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -239,9 +285,31 @@ export interface CreateDevelopmentPayload {
   project_id: string;
   code: string;
   name?: string;
+  description?: string;
+  dev_type?: DevelopmentType;
   location_address?: string;
+  country_code?: string;
+  latitude?: number;
+  longitude?: number;
   total_plots?: number;
+  total_area_m2?: number;
+  total_floors?: number;
   sales_phase?: DevelopmentSalesPhase;
+  start_date?: string;
+  launch_date?: string;
+  completion_date?: string;
+  marketing_brief?: string;
+  status?: DevelopmentStatus;
+  units?: 'metric' | 'imperial';
+  sales_target_amount?: number;
+  currency?: string;
+  developer_name?: string;
+  architect_name?: string;
+  general_contractor_name?: string;
+  cover_image_url?: string;
+  brochure_url?: string;
+  website_url?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CreatePlotPayload {
@@ -385,6 +453,10 @@ export function updatePlot(id: string, data: Partial<CreatePlotPayload>): Promis
   return apiPatch<Plot>(`${BASE}/plots/${id}`, data);
 }
 
+export function deletePlot(id: string): Promise<void> {
+  return apiDelete<void>(`${BASE}/plots/${id}`);
+}
+
 export function reservePlot(
   id: string,
   data: {
@@ -526,6 +598,45 @@ export function updateBuyer(
   return apiPatch<Buyer>(`${BASE}/buyers/${buyerId}`, payload);
 }
 
+/**
+ * Hard-delete a buyer. The backend (DELETE /buyers/{id}) returns 204.
+ * Wired through ``ConfirmDialog`` so the user has to acknowledge first.
+ */
+export function deleteBuyer(buyerId: string): Promise<void> {
+  return apiDelete(`${BASE}/buyers/${buyerId}`);
+}
+
+/**
+ * Payload for ``POST /buyers/{id}/cancel`` — cancels a buyer and computes
+ * jurisdiction-specific deposit forfeiture in a single call. Mirrors the
+ * backend ``BuyerCancelRequest`` Pydantic schema.
+ */
+export interface BuyerCancelPayload {
+  cancelled_at: string;
+  reason?: string;
+  jurisdiction_override?: string;
+}
+
+export interface DepositForfeitureResponse {
+  buyer_id: string;
+  jurisdiction: string;
+  deposit_amount: number | string;
+  forfeited_amount: number | string;
+  refundable_amount: number | string;
+  rule_citation: string;
+  rule_summary: string;
+}
+
+export function cancelBuyer(
+  buyerId: string,
+  payload: BuyerCancelPayload,
+): Promise<DepositForfeitureResponse> {
+  return apiPost<DepositForfeitureResponse>(
+    `${BASE}/buyers/${buyerId}/cancel`,
+    payload,
+  );
+}
+
 export function listJurisdictions(): Promise<string[]> {
   return apiGet<string[]>(`${BASE}/jurisdictions`);
 }
@@ -604,6 +715,76 @@ export function listSnags(params: {
   const qs = new URLSearchParams({ handover_id: params.handover_id });
   if (params.status) qs.set('status', params.status);
   return apiGet<Snag[]>(`${BASE}/snags/?${qs.toString()}`);
+}
+
+export interface CreateSnagPayload {
+  handover_id: string;
+  buyer_id?: string | null;
+  category?: SnagCategory;
+  location_in_plot?: string | null;
+  severity?: SnagSeverity;
+  description: string;
+  status?: SnagStatus;
+  reported_at?: string | null;
+  cost_impact?: number;
+}
+
+export function createSnag(data: CreateSnagPayload): Promise<Snag> {
+  return apiPost<Snag>(`${BASE}/snags/`, data);
+}
+
+export interface UpdateSnagPayload {
+  category?: SnagCategory;
+  location_in_plot?: string | null;
+  severity?: SnagSeverity;
+  description?: string;
+  status?: SnagStatus;
+  fixed_at?: string | null;
+  fix_notes?: string | null;
+  cost_impact?: number;
+}
+
+export function updateSnag(id: string, data: UpdateSnagPayload): Promise<Snag> {
+  return apiPatch<Snag>(`${BASE}/snags/${id}`, data);
+}
+
+export function deleteSnag(id: string): Promise<void> {
+  return apiDelete(`${BASE}/snags/${id}`);
+}
+
+export function fixSnag(id: string, fix_notes?: string): Promise<Snag> {
+  const qs = fix_notes ? `?fix_notes=${encodeURIComponent(fix_notes)}` : '';
+  return apiPost<Snag>(`${BASE}/snags/${id}/fix${qs}`, {});
+}
+
+export function wontFixSnag(id: string, fix_notes?: string): Promise<Snag> {
+  const qs = fix_notes ? `?fix_notes=${encodeURIComponent(fix_notes)}` : '';
+  return apiPost<Snag>(`${BASE}/snags/${id}/wont-fix${qs}`, {});
+}
+
+export async function uploadSnagPhoto(id: string, file: File): Promise<Snag> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const token = localStorage.getItem('oe_access_token');
+  const res = await fetch(`/api${BASE}/snags/${id}/photos/`, {
+    method: 'POST',
+    headers: {
+      Authorization: token ? `Bearer ${token}` : '',
+      'X-DDC-Client': 'OE/1.0',
+    },
+    body: formData,
+  });
+  if (!res.ok) {
+    let detail = `Upload failed: ${res.statusText}`;
+    try {
+      const j = await res.json();
+      if (j?.detail) detail = String(j.detail);
+    } catch {
+      /* fallthrough — keep statusText */
+    }
+    throw new Error(detail);
+  }
+  return res.json();
 }
 
 /* ── Warranty Claims ──────────────────────────────────────────────────── */
@@ -1082,10 +1263,15 @@ export function convertReservationToSpa(
 /* ── SalesContract (SPA) endpoints ────────────────────────────────── */
 
 export function listSalesContracts(params: {
-  plot_id: string;
+  plot_id?: string;
+  development_id?: string;
+  reservation_id?: string;
   status?: SpaStatus;
 }): Promise<SalesContract[]> {
-  const qs = new URLSearchParams({ plot_id: params.plot_id });
+  const qs = new URLSearchParams();
+  if (params.plot_id) qs.set('plot_id', params.plot_id);
+  if (params.development_id) qs.set('development_id', params.development_id);
+  if (params.reservation_id) qs.set('reservation_id', params.reservation_id);
   if (params.status) qs.set('status', params.status);
   return apiGet<SalesContract[]>(`${BASE}/sales-contracts/?${qs.toString()}`);
 }
@@ -1160,6 +1346,64 @@ export function fetchContractTaxQuote(
 }
 
 /* ── Payment schedules + instalments ──────────────────────────────── */
+
+/**
+ * Milestone-based payment schedule template descriptor returned by
+ * ``GET /payment-schedule-templates/``. Pure data — used to populate
+ * the "Generate Schedule" picker in the SPA detail tab.
+ */
+export interface PaymentScheduleTemplate {
+  key: string;
+  label: string;
+  description: string;
+  milestone_count: number;
+  splits: string[];
+}
+
+export function listPaymentScheduleTemplates(): Promise<
+  PaymentScheduleTemplate[]
+> {
+  return apiGet<PaymentScheduleTemplate[]>(
+    `${BASE}/payment-schedule-templates/`,
+  );
+}
+
+export interface GeneratePaymentSchedulePayload {
+  sales_contract_id: string;
+  template_key: string;
+  start_date?: string;
+  late_fee_pct?: number | string;
+  grace_period_days?: number;
+}
+
+export function generatePaymentScheduleFromTemplate(
+  data: GeneratePaymentSchedulePayload,
+): Promise<PaymentSchedule> {
+  return apiPost<PaymentSchedule>(
+    `${BASE}/payment-schedules/from-template`,
+    data,
+  );
+}
+
+/**
+ * List payment schedules either by SPA or by development. The top-level
+ * "Payment Schedules" tab uses ``development_id``; the SPA detail uses
+ * ``sales_contract_id``. Mirrors the backend gating.
+ */
+export function listPaymentSchedules(params: {
+  sales_contract_id?: string;
+  development_id?: string;
+  status?: PaymentScheduleStatus;
+}): Promise<PaymentSchedule[]> {
+  const qs = new URLSearchParams();
+  if (params.sales_contract_id)
+    qs.set('sales_contract_id', params.sales_contract_id);
+  if (params.development_id) qs.set('development_id', params.development_id);
+  if (params.status) qs.set('status', params.status);
+  return apiGet<PaymentSchedule[]>(
+    `${BASE}/payment-schedules/?${qs.toString()}`,
+  );
+}
 
 export function getPaymentSchedule(id: string): Promise<PaymentSchedule> {
   return apiGet<PaymentSchedule>(`${BASE}/payment-schedules/${id}`);
@@ -1519,6 +1763,10 @@ export function verifyBrokerKyc(id: string): Promise<Broker> {
   return apiPost<Broker>(`${BASE}/brokers/${id}/verify-kyc`, {});
 }
 
+export function deleteBroker(id: string): Promise<void> {
+  return apiDelete(`${BASE}/brokers/${id}`);
+}
+
 /* ── Commission Agreements ───────────────────────────────────────── */
 
 export function listCommissionAgreements(params: {
@@ -1599,6 +1847,24 @@ export function createEscrowAccount(data: {
   return apiPost<EscrowAccount>(`${BASE}/escrow-accounts/`, data);
 }
 
+export function updateEscrowAccount(
+  id: string,
+  data: Partial<{
+    regulator_account_number: string;
+    bank_name: string;
+    iban: string;
+    swift_bic: string;
+    closed_at: string | null;
+    is_active: boolean;
+  }>,
+): Promise<EscrowAccount> {
+  return apiPatch<EscrowAccount>(`${BASE}/escrow-accounts/${id}`, data);
+}
+
+export function deleteEscrowAccount(id: string): Promise<void> {
+  return apiDelete(`${BASE}/escrow-accounts/${id}`);
+}
+
 export function getEscrowBalance(
   id: string,
   as_of_date?: string,
@@ -1669,6 +1935,25 @@ export function activatePriceMatrix(id: string): Promise<PriceMatrix> {
   return apiPost<PriceMatrix>(`${BASE}/price-matrices/${id}/activate`, {});
 }
 
+export function updatePriceMatrix(
+  id: string,
+  data: Partial<{
+    name: string;
+    base_price_per_m2: number | string;
+    currency: string;
+    effective_from: string;
+    effective_to: string | null;
+    rules: PriceMatrixRule[];
+    status: PriceMatrixStatus;
+  }>,
+): Promise<PriceMatrix> {
+  return apiPatch<PriceMatrix>(`${BASE}/price-matrices/${id}`, data);
+}
+
+export function deletePriceMatrix(id: string): Promise<void> {
+  return apiDelete(`${BASE}/price-matrices/${id}`);
+}
+
 export function previewPriceOnPlot(
   matrix_id: string,
   plot_id: string,
@@ -1702,8 +1987,26 @@ export function createPhase(data: {
   sequence?: number;
   planned_start?: string;
   planned_end?: string;
+  status?: PhaseStatus;
 }): Promise<Phase> {
   return apiPost<Phase>(`${BASE}/phases/`, data);
+}
+
+export function updatePhase(
+  id: string,
+  data: Partial<{
+    name: string;
+    sequence: number;
+    planned_start: string | null;
+    planned_end: string | null;
+    status: PhaseStatus;
+  }>,
+): Promise<Phase> {
+  return apiPatch<Phase>(`${BASE}/phases/${id}`, data);
+}
+
+export function deletePhase(id: string): Promise<void> {
+  return apiDelete(`${BASE}/phases/${id}`);
 }
 
 export function listBlocks(phase_id: string): Promise<Block[]> {
@@ -1718,8 +2021,26 @@ export function createBlock(data: {
   levels_count?: number;
   units_per_level?: number;
   orientation?: string;
+  status?: BlockStatus;
 }): Promise<Block> {
   return apiPost<Block>(`${BASE}/blocks/`, data);
+}
+
+export function updateBlock(
+  id: string,
+  data: Partial<{
+    name: string;
+    levels_count: number;
+    units_per_level: number;
+    orientation: string | null;
+    status: BlockStatus;
+  }>,
+): Promise<Block> {
+  return apiPatch<Block>(`${BASE}/blocks/${id}`, data);
+}
+
+export function deleteBlock(id: string): Promise<void> {
+  return apiDelete(`${BASE}/blocks/${id}`);
 }
 
 /* ── Regulator Reports ───────────────────────────────────────────── */
@@ -2092,6 +2413,63 @@ export function previewPropDevDocument(
     `${BASE}/documents/preview`,
     params,
   );
+}
+
+/* ── Document Template catalogue (settings page) ──────────────────────── */
+
+export interface DocumentTemplateEntry {
+  doc_type: PropDevDocType;
+  title: string;
+  description: string;
+  trigger: string;
+  entity: string;
+  pages: string;
+}
+
+export interface DocumentTemplateCatalogue {
+  templates: DocumentTemplateEntry[];
+  locales: string[];
+  regulators: string[];
+}
+
+export function listDocumentTemplates(): Promise<DocumentTemplateCatalogue> {
+  return apiGet<DocumentTemplateCatalogue>(`${BASE}/document-templates/`);
+}
+
+export interface SampleDocumentPreview extends PropDevDocPreview {
+  regulator: string;
+  sample: boolean;
+}
+
+export function sampleDocumentPreview(
+  docType: PropDevDocType,
+  locale: string,
+  regulator: string,
+): Promise<SampleDocumentPreview> {
+  return apiPost<SampleDocumentPreview>(
+    `${BASE}/document-templates/${docType}/sample-preview`,
+    { locale, regulator },
+  );
+}
+
+/* ── Validation rule sets (read-only registry view) ───────────────────── */
+
+export interface ValidationRuleSetEntry {
+  name: string;
+  description: string;
+  rule_count: number;
+  rules: Array<{
+    rule_id: string;
+    name: string;
+    standard: string;
+    severity: string;
+    category: string;
+    enabled: boolean;
+  }>;
+}
+
+export function listValidationRuleSets(): Promise<ValidationRuleSetEntry[]> {
+  return apiGet<ValidationRuleSetEntry[]>('/v1/validation/rule-sets/');
 }
 
 /**
