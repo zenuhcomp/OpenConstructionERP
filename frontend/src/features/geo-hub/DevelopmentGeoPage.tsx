@@ -10,7 +10,7 @@
 
 import { Suspense, lazy, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Boxes, AlertTriangle } from 'lucide-react';
 
@@ -49,6 +49,12 @@ function emptyStateFor(
 export function DevelopmentGeoPage() {
   const { t } = useTranslation();
   const { devId } = useParams<{ devId: string }>();
+  // ``?phase=`` and ``?block=`` narrow the visible tilesets further —
+  // matched against ``Tileset.metadata.phase_id`` / ``block_id`` so the
+  // dev-scoped map can paint a single phase or block on demand.
+  const [searchParams] = useSearchParams();
+  const phaseFilter = searchParams.get('phase');
+  const blockFilter = searchParams.get('block');
 
   const development = useQuery({
     queryKey: ['property-dev', 'development', devId],
@@ -59,8 +65,12 @@ export function DevelopmentGeoPage() {
   });
 
   const mapConfig = useQuery({
-    queryKey: ['geo-hub', 'map-config', development.data?.project_id],
-    queryFn: () => getMapConfig(development.data!.project_id),
+    queryKey: ['geo-hub', 'map-config', development.data?.project_id, devId],
+    // Forward ``development_id`` so the backend trims tilesets + overlays
+    // to those linked to this development. The query-key is keyed on
+    // both ids so switching developments invalidates the cache.
+    queryFn: () =>
+      getMapConfig(development.data!.project_id, { developmentId: devId }),
     enabled: Boolean(development.data?.project_id),
     staleTime: 30_000,
   });
@@ -72,7 +82,33 @@ export function DevelopmentGeoPage() {
   );
   const [cameraState, setCameraState] = useState<GeoCameraState | null>(null);
 
-  const tilesets = mapConfig.data?.tilesets;
+  // Phase / block client-side filter. The backend already trims to the
+  // development; here we narrow further when the user deep-linked with
+  // ``?phase=`` / ``?block=``. Matched against ``metadata.phase_id`` /
+  // ``block_id`` — falls through to no filter when fields are absent.
+  const filteredTilesets = useMemo(() => {
+    const src = mapConfig.data?.tilesets;
+    if (!src) return src;
+    if (!phaseFilter && !blockFilter) return src;
+    return src.filter((ts) => {
+      const meta = ts.metadata as Record<string, unknown> | undefined;
+      if (!meta || typeof meta !== 'object') return false;
+      if (phaseFilter && meta['phase_id'] !== phaseFilter) return false;
+      if (blockFilter && meta['block_id'] !== blockFilter) return false;
+      return true;
+    });
+  }, [mapConfig.data?.tilesets, phaseFilter, blockFilter]);
+
+  // Compose the viewer's map config with the filtered tileset list so
+  // the Cesium scene only loads what the deep-link asked for. Cheap —
+  // we only override one field on the existing bundle.
+  const viewerMapConfig = useMemo(() => {
+    if (!mapConfig.data) return mapConfig.data;
+    if (filteredTilesets === mapConfig.data.tilesets) return mapConfig.data;
+    return { ...mapConfig.data, tilesets: filteredTilesets ?? [] };
+  }, [mapConfig.data, filteredTilesets]);
+
+  const tilesets = filteredTilesets;
   const emptyKind = useMemo(
     () => emptyStateFor(Boolean(mapConfig.data?.anchor), tilesets),
     [mapConfig.data?.anchor, tilesets],
@@ -122,7 +158,7 @@ export function DevelopmentGeoPage() {
       </header>
       <div className="flex flex-1 overflow-hidden">
         <TilesetSidebar
-          tilesets={mapConfig.data?.tilesets}
+          tilesets={tilesets}
           isLoading={loading}
           hiddenIds={hiddenIds}
           focusedId={focusedId}
@@ -168,7 +204,7 @@ export function DevelopmentGeoPage() {
             >
               <CesiumViewer
                 mode="development"
-                mapConfig={mapConfig.data}
+                mapConfig={viewerMapConfig}
                 onMouseMove={setCursorCoords}
                 onCameraChange={setCameraState}
                 overlay={

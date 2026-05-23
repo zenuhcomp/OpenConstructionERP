@@ -956,17 +956,100 @@ class GeoHubService:
         )
         return [_bim_element_to_canonical(e) for e in elements]
 
+    # ── Anchored-projects (Global map pin layer) ────────────────────────
+
+    async def list_anchored_projects(
+        self,
+        payload: dict[str, Any] | None,
+        *,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Return anchored projects the caller can access.
+
+        Powers the global Geo Hub's project-pin layer — non-admin users
+        see only their own projects, admins see everything. Projects
+        without a ``GeoAnchor`` are excluded so the pin layer never
+        contains zero-coord placeholders. Cheap single-join query.
+        """
+        if payload is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required",
+            )
+        from sqlalchemy import select
+
+        from app.modules.projects.models import Project
+
+        is_admin = payload.get("role") == "admin"
+        user_id = payload.get("sub") or payload.get("user_id")
+        if user_id is None and not is_admin:
+            return []
+
+        stmt = (
+            select(GeoAnchor, Project)
+            .join(Project, Project.id == GeoAnchor.project_id)
+            .where(Project.status != "archived")
+        )
+        if not is_admin:
+            # 404-safe scoping: non-admins only see projects they own.
+            # Cast user_id through ``str`` because JWT subs can arrive as
+            # either UUID or string depending on the auth path.
+            stmt = stmt.where(Project.owner_id == user_id)
+        stmt = stmt.order_by(Project.created_at.desc()).limit(limit)
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        return [
+            {
+                "project_id": project.id,
+                "project_name": project.name,
+                "anchor_id": anchor.id,
+                "lat": anchor.lat,
+                "lon": anchor.lon,
+                "alt": anchor.alt,
+                "region_code": anchor.region_code,
+                "address": anchor.address,
+            }
+            for (anchor, project) in rows
+        ]
+
     # ── Map-config one-shot bundle ──────────────────────────────────────
 
     async def map_config(
         self,
         project_id: uuid.UUID,
         payload: dict[str, Any] | None = None,
+        *,
+        development_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
-        """Single round-trip bundle for the Cesium viewer boot path."""
+        """Single round-trip bundle for the Cesium viewer boot path.
+
+        When ``development_id`` is set the result is narrowed to tilesets
+        and overlays linked to that development — either by stamped
+        ``metadata.development_id`` (PropDev-anchored tilesets), by
+        ``source_kind="development"`` with the matching ``source_id``
+        (native development tilesets), or by an overlay whose
+        ``metadata.development_id`` matches. Cross-development tilesets
+        within the same project are hidden so the dev-scoped map doesn't
+        leak unrelated buildings into the buyer's view.
+        """
         await self._verify_project_owner(
             project_id, payload, not_found_detail="Project not found",
         )
+
+        if development_id is not None:
+            # Validate the development belongs to this project — IDOR
+            # closure (a malicious caller could pass a stranger's dev id
+            # otherwise and have it silently filter the map to nothing).
+            from app.modules.property_dev.models import Development
+
+            dev = await self.session.get(Development, development_id)
+            if dev is None or str(dev.project_id) != str(project_id):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="development_not_found",
+                )
+
         anchor = await self.anchors.get_by_project(project_id)
         imagery = await self.imagery.list_for_project(project_id)
         terrain = await self.terrain.get_default()
@@ -978,6 +1061,34 @@ class GeoHubService:
         )
         viewpoints = await self.viewpoints.list_for_project(project_id)
         active_jobs = await self.jobs.list_active_for_project(project_id)
+
+        if development_id is not None:
+            dev_str = str(development_id)
+
+            def _ts_matches(t: Any) -> bool:
+                if (
+                    t.source_kind == "development"
+                    and str(t.source_id) == dev_str
+                ):
+                    return True
+                meta = t.metadata_ or {}
+                if isinstance(meta, dict):
+                    val = meta.get("development_id")
+                    if isinstance(val, str) and val == dev_str:
+                        return True
+                return False
+
+            def _ov_matches(o: Any) -> bool:
+                meta = o.metadata_ or {}
+                if isinstance(meta, dict):
+                    val = meta.get("development_id")
+                    if isinstance(val, str) and val == dev_str:
+                        return True
+                return False
+
+            tilesets = [t for t in tilesets if _ts_matches(t)]
+            overlays = [o for o in overlays if _ov_matches(o)]
+
         return {
             "project_id": project_id,
             "anchor": anchor,

@@ -15,15 +15,18 @@
  * map config to load.
  */
 
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
 import { Globe2 } from 'lucide-react';
 
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 
+import { fetchAnchoredProjects } from './api';
 import type { GeoCameraState, GeoCursorCoords } from './CesiumViewer';
 import { GeoModePicker } from './GeoModePicker';
 import { GeoOverlayHud } from './GeoOverlayHud';
+import type { GeoPinBundle } from './types';
 
 const CesiumViewer = lazy(() =>
   import('./CesiumViewer').then((m) => ({ default: m.CesiumViewer })),
@@ -36,6 +39,24 @@ export function GeoHubPage() {
     null,
   );
   const [cameraState, setCameraState] = useState<GeoCameraState | null>(null);
+
+  // One pin per anchored project the user can access — degrades to an
+  // empty list on backend failure so the globe still renders.
+  const projectsQuery = useQuery({
+    queryKey: ['geo-hub', 'anchored-projects'],
+    queryFn: () => fetchAnchoredProjects(),
+    staleTime: 60_000,
+  });
+
+  const pins = useMemo<GeoPinBundle>(
+    () => ({
+      hse: [],
+      punchlist: [],
+      diary: [],
+      projects: projectsQuery.data ?? [],
+    }),
+    [projectsQuery.data],
+  );
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -85,6 +106,7 @@ export function GeoHubPage() {
         >
           <CesiumViewer
             mode="global"
+            pins={pins}
             onMouseMove={setCursorCoords}
             onCameraChange={setCameraState}
             overlay={

@@ -8,6 +8,7 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/shared/lib/api';
 
 import type {
+  AnchoredProject,
   DiaryPhotoPin,
   GeoAnchor,
   GeoOverlay,
@@ -25,8 +26,18 @@ const BASE = '/v1/geo-hub';
 
 /* ── Map config one-shot bundle ──────────────────────────────────────── */
 
-export function getMapConfig(projectId: string): Promise<MapConfig> {
-  return apiGet<MapConfig>(`${BASE}/map-config/${projectId}`);
+export function getMapConfig(
+  projectId: string,
+  options?: { developmentId?: string | null },
+): Promise<MapConfig> {
+  const params = new URLSearchParams();
+  if (options?.developmentId) {
+    params.set('development_id', options.developmentId);
+  }
+  const qs = params.toString();
+  return apiGet<MapConfig>(
+    `${BASE}/map-config/${projectId}${qs ? `?${qs}` : ''}`,
+  );
 }
 
 /* ── Anchors ─────────────────────────────────────────────────────────── */
@@ -205,6 +216,14 @@ export function exportGeoJSON(
 
 export function deleteOverlay(id: string): Promise<void> {
   return apiDelete(`${BASE}/overlays/${id}`);
+}
+
+/* ── Anchored projects (Global Geo Hub pin layer) ───────────────────── */
+
+export function fetchAnchoredProjects(
+  limit = 500,
+): Promise<AnchoredProject[]> {
+  return apiGet<AnchoredProject[]>(`${BASE}/projects?limit=${limit}`);
 }
 
 /* ── Cross-module geo pin layers ─────────────────────────────────────── */

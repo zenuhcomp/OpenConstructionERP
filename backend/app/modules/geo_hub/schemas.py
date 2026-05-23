@@ -476,6 +476,27 @@ class PunchlistPinResponse(BaseModel):
     lon: float
 
 
+class AnchoredProjectResponse(BaseModel):
+    """A single anchored project for the Global map's project-pin layer.
+
+    Returned by ``GET /api/v1/geo-hub/projects`` — only projects the
+    caller can access AND that have a registered ``GeoAnchor`` are
+    included. Used by the global Geo Hub to drop a pin per project on
+    the earth-scale view (no tilesets at this LOD).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    project_id: UUID
+    project_name: str
+    anchor_id: UUID
+    lat: Decimal
+    lon: Decimal
+    alt: Decimal
+    region_code: str | None = None
+    address: str | None = None
+
+
 class DiaryPhotoPinResponse(BaseModel):
     """A single geo-tagged Daily Diary photo on the project map."""
 
@@ -493,6 +514,7 @@ class DiaryPhotoPinResponse(BaseModel):
 
 
 __all__ = [
+    "AnchoredProjectResponse",
     "CanonicalToTilesetRequest",
     "DiaryPhotoPinResponse",
     "GeoAnchorCreate",

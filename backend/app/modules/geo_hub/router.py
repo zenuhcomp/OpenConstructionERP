@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.dependencies import CurrentUserPayload, RequirePermission, SessionDep
 from app.modules.geo_hub.schemas import (
+    AnchoredProjectResponse,
     CanonicalToTilesetRequest,
     DiaryPhotoPinResponse,
     GeoAnchorCreate,
@@ -523,17 +524,49 @@ async def export_geojson(
     return await service.export_geojson(project_id, payload=payload, kind=kind)
 
 
+# ── Anchored projects (Global map pin layer) ────────────────────────────
+
+
+@router.get("/projects", response_model=list[AnchoredProjectResponse])
+async def list_anchored_projects(
+    limit: int = Query(default=500, ge=1, le=2000),
+    service: GeoHubService = Depends(_svc),
+    payload: CurrentUserPayload = None,  # type: ignore[assignment]
+    _perm: None = Depends(RequirePermission("geo_hub.read")),
+) -> list[AnchoredProjectResponse]:
+    """All anchored projects the caller can access.
+
+    Returns only the minimum needed to render the global Geo Hub: project
+    id + name + anchor coords. Non-admin users see their own projects;
+    admins see all. Projects without a ``GeoAnchor`` are excluded so the
+    pin layer never paints null-island placeholders.
+    """
+    rows = await service.list_anchored_projects(payload, limit=limit)
+    return [AnchoredProjectResponse.model_validate(r) for r in rows]
+
+
 # ── Map config one-shot bundle ───────────────────────────────────────────
 
 
 @router.get("/map-config/{project_id}", response_model=MapConfigResponse)
 async def get_map_config(
     project_id: uuid.UUID,
+    development_id: uuid.UUID | None = Query(default=None),
     service: GeoHubService = Depends(_svc),
     payload: CurrentUserPayload = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("geo_hub.read")),
 ) -> MapConfigResponse:
-    bundle = await service.map_config(project_id, payload=payload)
+    """Project-scoped map config.
+
+    When ``development_id`` is supplied, tilesets and overlays are
+    filtered down to those linked to that development (via
+    ``metadata.development_id`` for tilesets, ``source_kind=development``
+    for native dev tilesets, or PropDev's known unit/plot ids). Cross-
+    tenant access is collapsed to 404 by the service IDOR helper.
+    """
+    bundle = await service.map_config(
+        project_id, payload=payload, development_id=development_id,
+    )
     return MapConfigResponse.model_validate(bundle)
 
 

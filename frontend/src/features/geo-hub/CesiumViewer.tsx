@@ -55,6 +55,16 @@ interface CesiumViewerProps {
    */
   pins?: GeoPinBundle;
   /**
+   * If set, after the matching tileset finishes loading the camera
+   * flies to its bounding sphere. This is how deep-links from BIM
+   * ("View on map" with ``?model=…``) and PropDev focus the user on
+   * a specific model instead of leaving them at the project anchor.
+   *
+   * Best-effort — silently no-ops when the tileset has no resolvable
+   * ``boundingSphere`` or fails to load.
+   */
+  focusedTilesetId?: string | null;
+  /**
    * Optional overlay rendered above the Cesium canvas (HUD, empty
    * states, custom badges). Rendered inside the same relative wrapper
    * so absolute-positioned children compose naturally.
@@ -146,6 +156,15 @@ type CesiumViewerInstance = {
   destroy: () => void;
   camera: {
     flyTo: (options: { destination: unknown }) => void;
+    /**
+     * Optional in our type-shim — exists in all Cesium versions we ship
+     * but we guard the call at runtime so the focus effect degrades to
+     * a no-op on hypothetical builds where it's absent.
+     */
+    flyToBoundingSphere?: (
+      sphere: unknown,
+      options?: { duration?: number; offset?: unknown },
+    ) => void;
     changed: CesiumEventLike;
     heading: number;
     positionCartographic: CesiumCartographicLike;
@@ -179,6 +198,7 @@ interface CesiumLike {
     ORANGE: unknown;
     DODGERBLUE: unknown;
     WHITE: unknown;
+    LIMEGREEN?: unknown;
     fromCssColorString?: (css: string) => unknown;
   };
   EllipsoidTerrainProvider: new () => unknown;
@@ -221,6 +241,7 @@ export function CesiumViewer({
   mode,
   mapConfig,
   pins,
+  focusedTilesetId,
   overlay,
   onMouseMove,
   onCameraChange,
@@ -233,6 +254,11 @@ export function CesiumViewer({
   // effect can incrementally remove/re-add without tearing down user
   // entities created by other future code paths.
   const pinEntitiesRef = useRef<CesiumEntityLike[]>([]);
+  // Map of Tileset.id -> the loaded Cesium3DTileset primitive, populated
+  // as the viewer effect resolves each tileset. The focus effect reads
+  // from this map to flyTo() the bounding sphere of the user-selected
+  // tileset (via deep-link). Keyed by our DB id, not the cesium uuid.
+  const loadedTilesetsRef = useRef<Map<string, unknown>>(new Map());
   // Latest callback refs so the viewer effect doesn't have to re-run
   // when only the parent's handler identity changes.
   const onMouseMoveRef = useRef(onMouseMove);
@@ -313,6 +339,10 @@ export function CesiumViewer({
               );
               if (disposed) break;
               v.scene.primitives.add(tileset);
+              // Record so the focus effect can flyTo() its boundingSphere
+              // when ``focusedTilesetId`` matches. Cleared on cleanup
+              // along with the rest of the viewer state.
+              loadedTilesetsRef.current.set(ts.id, tileset);
             } catch (err) {
               // One bad tileset must not kill the viewer.
               // eslint-disable-next-line no-console
@@ -496,6 +526,7 @@ export function CesiumViewer({
       viewerRef.current = null;
       cesiumRef.current = null;
       pinEntitiesRef.current = [];
+      loadedTilesetsRef.current = new Map();
     };
     // ``signature`` collapses ``mapConfig`` into a stable string that
     // only changes when something the viewer actually renders changes.
@@ -509,7 +540,10 @@ export function CesiumViewer({
     const hse = pins.hse.map((p) => p.incident_id).join(',');
     const punch = pins.punchlist.map((p) => p.item_id).join(',');
     const diary = pins.diary.map((p) => p.photo_id).join(',');
-    return `hse:${hse}|pl:${punch}|dp:${diary}`;
+    const projects = (pins.projects ?? [])
+      .map((p) => p.project_id)
+      .join(',');
+    return `hse:${hse}|pl:${punch}|dp:${diary}|pj:${projects}`;
   }, [pins]);
 
   // Incremental pin rendering — runs AFTER the viewer effect (and
@@ -603,8 +637,80 @@ export function CesiumViewer({
         `diary:${p.photo_id}`,
       );
     }
+    // Global Geo Hub project pins — one per anchored project.
+    const projectColor =
+      cesium.Color.LIMEGREEN
+      ?? cesium.Color.fromCssColorString?.('#22c55e')
+      ?? cesium.Color.WHITE;
+    for (const p of pins.projects ?? []) {
+      addPin(
+        Number(p.lon),
+        Number(p.lat),
+        projectColor,
+        p.project_name || 'Project',
+        `project:${p.project_id}`,
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinSignature, cesiumStatus]);
+
+  // ── Focused-tileset flyTo ──────────────────────────────────────────────
+  //
+  // When the page deep-links into the geo viewer with a ``?model=`` query
+  // param, the host page maps that to a Tileset.id and passes it here.
+  // We fly to the matching tileset's bounding sphere once it has loaded —
+  // ``Cesium3DTileset.fromUrl`` resolves before the root tile is ready,
+  // so we await ``readyPromise`` (when present) before flying.
+  useEffect(() => {
+    if (!focusedTilesetId) return;
+    if (cesiumStatus !== 'loaded') return;
+    const v = viewerRef.current;
+    if (!v) return;
+    let cancelled = false;
+    (async () => {
+      // Poll for the tileset to appear in the loaded map — the viewer
+      // effect adds entries as ``fromUrl()`` resolves. Cap the wait so
+      // a stale focus id never holds the camera hostage.
+      const deadline = Date.now() + 8000;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let tileset: any = loadedTilesetsRef.current.get(focusedTilesetId);
+      while (!tileset && Date.now() < deadline && !cancelled) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        tileset = loadedTilesetsRef.current.get(focusedTilesetId);
+      }
+      if (cancelled || !tileset) return;
+      // Wait for the root tile to be ready so ``boundingSphere`` is
+      // populated. ``readyPromise`` was renamed in Cesium 1.107 — handle
+      // both ``ready`` boolean and the legacy ``readyPromise``.
+      try {
+        if (tileset.readyPromise && typeof tileset.readyPromise.then === 'function') {
+          await tileset.readyPromise;
+        }
+      } catch {
+        /* tileset never became ready — degrade silently */
+      }
+      if (cancelled) return;
+      const sphere = tileset.boundingSphere;
+      if (!sphere) return;
+      try {
+        if (typeof v.camera.flyToBoundingSphere === 'function') {
+          v.camera.flyToBoundingSphere(sphere, { duration: 1.5 });
+        } else {
+          // Fallback: aim the camera at the sphere centre. Less ideal —
+          // no automatic zoom to fit — but still better than leaving the
+          // user at the project anchor.
+          v.camera.flyTo({ destination: sphere.center ?? sphere });
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[geo_hub] flyToBoundingSphere failed', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedTilesetId, cesiumStatus, signature]);
 
   return (
     <div className="relative h-full w-full">

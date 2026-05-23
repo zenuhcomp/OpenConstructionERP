@@ -227,4 +227,25 @@ export interface GeoPinBundle {
   hse: HSEPin[];
   punchlist: PunchlistPin[];
   diary: DiaryPhotoPin[];
+  /**
+   * Optional project pin layer (Global Geo Hub only). Each pin is the
+   * project's anchor — clicking jumps into the project-scoped map.
+   * Empty in project / development modes.
+   */
+  projects?: AnchoredProject[];
+}
+
+/**
+ * Mirrors backend ``AnchoredProjectResponse`` — one row per project
+ * shown as a pin on the global Geo Hub map.
+ */
+export interface AnchoredProject {
+  project_id: string;
+  project_name: string;
+  anchor_id: string;
+  lat: string;
+  lon: string;
+  alt: string;
+  region_code: string | null;
+  address: string | null;
 }

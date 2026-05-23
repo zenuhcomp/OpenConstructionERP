@@ -21,7 +21,7 @@
 
 import { Suspense, lazy, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { MapPinned, AlertTriangle } from 'lucide-react';
 
@@ -61,6 +61,10 @@ function emptyStateFor(
 export function ProjectGeoPage() {
   const { t } = useTranslation();
   const { projectId } = useParams<{ projectId: string }>();
+  // Deep-link context — ``?model=<bim_model_or_federation_id>`` focuses the
+  // camera onto the matching tileset's boundingSphere once it loads.
+  const [searchParams] = useSearchParams();
+  const focusedModelId = searchParams.get('model');
 
   const { data, error, isLoading } = useQuery({
     queryKey: ['geo-hub', 'map-config', projectId],
@@ -115,6 +119,27 @@ export function ProjectGeoPage() {
     () => emptyStateFor(Boolean(data?.anchor), tilesets),
     [data?.anchor, tilesets],
   );
+
+  // Resolve ``?model=...`` to a Tileset.id by matching either the
+  // polymorphic ``source_id`` (bim_model / federation) or the
+  // ``metadata.cad_import_id`` stamped by the canonical-tileset
+  // packager. Falls back to ``null`` so the viewer skips flyTo() when
+  // the user has no in-flight deep-link.
+  const focusedTilesetId = useMemo<string | null>(() => {
+    if (!focusedModelId || !tilesets || tilesets.length === 0) return null;
+    const hit = tilesets.find((ts) => {
+      if (ts.source_id === focusedModelId) return true;
+      const meta = ts.metadata as Record<string, unknown> | undefined;
+      if (meta && typeof meta === 'object') {
+        const cad = meta['cad_import_id'];
+        if (typeof cad === 'string' && cad === focusedModelId) return true;
+        const fed = meta['federation_id'];
+        if (typeof fed === 'string' && fed === focusedModelId) return true;
+      }
+      return false;
+    });
+    return hit?.id ?? null;
+  }, [focusedModelId, tilesets]);
 
   if (!projectId) {
     return (
@@ -219,6 +244,7 @@ export function ProjectGeoPage() {
                 mode="project"
                 mapConfig={data}
                 pins={pins}
+                focusedTilesetId={focusedTilesetId}
                 onMouseMove={setCursorCoords}
                 onCameraChange={setCameraState}
                 overlay={

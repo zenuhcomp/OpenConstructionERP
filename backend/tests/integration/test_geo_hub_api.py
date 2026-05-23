@@ -905,3 +905,63 @@ class TestMapConfig:
             headers=tenant_b["headers"],
         )
         assert res.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_map_config_unknown_development_returns_404(
+        self, http_client, tenant_a,
+    ):
+        # ``development_id`` not under the project must 404 — IDOR closure
+        # so the filter cannot be turned into a UUID-existence oracle.
+        bogus = uuid.uuid4()
+        res = await http_client.get(
+            f"/api/v1/geo-hub/map-config/{tenant_a['project_id']}"
+            f"?development_id={bogus}",
+            headers=tenant_a["headers"],
+        )
+        assert res.status_code == 404
+
+
+# ── Anchored projects (Global pin layer) ───────────────────────────────
+
+
+class TestAnchoredProjects:
+    @pytest.mark.asyncio
+    async def test_list_anchored_projects_returns_own(
+        self, http_client, tenant_a,
+    ):
+        res = await http_client.get(
+            "/api/v1/geo-hub/projects",
+            headers=tenant_a["headers"],
+        )
+        assert res.status_code == 200, res.text
+        rows = res.json()
+        assert isinstance(rows, list)
+        # The earlier anchor test seeded ``tenant_a['project_id']`` with an
+        # anchor — it should appear in the global pin list.
+        ids = {r["project_id"] for r in rows}
+        assert tenant_a["project_id"] in ids
+        # And every row carries the minimum fields the frontend needs to
+        # paint a pin.
+        for r in rows:
+            assert "lat" in r and "lon" in r
+            assert "project_name" in r
+            assert "anchor_id" in r
+
+    @pytest.mark.asyncio
+    async def test_list_anchored_projects_excludes_other_tenants(
+        self, http_client, tenant_a, tenant_b,
+    ):
+        # tenant_b is a non-admin editor — tenant_a's anchored project
+        # must NOT appear in tenant_b's list (single-tenant per-project).
+        res = await http_client.get(
+            "/api/v1/geo-hub/projects",
+            headers=tenant_b["headers"],
+        )
+        assert res.status_code == 200
+        ids = {r["project_id"] for r in res.json()}
+        assert tenant_a["project_id"] not in ids
+
+    @pytest.mark.asyncio
+    async def test_list_anchored_projects_requires_auth(self, http_client):
+        res = await http_client.get("/api/v1/geo-hub/projects")
+        assert res.status_code in (401, 403)

@@ -2731,7 +2731,15 @@ export function BIMPage() {
 
               {projectId && (
                 <button
-                  onClick={() => navigate(`/projects/${projectId}/geo`)}
+                  onClick={() => {
+                    // Carry the currently-loaded BIM model id forward so
+                    // the geo page can flyTo() the matching tileset
+                    // instead of leaving the camera at the project anchor.
+                    const url = activeModelId
+                      ? `/projects/${projectId}/geo?model=${encodeURIComponent(activeModelId)}`
+                      : `/projects/${projectId}/geo`;
+                    navigate(url);
+                  }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors border text-content-secondary bg-surface-secondary border-border-light hover:bg-surface-tertiary"
                   title={t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
                   aria-label={t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
