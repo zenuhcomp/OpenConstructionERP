@@ -44,7 +44,7 @@ Professional BOQ, 4D/5D planning, AI-powered estimation, CAD/BIM takeoff — all
 <tr>
 <td valign="top">
 
-**Getting Started**
+**🚀 Get Started**
 - [Why OpenConstructionERP?](#why-openconstructionerp)
 - [See It In Action](#see-it-in-action)
 - [Quick Start](#quick-start)
@@ -53,66 +53,69 @@ Professional BOQ, 4D/5D planning, AI-powered estimation, CAD/BIM takeoff — all
 </td>
 <td valign="top">
 
-**Core Modules**
-- [BOQ Management](#-bill-of-quantities-boq-management)
+**💰 Estimating & Costs**
+- [Bill of Quantities](#-bill-of-quantities-boq-management)
 - [Cost Databases & Catalog](#%EF%B8%8F-cost-databases--resource-catalog)
-- [CAD/BIM & AI Estimation](#%EF%B8%8F-cadbim-takeoff--ai-estimation)
+- [CAD/BIM Takeoff & AI](#%EF%B8%8F-cadbim-takeoff--ai-estimation)
 
 </td>
 <td valign="top">
 
-**Planning & Delivery**
+**📆 Project Lifecycle**
 - [4D Scheduling & 5D Cost](#-4d-scheduling--5d-cost-model)
 - [Tendering, Risk & Reports](#-tendering-risk--reporting)
 - [Requirements & Quality](#-requirements--quality-gates)
+- [Property Development](#-property-development)
 
 </td>
 </tr>
 <tr>
 <td valign="top">
 
-**Field Tools**
+**🌐 Visualization & Coordination**
+- [Geo Hub (3D Globe)](#-geo-hub-3d-globe)
+- [Coordination Hub & Clash AI](#-coordination-hub--clash-ai)
 - [PDF Markups & Annotations](#%EF%B8%8F-pdf-markups--annotations)
+
+</td>
+<td valign="top">
+
+**🦺 Field & Quality**
+- [Daily Diary & HSE](#-daily-diary--hse)
 - [Punch List](#-punch-list)
 - [Validation Engine](#%EF%B8%8F-validation--compliance-engine)
 
 </td>
 <td valign="top">
 
-**Standards & Onboarding**
-- [20 Regional Standards](#-20-regional-standards)
+**⚙️ Setup & Standards**
+- [30+ Regional Standards](#-30-regional-standards)
 - [Guided Onboarding](#-guided-onboarding)
-- [Key Features Overview](#key-features)
-
-</td>
-<td valign="top">
-
-**Technical**
-- [Tech Stack](#tech-stack)
-- [Architecture](#architecture)
-- [Security](#security)
+- [All Key Features](#key-features)
 
 </td>
 </tr>
 <tr>
 <td valign="top">
 
-**Project & Community**
-- [Support the Project](#support-the-project)
+**🔧 Technical**
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Security](#security)
 
 </td>
 <td valign="top">
 
-**Compliance**
+**🤝 Community**
+- [Support the Project](#support-the-project)
 - [AI Disclaimer](#ai-disclaimer)
 - [Trademarks](#trademarks)
-- [Export Control](#export-control)
 
 </td>
 <td valign="top">
 
-**Legal & Privacy**
-- [Star History](#star-history)
+**📜 Legal & Privacy**
+- [Export Control](#export-control)
 - [License](#license)
 - [Privacy and Terms](#privacy-and-terms)
 
@@ -379,6 +382,46 @@ Extract quantities from any source — drawings, models, text, or photos:
 - **AI Cost Advisor** — Ask questions about pricing, materials, or estimation methodology. AI answers using your cost database as context
 - **Cost matching** — After AI generates an estimate, match each item against your CWICR database to replace AI-guessed rates with real market prices
 
+### 🌍 Geo Hub (3D Globe)
+
+Anchor every project on a real spherical earth — Cesium 3D Tiles 1.1 with live HUD and pin layers:
+
+- **Three-mode picker** — Global (planet-wide portfolio), Project (job-site scale), Development (plot-level masterplan)
+- **Live HUD** — Cursor latitude / longitude, terrain altitude, dynamic scale bar, north arrow
+- **Anchored Projects rail** — Floating collapsible overlay showing every geo-anchored project, click to fly-to
+- **Deeplinks** — `?model=`, `?plot=`, `?dev_id=`, `?phase=`, `?block=` survive page reloads and shareable URLs
+- **Pin layers** — HSE incidents, Punchlist items, Daily Diary entries plotted on the globe with category icons
+- **"View on map" CTAs** — One click from BIM viewer, PropDev plot, Daily Diary entry, Project card → globe with that asset selected
+- **Canonical pipeline** — `POST /api/v1/geo-hub/from-canonical/{cad_import_id}` turns any DDC cad2data conversion into glTF 3D Tiles via pure-Python pygltflib (no commercial toolkit needed)
+
+*Example: open a Berlin masterplan in Geo Hub, switch to Development mode, see all 12 plots colored by sale status, click one → reservation pipeline opens with that buyer pre-filtered.*
+
+### 🏢 Property Development
+
+End-to-end real-estate developer workflow — from first lead to handover snags to warranty close-out:
+
+- **Lead → Reservation → SPA → Handover → Warranty** — Full lifecycle FSM with auto-creation of ContractParty on SPA conversion, Payment Schedule state machine, idempotent stage transitions
+- **Sub-entity tabs** — Phases · Blocks · Brokers · Price Matrix · Escrow — one screen for every dev operation, no page hops
+- **House Type catalogue** — ISO 3166-1 picker covering 180+ countries plus Custom region; CountryCombobox + HouseTypeEditModal share the same backend taxonomy as catalog & costs
+- **SnagsBlock per handover** — Photo upload, status (Open / Resolved / Disputed), one-click promote-to-warranty when a snag survives the defects-liability period
+- **Contacts ↔ PropDev bridge** — Every Lead and Buyer is idempotently tagged as a Contact via `Contact.module_tags`, so CRM and PropDev stay in sync without duplicates
+- **Price Matrix** — Per-phase × house-type × view-premium grid with currency-aware totals and bulk apply
+- **Escrow** — Per-buyer payment schedule with milestone receipts and outstanding balance roll-up
+
+*Example: import a 240-unit residential masterplan, generate price matrix from house-type × view, push to globe, accept 18 reservations across 3 brokers, convert 11 to SPA, hand over 4, track 7 open snags in the warranty period — all in one app.*
+
+### 🤝 Coordination Hub & Clash AI
+
+Multi-disciplinary BIM coordination with AI-assisted issue triage:
+
+- **Coordination Hub** — Single dashboard fusing clashes, RFIs, submittals, action items per model federation
+- **Smart Views v1** — Saved filters across the federation (e.g. "MEP-vs-STR clashes > 50mm in Level 03")
+- **Clash Smart Issues** — Auto-group thousands of raw clash results into prioritized issue clusters by location + discipline pair
+- **AI Triage** — LLM ranks new clashes by severity / rework cost / location criticality with confidence scores
+- **Cost Impact rollup** — Per-issue rework estimate driven by your cost database, surfaced on the dashboard
+- **BCF 3.0 / OpenCDE export** — Round-trip with Solibri, Navisworks, BIMcollab via the open BIM standard
+- **BIM Requirements** — IDS (Information Delivery Specification) and COBie import / export for owner-side data drops
+
 ### 📅 4D Scheduling & 5D Cost Model
 
 Plan your project timeline and track costs over time:
@@ -431,7 +474,17 @@ Track construction deficiencies from discovery to resolution:
 - **PDF Export** — Generate punch list reports for stakeholder review
 - **Verification control** — Different user must verify (not the resolver)
 
-### 🌍 20 Regional Standards
+### 📓 Daily Diary & HSE
+
+Field-level reporting and safety tracking that holds up in court:
+
+- **Daily Diary** — Weather-aware entries (auto-pulled from project geo-coordinates), crew on site, equipment used, deliveries, delays, photos
+- **HSE Incidents** — Near-miss → first-aid → recordable → lost-time taxonomy with mandatory root-cause and corrective-action fields
+- **OSHA-recordable flag** — Server-side default backing for compliant regulatory exports (300 / 300A / 301)
+- **Photo capture with EXIF / GPS** — Field photos preserve location and timestamp metadata; magic-byte upload validation for defence-in-depth
+- **Geo-anchored pins** — Daily Diary and HSE pins surface on the Geo Hub globe layer for portfolio-level safety dashboards
+
+### 🌍 30+ Regional Standards
 
 | Standard | Region | Format |
 |----------|--------|--------|
