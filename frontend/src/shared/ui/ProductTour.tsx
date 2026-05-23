@@ -59,7 +59,7 @@ export const TOUR_START_EVENT = 'oe:start-tour';
 
 /** Known tour identifiers.  Add a new id here when registering a new
  *  per-module tour so callers get autocompletion + type safety. */
-export type TourId = 'global' | 'boq';
+export type TourId = 'global' | 'boq' | 'accommodation';
 
 /** Per-tour storage key.  `global` keeps the bare key for backward
  *  compatibility with installs upgraded from before this refactor. */
@@ -225,11 +225,53 @@ export const BOQ_TOUR_STEPS: ProductTourStep[] = [
   },
 ];
 
+/* ── Per-module tour: Accommodation (5 steps) ─────────────────────────
+ *
+ * Walks a new operator through the Accommodation detail page:
+ *   1. Header — name, kind badge, BIM link, Geo CTA.
+ *   2. Tabs strip — Rooms / Bookings / Charges / Settings.
+ *   3. Rooms tab — colour-coded grid + bulk add.
+ *   4. Bookings tab — state machine actions.
+ *   5. Wrap-up — bootstrap from PropDev + HR autobook.
+ */
+export const ACCOMMODATION_TOUR_STEPS: ProductTourStep[] = [
+  {
+    selector: '[data-testid="accommodation-detail-header"]',
+    titleKey: 'tour.accommodation.step.1.title',
+    bodyKey: 'tour.accommodation.step.1.body',
+    preferredPosition: 'bottom',
+  },
+  {
+    selector: '[data-testid="accommodation-detail-tabs"]',
+    titleKey: 'tour.accommodation.step.2.title',
+    bodyKey: 'tour.accommodation.step.2.body',
+    preferredPosition: 'bottom',
+  },
+  {
+    selector: '[data-testid="accommodation-tab-panel-rooms"]',
+    titleKey: 'tour.accommodation.step.3.title',
+    bodyKey: 'tour.accommodation.step.3.body',
+    preferredPosition: 'top',
+  },
+  {
+    selector: '[data-testid="accommodation-detail-tab-bookings"]',
+    titleKey: 'tour.accommodation.step.4.title',
+    bodyKey: 'tour.accommodation.step.4.body',
+    preferredPosition: 'bottom',
+  },
+  {
+    selector: null,
+    titleKey: 'tour.accommodation.step.5.title',
+    bodyKey: 'tour.accommodation.step.5.body',
+  },
+];
+
 /* ── Tour registry — id → playlist of steps ────────────────────────────── */
 
 export const TOUR_REGISTRY: Record<TourId, ProductTourStep[]> = {
   global: DEFAULT_PRODUCT_TOUR_STEPS,
   boq: BOQ_TOUR_STEPS,
+  accommodation: ACCOMMODATION_TOUR_STEPS,
 };
 
 /* ── Hard-coded fallbacks for the locale keys, used when i18n misses ────── */
@@ -290,6 +332,23 @@ const STEP_FALLBACKS: Record<string, string> = {
   'tour.boq.step.8.title': 'Export anywhere',
   'tour.boq.step.8.body':
     'Export to Excel (.xlsx), CSV, PDF report, or GAEB XML X83 for German tender submission. Currency, FX rates and markups are baked in so the recipient sees the same totals.',
+
+  // ── Accommodation tour ───────────────────────────────────────────────
+  'tour.accommodation.step.1.title': 'Accommodation header',
+  'tour.accommodation.step.1.body':
+    'Name, kind badge, project context and quick links to BIM and the Geo Hub when geo-coordinates are set. Launch the per-module tour from the Tour button here.',
+  'tour.accommodation.step.2.title': 'Tabs',
+  'tour.accommodation.step.2.body':
+    'Rooms, Bookings, Charges and Settings. Each tab scopes its data to this accommodation only.',
+  'tour.accommodation.step.3.title': 'Rooms grid',
+  'tour.accommodation.step.3.body':
+    'Colour-coded by status — green available, amber occupied, grey maintenance, red blocked. Bulk-create rooms with the generator: prefix + start + count.',
+  'tour.accommodation.step.4.title': 'Bookings',
+  'tour.accommodation.step.4.body':
+    'State machine: reserved → checked_in → checked_out. Cancel is allowed from any non-final state. The room flips to occupied on check-in and back to available on check-out / cancel.',
+  'tour.accommodation.step.5.title': 'Bridges you can use today',
+  'tour.accommodation.step.5.body':
+    'Bootstrap rooms from a PropDev block (idempotent — re-run safely) and let HR suggest the lowest-numbered free worker-camp room for a new employee.',
 
   // ── ModuleHelpButton labels ──────────────────────────────────────────
   'module_help.tour_button': 'Tour',
