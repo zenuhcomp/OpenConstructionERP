@@ -45,10 +45,26 @@ import BIMCoverageCard from './BIMCoverageCard';
 import { CompactProjectCard } from './components/CompactProjectCard';
 import { DashboardProjectsMap } from './components/DashboardProjectsMap';
 import { ShowAllProjectsCard } from './components/ShowAllProjectsCard';
+import {
+  BOQSummaryWidget,
+  CriticalPathWidget,
+  TopRisksWidget,
+  HSEScoreCardWidget,
+  ProcurementPipelineWidget,
+  BudgetVarianceWidget,
+  ChangeOrdersWidget,
+  ClashHealthWidget,
+  ValidationHealthWidget,
+  WeatherSiteWidget,
+} from './components/NewWidgets';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { DashboardLayoutManager } from './DashboardLayoutManager';
 import { DASHBOARD_WIDGET_IDS } from './widgetRegistry';
-import { useDashboardLayoutStore, reconcileOrder } from '@/stores/useDashboardLayoutStore';
+import {
+  useDashboardLayoutStore,
+  reconcileOrder,
+  hydrateDashboardLayoutFromServer,
+} from '@/stores/useDashboardLayoutStore';
 
 /* ── Helpers ──────────────────────────────────────────────────────────── */
 
@@ -1720,6 +1736,13 @@ export function DashboardPage() {
     [widgetOrder],
   );
 
+  // Pull the server-side layout once at mount so a user who customised on
+  // another browser sees the same dashboard here. Idempotent: only the
+  // first call actually fires.
+  useEffect(() => {
+    void hydrateDashboardLayoutFromServer();
+  }, []);
+
   const { data: projects } = useQuery({
     queryKey: ['projects'],
     queryFn: () => apiGet<ProjectSummary[]>('/v1/projects/').catch(() => []),
@@ -1994,6 +2017,18 @@ export function DashboardPage() {
         </div>
       </div>
     ),
+
+    // ── Wave 2 widgets (2026-05-23) — definitions in components/NewWidgets.tsx ──
+    boq_summary: <BOQSummaryWidget projects={projects} />,
+    validation_score: <ValidationHealthWidget />,
+    clash_health: <ClashHealthWidget />,
+    schedule_critical: <CriticalPathWidget projects={projects} />,
+    risk_top: <TopRisksWidget />,
+    hse_scorecard: <HSEScoreCardWidget />,
+    procurement_pipeline: <ProcurementPipelineWidget />,
+    budget_variance: <BudgetVarianceWidget projects={projects} />,
+    change_orders: <ChangeOrdersWidget projects={projects} />,
+    weather_site: <WeatherSiteWidget projects={projects} />,
   };
 
   return (

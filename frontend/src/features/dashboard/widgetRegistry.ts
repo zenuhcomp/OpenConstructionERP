@@ -21,6 +21,17 @@ import {
   CheckCircle2,
   BarChart3,
   Activity,
+  // Wave 2 (added 2026-05-23) — 10 new widgets, grouped by domain below.
+  FileSpreadsheet,
+  GitBranch,
+  ShieldAlert,
+  HardHat,
+  ShoppingCart,
+  Wallet,
+  ClipboardList,
+  Cog,
+  CheckSquare,
+  CloudSun,
 } from 'lucide-react';
 
 export interface DashboardWidgetMeta {
@@ -35,6 +46,7 @@ export interface DashboardWidgetMeta {
 }
 
 export const DASHBOARD_WIDGETS: readonly DashboardWidgetMeta[] = [
+  // ── Core (existing 12) ────────────────────────────────────────────────
   {
     id: 'continue_work',
     labelKey: 'dashboard.layout.w_continue',
@@ -130,6 +142,94 @@ export const DASHBOARD_WIDGETS: readonly DashboardWidgetMeta[] = [
     descKey: 'dashboard.layout.w_activity_desc',
     descDefault: 'Recent cross-module activity feed and system health',
     icon: Activity,
+  },
+
+  // ── Estimation & quality (wave 2 — 2026-05-23) ────────────────────────
+  {
+    id: 'boq_summary',
+    labelKey: 'dashboard.layout.w_boq_summary',
+    labelDefault: 'BOQ Summary',
+    descKey: 'dashboard.layout.w_boq_summary_desc',
+    descDefault: 'BOQ count, total value, completeness across projects',
+    icon: FileSpreadsheet,
+  },
+  {
+    id: 'validation_score',
+    labelKey: 'dashboard.layout.w_validation',
+    labelDefault: 'Validation Health',
+    descKey: 'dashboard.layout.w_validation_desc',
+    descDefault: 'Pass / warn / fail counts across validation reports',
+    icon: CheckSquare,
+  },
+  {
+    id: 'clash_health',
+    labelKey: 'dashboard.layout.w_clash',
+    labelDefault: 'Clash Health',
+    descKey: 'dashboard.layout.w_clash_desc',
+    descDefault: 'Open clashes by severity and resolution progress',
+    icon: Cog,
+  },
+
+  // ── Planning & risk ────────────────────────────────────────────────────
+  {
+    id: 'schedule_critical',
+    labelKey: 'dashboard.layout.w_schedule',
+    labelDefault: 'Critical Path',
+    descKey: 'dashboard.layout.w_schedule_desc',
+    descDefault: 'Top at-risk tasks on the critical path',
+    icon: GitBranch,
+  },
+  {
+    id: 'risk_top',
+    labelKey: 'dashboard.layout.w_risk',
+    labelDefault: 'Top Risks',
+    descKey: 'dashboard.layout.w_risk_desc',
+    descDefault: 'Highest probability × impact risks with trend',
+    icon: ShieldAlert,
+  },
+  {
+    id: 'hse_scorecard',
+    labelKey: 'dashboard.layout.w_hse',
+    labelDefault: 'HSE Scorecard',
+    descKey: 'dashboard.layout.w_hse_desc',
+    descDefault: 'Incidents, near-misses and last-incident date',
+    icon: HardHat,
+  },
+
+  // ── Commercial ─────────────────────────────────────────────────────────
+  {
+    id: 'procurement_pipeline',
+    labelKey: 'dashboard.layout.w_procurement',
+    labelDefault: 'Procurement',
+    descKey: 'dashboard.layout.w_procurement_desc',
+    descDefault: 'RFQs pending, POs issued and received counts',
+    icon: ShoppingCart,
+  },
+  {
+    id: 'budget_variance',
+    labelKey: 'dashboard.layout.w_budget',
+    labelDefault: 'Budget Variance',
+    descKey: 'dashboard.layout.w_budget_desc',
+    descDefault: 'Planned vs actual and top over-budget projects',
+    icon: Wallet,
+  },
+  {
+    id: 'change_orders',
+    labelKey: 'dashboard.layout.w_changeorders',
+    labelDefault: 'Change Orders',
+    descKey: 'dashboard.layout.w_changeorders_desc',
+    descDefault: 'Open count, dollar impact, top pending approvals',
+    icon: ClipboardList,
+  },
+
+  // ── Field ──────────────────────────────────────────────────────────────
+  {
+    id: 'weather_site',
+    labelKey: 'dashboard.layout.w_weather',
+    labelDefault: 'Weather & Site',
+    descKey: 'dashboard.layout.w_weather_desc',
+    descDefault: "Today's weather at your first project site",
+    icon: CloudSun,
   },
 ] as const;
 
