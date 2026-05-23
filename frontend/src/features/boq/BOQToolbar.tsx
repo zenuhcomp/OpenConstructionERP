@@ -193,9 +193,12 @@ export function BOQToolbar({
   // Bug 7: stick BELOW the app header (52px / --oe-header-height) — using top-0 collides
   // with the sticky header (z-30), pushing the toolbar out of view when scrolling.
   return (
-    <div className="sticky top-[52px] z-20 bg-surface-primary flex flex-wrap items-center gap-x-1.5 gap-y-2 px-1 py-2 border-b border-border-light mb-3">
+    <div
+      data-testid="boq-toolbar"
+      className="sticky top-[52px] z-20 bg-surface-primary flex flex-wrap items-center gap-x-1.5 gap-y-2 px-1 py-2 border-b border-border-light mb-3"
+    >
       {/* ── Row-group: Quality + Undo/Redo ─────────────────────────────── */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5" data-testid="boq-quality-ring">
         {hasPositions && qualityScoreRing}
         <Button variant="ghost" size="sm" icon={<Undo2 size={15} />} onClick={onUndo} disabled={!canUndo} title={t('boq.undo', { defaultValue: 'Undo (Ctrl+Z)' })} />
         <Button variant="ghost" size="sm" icon={<Redo2 size={15} />} onClick={onRedo} disabled={!canRedo} title={t('boq.redo', { defaultValue: 'Redo (Ctrl+Y)' })} />
@@ -206,7 +209,13 @@ export function BOQToolbar({
 
       {/* ── Row-group: Add ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-1.5">
-        <Button variant="primary" size="sm" icon={<Plus size={15} />} onClick={onAddPosition}>
+        <Button
+          variant="primary"
+          size="sm"
+          icon={<Plus size={15} />}
+          onClick={onAddPosition}
+          data-testid="boq-add-position-button"
+        >
           {t('boq.add_position')}
         </Button>
         <Button variant="secondary" size="sm" icon={<Layers size={15} />} onClick={onAddSection} title={t('boq.add_section')}>
@@ -254,7 +263,7 @@ export function BOQToolbar({
             </span>
           </Button>
         )}
-        <div ref={exportRef} className="relative">
+        <div ref={exportRef} className="relative" data-testid="boq-export-button">
           <Button variant="ghost" size="sm" icon={<Download size={15} />} onClick={() => setShowExportMenu((prev) => !prev)} aria-expanded={showExportMenu} aria-haspopup="true">
             {t('boq.export')}
           </Button>
@@ -578,7 +587,7 @@ function QualityAiMenu(props: QualityAiMenuProps) {
   };
 
   return (
-    <div ref={wrapperRef} className="relative">
+    <div ref={wrapperRef} className="relative" data-testid="boq-quality-ai-menu">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

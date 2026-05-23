@@ -89,10 +89,15 @@ export type { TourStep } from './OnboardingTour';
 export {
   ProductTour,
   DEFAULT_PRODUCT_TOUR_STEPS,
+  BOQ_TOUR_STEPS,
+  TOUR_REGISTRY,
   TOUR_COMPLETED_KEY,
   TOUR_START_EVENT,
 } from './ProductTour';
-export type { ProductTourStep, ProductTourProps } from './ProductTour';
+export type { ProductTourStep, ProductTourProps, TourId } from './ProductTour';
+
+export { ModuleHelpButton } from './ModuleHelpButton';
+export type { ModuleHelpButtonProps } from './ModuleHelpButton';
 
 export { GlobalProgress, useProgressStore } from './GlobalProgress';
 

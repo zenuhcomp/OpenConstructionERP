@@ -6596,6 +6596,30 @@ const resource = {
     "tour.step_counter": "Step {{current}} of {{total}}",
     "tour.confirm_skip": "Skip the product tour? You can re-launch it from the Help menu.",
     // --- /Product tour ---
+
+    // --- Per-module tour: BOQ Editor (8 steps) ---
+    "tour.boq.step.1.title": "BOQ toolbar",
+    "tour.boq.step.1.body": "Every action lives here: add sections and positions, import GAEB or Excel, pick from the cost database, validate, run AI checks, and export. Hover any icon for its keyboard shortcut.",
+    "tour.boq.step.2.title": "Add a position",
+    "tour.boq.step.2.body": "Creates a new line under the section you last clicked. The Description cell opens for inline edit automatically — type, then Tab through unit, quantity and unit rate.",
+    "tour.boq.step.3.title": "The estimating grid",
+    "tour.boq.step.3.body": "Click any cell to edit; arrow keys / Tab navigate; formulas like =2*A1 are supported; right-click a row for duplicate, indent, link to BIM, or save-as-assembly.",
+    "tour.boq.step.4.title": "Quality & AI tools",
+    "tour.boq.step.4.body": "Run validation against DIN 276 / GAEB / NRM, recalculate rates from the cost database, price-check against market medians, or open the AI assistant for plain-text BOQ generation.",
+    "tour.boq.step.5.title": "Resource summary",
+    "tour.boq.step.5.body": "Live rollup of every material, labour and equipment line consumed across this BOQ — quantities, unit costs and total spend per resource. Click a row to see which positions use it.",
+    "tour.boq.step.6.title": "Markups & VAT",
+    "tour.boq.step.6.body": "Add overhead, profit, tax, contingency, insurance or bonds — pick a regional template (DACH VOB, UK NRM, US RSMeans, FR BATIPRIX, …) or roll your own. Markups stack on the direct cost.",
+    "tour.boq.step.7.title": "Quality score",
+    "tour.boq.step.7.body": "Traffic light driven by the validation pipeline — green over 80, amber 50-80, red below. Hover for the breakdown: descriptions filled, quantities set, rates set, markups configured.",
+    "tour.boq.step.8.title": "Export anywhere",
+    "tour.boq.step.8.body": "Export to Excel (.xlsx), CSV, PDF report, or GAEB XML X83 for German tender submission. Currency, FX rates and markups are baked in so the recipient sees the same totals.",
+    // --- /Per-module tour: BOQ Editor ---
+
+    // --- ModuleHelpButton (per-module page Tour CTA) ---
+    "module_help.tour_button": "Tour",
+    "module_help.tour_aria": "Start guided tour for this module",
+    // --- /ModuleHelpButton ---
     // --- Header: newsletter Subscribe pill + popover (centered in topbar) ---
     "header.subscribe.button": "Subscribe to news",
     "header.subscribe.subscribed": "Subscribed",

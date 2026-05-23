@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 // lucide-react icons used by sub-components (BOQToolbar, BOQGrid, etc.) — none needed directly here
 import { Database, Download, ExternalLink, X, Sparkles, AlertTriangle as WarnTriangle, Lock, Copy, Wallet, Keyboard, GitCompare, RefreshCw } from 'lucide-react';
-import { Button, Badge, Breadcrumb } from '@/shared/ui';
+import { Button, Badge, Breadcrumb, ModuleHelpButton } from '@/shared/ui';
 import { useProgressStore } from '@/shared/ui/GlobalProgress';
 import { apiGet, apiPost, triggerDownload } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
@@ -3877,6 +3877,10 @@ export function BOQEditorPage() {
               <Copy size={14} className="mr-1" />
               {t('boq.create_revision', { defaultValue: 'Create Revision' })}
             </Button>
+            {/* Per-module Tour CTA — launches the BOQ-specific guided tour
+                via the registered TOUR_REGISTRY entry, independent of any
+                global / first-login tour state. */}
+            <ModuleHelpButton tourId="boq" />
           </div>
         </div>
 
@@ -3966,7 +3970,7 @@ export function BOQEditorPage() {
         // than the viewport when many custom columns are added — the grid
         // keeps its own internal horizontal scrollbar, which is what the
         // user expects (toolbar and headers stay aligned with the page).
-        <div className="mb-2 min-w-0">
+        <div className="mb-2 min-w-0" data-testid="boq-grid">
         <BOQGrid
           ref={boqGridRef}
           positions={boq.positions}
@@ -4061,19 +4065,21 @@ export function BOQEditorPage() {
 
       {/* ── Markup Management Panel ──────────────────────────────────── */}
       {boqId && (
-        <MarkupPanel
-          boqId={boqId}
-          markups={markups}
-          directCost={directCost}
-          currencySymbol={currencySymbol}
-          currencyCode={currencyCode}
-          locale={locale}
-          fmt={fmt}
-        />
+        <div data-testid="boq-markup-panel">
+          <MarkupPanel
+            boqId={boqId}
+            markups={markups}
+            directCost={directCost}
+            currencySymbol={currencySymbol}
+            currencyCode={currencyCode}
+            locale={locale}
+            fmt={fmt}
+          />
+        </div>
       )}
 
       {/* ── Resource Summary ──────────────────────────────────────────── */}
-      {boqId && hasPositions && <div className="mt-6"><ResourceSummary boqId={boqId} locale={locale} /></div>}
+      {boqId && hasPositions && <div className="mt-6" data-testid="boq-resource-summary"><ResourceSummary boqId={boqId} locale={locale} /></div>}
 
       {/* ── Cost Breakdown Panel ─────────────────────────────────────── */}
       {boqId && hasPositions && <div className="mt-6"><CostBreakdownPanel boqId={boqId} locale={locale} /></div>}

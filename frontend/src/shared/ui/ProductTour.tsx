@@ -43,12 +43,29 @@ import { ConfirmDialog } from './ConfirmDialog';
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
 
-/** Tour completion flag.  Tested against the literal string `'true'`. */
+/** Tour completion flag.  Tested against the literal string `'true'`.
+ *  Per-tour storage uses `${TOUR_COMPLETED_KEY}.<tourId>` (e.g.
+ *  `oe.tour_completed.boq`) so finishing one module's tour never blocks
+ *  another from launching.  The bare key is kept for the historical
+ *  global tour (tourId === 'global') so legacy installs keep working. */
 export const TOUR_COMPLETED_KEY = 'oe.tour_completed';
 
 /** Window event that any external trigger (e.g. WhatsNewCard "Take a
- *  quick tour" button, Help menu item) can dispatch to (re-)start. */
+ *  quick tour" button, Help menu item, per-module ModuleHelpButton) can
+ *  dispatch to (re-)start.  The event detail may carry a `tourId` to
+ *  pick a registered tour playlist; omitting it launches the global
+ *  default. */
 export const TOUR_START_EVENT = 'oe:start-tour';
+
+/** Known tour identifiers.  Add a new id here when registering a new
+ *  per-module tour so callers get autocompletion + type safety. */
+export type TourId = 'global' | 'boq';
+
+/** Per-tour storage key.  `global` keeps the bare key for backward
+ *  compatibility with installs upgraded from before this refactor. */
+function storageKeyFor(tourId: TourId): string {
+  return tourId === 'global' ? TOUR_COMPLETED_KEY : `${TOUR_COMPLETED_KEY}.${tourId}`;
+}
 
 /** Routes where the *auto-start* must NOT mount on top of the page (the
  *  spotlight overlay would block form inputs / primary CTAs).  Manual
@@ -141,6 +158,80 @@ export const DEFAULT_PRODUCT_TOUR_STEPS: ProductTourStep[] = [
   },
 ];
 
+/* ── Per-module tour: BOQ Editor (8 steps) ──────────────────────────────
+ *
+ * Steps walk a brand-new estimator from "what is this page" through every
+ * load-bearing surface of the BOQ editor:
+ *   1. Toolbar — primary action band, undo/redo + add + import/export.
+ *   2. Add Position — the primary CTA every user hits first.
+ *   3. AG Grid — the editable table itself, inline editing + keyboard nav.
+ *   4. Quality & AI menu — validate, AI rate recovery, anomaly check.
+ *   5. Resource summary panel — material / labour / equipment rollup.
+ *   6. Markup panel — overhead / profit / VAT / contingency configuration.
+ *   7. Quality score ring — live traffic light driven by validation.
+ *   8. Export menu (closing tip) — Excel / GAEB X83 / PDF / CSV.
+ *
+ * Selectors target stable `data-testid` attributes added in BOQEditorPage
+ * and BOQToolbar so the tour survives Tailwind churn / button reorders.
+ */
+export const BOQ_TOUR_STEPS: ProductTourStep[] = [
+  {
+    selector: '[data-testid="boq-toolbar"]',
+    titleKey: 'tour.boq.step.1.title',
+    bodyKey: 'tour.boq.step.1.body',
+    preferredPosition: 'bottom',
+  },
+  {
+    selector: '[data-testid="boq-add-position-button"]',
+    titleKey: 'tour.boq.step.2.title',
+    bodyKey: 'tour.boq.step.2.body',
+    preferredPosition: 'bottom',
+  },
+  {
+    selector: '[data-testid="boq-grid"]',
+    titleKey: 'tour.boq.step.3.title',
+    bodyKey: 'tour.boq.step.3.body',
+    preferredPosition: 'top',
+  },
+  {
+    selector: '[data-testid="boq-quality-ai-menu"]',
+    titleKey: 'tour.boq.step.4.title',
+    bodyKey: 'tour.boq.step.4.body',
+    preferredPosition: 'bottom',
+  },
+  {
+    selector: '[data-testid="boq-resource-summary"]',
+    titleKey: 'tour.boq.step.5.title',
+    bodyKey: 'tour.boq.step.5.body',
+    preferredPosition: 'top',
+  },
+  {
+    selector: '[data-testid="boq-markup-panel"]',
+    titleKey: 'tour.boq.step.6.title',
+    bodyKey: 'tour.boq.step.6.body',
+    preferredPosition: 'top',
+  },
+  {
+    selector: '[data-testid="boq-quality-ring"]',
+    titleKey: 'tour.boq.step.7.title',
+    bodyKey: 'tour.boq.step.7.body',
+    preferredPosition: 'bottom',
+  },
+  {
+    selector: '[data-testid="boq-export-button"]',
+    titleKey: 'tour.boq.step.8.title',
+    bodyKey: 'tour.boq.step.8.body',
+    preferredPosition: 'bottom',
+  },
+];
+
+/* ── Tour registry — id → playlist of steps ────────────────────────────── */
+
+export const TOUR_REGISTRY: Record<TourId, ProductTourStep[]> = {
+  global: DEFAULT_PRODUCT_TOUR_STEPS,
+  boq: BOQ_TOUR_STEPS,
+};
+
 /* ── Hard-coded fallbacks for the locale keys, used when i18n misses ────── */
 
 const STEP_FALLBACKS: Record<string, string> = {
@@ -173,6 +264,36 @@ const STEP_FALLBACKS: Record<string, string> = {
   'tour.next': 'Next',
   'tour.finish': 'Finish',
   'tour.step_counter': 'Step {{current}} of {{total}}',
+
+  // ── BOQ Editor tour ──────────────────────────────────────────────────
+  'tour.boq.step.1.title': 'BOQ toolbar',
+  'tour.boq.step.1.body':
+    'Every action lives here: add sections and positions, import GAEB or Excel, pick from the cost database, validate, run AI checks, and export. Hover any icon for its keyboard shortcut.',
+  'tour.boq.step.2.title': 'Add a position',
+  'tour.boq.step.2.body':
+    'Creates a new line under the section you last clicked. The Description cell opens for inline edit automatically — type, then Tab through unit, quantity and unit rate.',
+  'tour.boq.step.3.title': 'The estimating grid',
+  'tour.boq.step.3.body':
+    'Click any cell to edit; arrow keys / Tab navigate; formulas like =2*A1 are supported; right-click a row for duplicate, indent, link to BIM, or save-as-assembly.',
+  'tour.boq.step.4.title': 'Quality & AI tools',
+  'tour.boq.step.4.body':
+    'Run validation against DIN 276 / GAEB / NRM, recalculate rates from the cost database, price-check against market medians, or open the AI assistant for plain-text BOQ generation.',
+  'tour.boq.step.5.title': 'Resource summary',
+  'tour.boq.step.5.body':
+    'Live rollup of every material, labour and equipment line consumed across this BOQ — quantities, unit costs and total spend per resource. Click a row to see which positions use it.',
+  'tour.boq.step.6.title': 'Markups & VAT',
+  'tour.boq.step.6.body':
+    'Add overhead, profit, tax, contingency, insurance or bonds — pick a regional template (DACH VOB, UK NRM, US RSMeans, FR BATIPRIX, …) or roll your own. Markups stack on the direct cost.',
+  'tour.boq.step.7.title': 'Quality score',
+  'tour.boq.step.7.body':
+    'Traffic light driven by the validation pipeline — green over 80, amber 50-80, red below. Hover for the breakdown: descriptions filled, quantities set, rates set, markups configured.',
+  'tour.boq.step.8.title': 'Export anywhere',
+  'tour.boq.step.8.body':
+    'Export to Excel (.xlsx), CSV, PDF report, or GAEB XML X83 for German tender submission. Currency, FX rates and markups are baked in so the recipient sees the same totals.',
+
+  // ── ModuleHelpButton labels ──────────────────────────────────────────
+  'module_help.tour_button': 'Tour',
+  'module_help.tour_aria': 'Start guided tour for this module',
 };
 
 /* ── Geometry helpers ───────────────────────────────────────────────────── */
@@ -260,13 +381,30 @@ function centerOfViewport(): TooltipCoords {
 /* ── Component ──────────────────────────────────────────────────────────── */
 
 export interface ProductTourProps {
+  /** Fallback playlist (legacy callers).  When omitted the component
+   *  resolves the active tour from `defaultTourId` / the dispatched
+   *  start event payload via the registry. */
   steps?: ProductTourStep[];
+  /** Tour id auto-launched on first-login when no tour-completed flag
+   *  is set for that id.  Defaults to `'global'` so the legacy
+   *  installer behaviour (dashboard first-run) is preserved. */
+  defaultTourId?: TourId;
 }
 
-export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourProps) {
+export function ProductTour({ steps, defaultTourId = 'global' }: ProductTourProps) {
   const { t } = useTranslation();
   const location = useLocation();
-  const totalSteps = steps.length;
+
+  // Active tour id drives which playlist + storage key we use. Starts at
+  // `defaultTourId` and is replaced whenever the start-tour event fires
+  // with a `{detail: {tourId}}` payload.
+  const [activeTourId, setActiveTourId] = useState<TourId>(defaultTourId);
+
+  // Resolve playlist: explicit `steps` prop wins (legacy callers), then
+  // registry lookup by active id, then the global default.
+  const resolvedSteps: ProductTourStep[] =
+    steps ?? TOUR_REGISTRY[activeTourId] ?? DEFAULT_PRODUCT_TOUR_STEPS;
+  const totalSteps = resolvedSteps.length;
 
   const [active, setActive] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
@@ -277,25 +415,27 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
   // spam the console on resize/recompute.
   const warnedRef = useRef<Set<string>>(new Set());
 
-  const step = steps[currentStep];
+  const step = resolvedSteps[currentStep];
   const isFirst = currentStep === 0;
   const isLast = currentStep === totalSteps - 1;
 
   /* ── Persist completion + close ──────────────────────────────────────── */
   const completeTour = useCallback(() => {
     try {
-      localStorage.setItem(TOUR_COMPLETED_KEY, 'true');
+      // Per-tour completion key — finishing the BOQ tour doesn't suppress
+      // the global tour and vice-versa.
+      localStorage.setItem(storageKeyFor(activeTourId), 'true');
     } catch {
       /* localStorage unavailable — non-fatal */
     }
     setActive(false);
     setCurrentStep(0);
-  }, []);
+  }, [activeTourId]);
 
   /* ── Scroll target into view + measure ───────────────────────────────── */
   const positionForStep = useCallback(
     (idx: number) => {
-      const s = steps[idx];
+      const s = resolvedSteps[idx];
       if (!s) return;
 
       // Wrap-up step (no selector) → centred modal, no spotlight.
@@ -332,7 +472,7 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
         }
       }, 180);
     },
-    [steps],
+    [resolvedSteps],
   );
 
   /* ── (Re)compute on currentStep change + resize/scroll/observer ──────── */
@@ -341,7 +481,7 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
     positionForStep(currentStep);
 
     const recompute = () => {
-      const s = steps[currentStep];
+      const s = resolvedSteps[currentStep];
       if (!s) return;
       if (s.selector == null) {
         setTooltipCoords(centerOfViewport());
@@ -369,7 +509,7 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
       window.removeEventListener('scroll', recompute, true);
       if (ro) ro.disconnect();
     };
-  }, [active, currentStep, positionForStep, steps]);
+  }, [active, currentStep, positionForStep, resolvedSteps]);
 
   /* ── Esc key — soft-confirm dismiss ──────────────────────────────────── */
   useEffect(() => {
@@ -388,9 +528,19 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
     return () => document.removeEventListener('keydown', handler, { capture: true });
   }, [active, confirmExitOpen]);
 
-  /* ── External trigger: `oe:start-tour` window event ──────────────────── */
+  /* ── External trigger: `oe:start-tour` window event ────────────────────
+   *
+   * Optional `event.detail.tourId` picks a registered playlist (e.g.
+   * `{tourId: 'boq'}` from the BOQ Editor's Tour button).  Unknown ids
+   * silently fall back to the existing active id so a typo never wipes
+   * the user's tour mid-session. */
   useEffect(() => {
-    const start = () => {
+    const start = (evt: Event) => {
+      const detail = (evt as CustomEvent<{ tourId?: TourId } | undefined>).detail;
+      const requested = detail?.tourId;
+      if (requested && requested in TOUR_REGISTRY) {
+        setActiveTourId(requested);
+      }
       warnedRef.current.clear();
       setCurrentStep(0);
       setActive(true);
@@ -406,7 +556,10 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
 
     let completed = 'false';
     try {
-      completed = localStorage.getItem(TOUR_COMPLETED_KEY) ?? 'false';
+      // Auto-start only fires for the `defaultTourId` (typically global).
+      // Per-module tours are launched explicitly via the Tour button —
+      // they never auto-pop.
+      completed = localStorage.getItem(storageKeyFor(defaultTourId)) ?? 'false';
     } catch {
       /* ignore */
     }
@@ -420,11 +573,12 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
     // Small delay so the dashboard has time to mount its targets.
     const id = window.setTimeout(() => {
       warnedRef.current.clear();
+      setActiveTourId(defaultTourId);
       setCurrentStep(0);
       setActive(true);
     }, 600);
     return () => window.clearTimeout(id);
-  }, [active, location.pathname]);
+  }, [active, location.pathname, defaultTourId]);
 
   /* ── Navigation handlers ─────────────────────────────────────────────── */
   const handleNext = useCallback(() => {
@@ -567,7 +721,7 @@ export function ProductTour({ steps = DEFAULT_PRODUCT_TOUR_STEPS }: ProductTourP
 
           {/* Dot indicators */}
           <div className="flex items-center gap-1 mx-auto" aria-hidden>
-            {steps.map((_, idx) => (
+            {resolvedSteps.map((_, idx) => (
               <div
                 key={idx}
                 className={clsx(

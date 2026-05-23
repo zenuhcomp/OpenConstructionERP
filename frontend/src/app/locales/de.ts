@@ -6241,6 +6241,30 @@ const resource = {
     "propdev.bedrooms": "Schlafzimmer",
     "propdev.phone": "Telefon",
     // --- /propdev ---
+
+    // --- Per-module tour: BOQ Editor (8 steps) ---
+    "tour.boq.step.1.title": "LV-Werkzeugleiste",
+    "tour.boq.step.1.body": "Hier liegen alle Aktionen: Titel und Positionen anlegen, GAEB oder Excel importieren, aus der Kostendatenbank wählen, validieren, KI-Prüfungen starten und exportieren. Bewege den Mauszeiger über ein Symbol für die Tastenkombination.",
+    "tour.boq.step.2.title": "Position hinzufügen",
+    "tour.boq.step.2.body": "Legt eine neue Zeile unter dem zuletzt angeklickten Titel an. Die Beschreibung öffnet sich automatisch im Editiermodus — tippen, dann mit Tab durch Einheit, Menge und Einheitspreis.",
+    "tour.boq.step.3.title": "Das Kalkulationsraster",
+    "tour.boq.step.3.body": "Klicke eine Zelle, um sie zu bearbeiten; Pfeiltasten und Tab navigieren; Formeln wie =2*A1 werden unterstützt; Rechtsklick auf eine Zeile für Duplizieren, Einrücken, BIM-Verknüpfung oder Als-Vorlage-Speichern.",
+    "tour.boq.step.4.title": "Qualität & KI-Werkzeuge",
+    "tour.boq.step.4.body": "Validiere gegen DIN 276 / GAEB / NRM, berechne Einheitspreise aus der Kostendatenbank neu, prüfe Preise gegen Marktmedianwerte oder öffne den KI-Assistenten für Klartext-LV-Erstellung.",
+    "tour.boq.step.5.title": "Ressourcenübersicht",
+    "tour.boq.step.5.body": "Live-Zusammenfassung jeder Material-, Lohn- und Geräteposition im LV — Mengen, Einheitspreise und Gesamtkosten pro Ressource. Klick eine Zeile, um zu sehen, welche Positionen sie verwenden.",
+    "tour.boq.step.6.title": "Zuschläge & USt.",
+    "tour.boq.step.6.body": "Füge Gemeinkosten, Gewinn, Steuer, Wagnis, Versicherung oder Bürgschaften hinzu — wähle eine regionale Vorlage (DACH VOB, UK NRM, US RSMeans, FR BATIPRIX, …) oder definiere eigene. Zuschläge addieren sich auf die direkten Kosten.",
+    "tour.boq.step.7.title": "Qualitätsbewertung",
+    "tour.boq.step.7.body": "Ampel von der Validierungs-Pipeline gesteuert — grün über 80, gelb 50-80, rot darunter. Bewege den Mauszeiger für die Aufschlüsselung: Beschreibungen, Mengen, Preise, Zuschläge konfiguriert.",
+    "tour.boq.step.8.title": "Überall hin exportieren",
+    "tour.boq.step.8.body": "Export nach Excel (.xlsx), CSV, PDF-Bericht oder GAEB XML X83 für deutsche Ausschreibungen. Währung, Wechselkurse und Zuschläge sind enthalten, sodass der Empfänger dieselben Summen sieht.",
+    // --- /Per-module tour: BOQ Editor ---
+
+    // --- ModuleHelpButton ---
+    "module_help.tour_button": "Tour",
+    "module_help.tour_aria": "Geführte Tour für dieses Modul starten",
+    // --- /ModuleHelpButton ---
   }
 } as { translation: Record<string, string> };
 
