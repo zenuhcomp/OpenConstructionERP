@@ -611,7 +611,13 @@ async def test_contact_agent_publishes_event(
 async def test_rate_limit_fires_on_31st_request(
     client: AsyncClient, portal_chain,
 ):
-    """Burst of 31 verify calls trips the per-token approval_limiter."""
+    """Burst of N+1 public-endpoint calls trips the per-token approval_limiter.
+
+    Uses /overview/ rather than /verify/ because verify is single-use
+    (spec change v3130) and would 401 on the 2nd call before the
+    limiter could fire. /overview/ stays multi-use so we can issue
+    enough hits to exercise the rate gate.
+    """
     issued = await client.post(
         "/api/v1/property-dev/portal/issue/",
         json={"buyer_id": portal_chain["buyer_id"]},
@@ -632,18 +638,20 @@ async def test_rate_limit_fires_on_31st_request(
     original_max = rl.approval_limiter.max_requests
     rl.approval_limiter.max_requests = 3
     try:
-        first = await client.post(
-            "/api/v1/property-dev/portal/verify/", json={"token": token}
+        # Use /overview/ rather than /verify/ for the burst — both go
+        # through the same _resolve_portal_context rate-limit gate but
+        # /verify/ is single-use after the spec change, so calling it
+        # 4× on one token would yield 401 already_used on the 2nd hit
+        # before the limiter could fire. /overview/ stays multi-use
+        # (session JWT semantics) so the limiter is the only thing
+        # rejecting the 4th call — which is what this test pins.
+        overview_path = (
+            f"/api/v1/property-dev/portal/buyer/{token}/overview/"
         )
-        second = await client.post(
-            "/api/v1/property-dev/portal/verify/", json={"token": token}
-        )
-        third = await client.post(
-            "/api/v1/property-dev/portal/verify/", json={"token": token}
-        )
-        fourth = await client.post(
-            "/api/v1/property-dev/portal/verify/", json={"token": token}
-        )
+        first = await client.get(overview_path)
+        second = await client.get(overview_path)
+        third = await client.get(overview_path)
+        fourth = await client.get(overview_path)
         assert first.status_code == 200
         assert second.status_code == 200
         assert third.status_code == 200

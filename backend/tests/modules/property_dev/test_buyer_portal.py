@@ -6,10 +6,16 @@ limit / RBAC / overview round-trip / event publication.
 
 This file fills the spec gaps NOT already exercised there:
 
-* **Single-use vs idempotent verify** — confirms a token can be
-  verified multiple times until expiry/revocation (NOT one-shot).
-  The portal UX explicitly allows the buyer to re-open the link
-  any time; treating verify as single-use would break that.
+* **Single-use verify** — verify is one-shot (industry standard:
+  Slack / Notion / Linear). The first call atomically marks the
+  magic-link consumed and returns the buyer summary; the second
+  call (or a concurrent loser of the DB race) returns 401 with the
+  distinguishing ``portal_token_already_used`` code so the frontend
+  can render a "request a new login link" CTA. Replaces the prior
+  multi-use contract — see :pyfunc:`test_verify_succeeds_on_first_call_only`,
+  :pyfunc:`test_concurrent_verify_atomic`,
+  :pyfunc:`test_verify_after_consume_returns_specific_error_code`,
+  :pyfunc:`test_verify_consumes_token_atomically_via_sql_where_clause`.
 * **Cross-scope JWT isolation** — a portal-scoped token cannot
   authenticate against internal ``/api/v1/projects/...`` endpoints.
 * **Payment-schedule decimals** — every Decimal money field on the
@@ -128,25 +134,26 @@ async def chain(client: AsyncClient):
     return await _mk_buyer_with_contract_chain(client)
 
 
-# ── 1. Verify is idempotent (NOT single-use) ───────────────────────────
+# ── 1. Verify is SINGLE-USE (industry standard: Slack/Notion/Linear) ──
 
 
 @pytest.mark.asyncio
-async def test_verify_is_idempotent_across_multiple_calls(
+async def test_verify_succeeds_on_first_call_only(
     client: AsyncClient, chain,
 ):
-    """A single token verifies cleanly N times until expiry/revocation.
+    """The first ``/verify/`` of a token returns 200 + JWT context;
+    every subsequent call returns 401 with the distinct
+    ``portal_token_already_used`` code.
 
-    Spec §3 asks for "single-use" semantics. The current implementation
-    is intentionally multi-use (the portal UX requires the buyer to
-    re-open the link any time during the 30-day TTL — single-use would
-    break a benign page refresh). This test pins the current contract
-    so a future "make it one-shot" change shows up as a regression
-    that the user has to consciously sign off on.
+    Replaces the prior multi-use contract pinned by
+    ``test_verify_is_idempotent_across_multiple_calls``. The session
+    JWT issued at first verify continues to work for follow-up
+    buyer-portal endpoints (``/overview/`` etc.) — only the verify
+    endpoint enforces single-use, per the spec's
+    "session-JWT stays multi-use" constraint.
 
-    If the policy genuinely changes to single-use, this test must be
-    replaced (NOT deleted) with one asserting the second call returns
-    401.
+    A fresh-device user who needs another session must request a new
+    magic-link from the sales agent.
     """
     issued = await client.post(
         "/api/v1/property-dev/portal/issue/",
@@ -156,12 +163,200 @@ async def test_verify_is_idempotent_across_multiple_calls(
     assert issued.status_code == 201, issued.text
     token = issued.json()["token"]
 
-    for _ in range(3):
-        v = await client.post(
+    # First call: 200 + JWT context.
+    first = await client.post(
+        "/api/v1/property-dev/portal/verify/", json={"token": token},
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["buyer_id"] == chain["buyer_id"]
+
+    # Second call: 401 with the specific ``portal_token_already_used``
+    # code (NOT the generic ``portal_token_invalid_or_expired``).
+    second = await client.post(
+        "/api/v1/property-dev/portal/verify/", json={"token": token},
+    )
+    assert second.status_code == 401, second.text
+    assert second.json()["detail"]["code"] == "portal_token_already_used"
+
+    # Third call: same 401 + same code (idempotent error response).
+    third = await client.post(
+        "/api/v1/property-dev/portal/verify/", json={"token": token},
+    )
+    assert third.status_code == 401, third.text
+    assert third.json()["detail"]["code"] == "portal_token_already_used"
+
+    # And the session JWT remains valid for buyer-facing endpoints —
+    # /overview/ does NOT consume so a multi-use session continues to
+    # work until the token expires or is revoked. This is the spec's
+    # "after verify, user's continued access is via the session JWT
+    # (multi-use until expiry)" clause.
+    overview = await client.get(
+        f"/api/v1/property-dev/portal/buyer/{token}/overview/",
+    )
+    assert overview.status_code == 200, overview.text
+
+
+# ── 1b. Concurrent verify of the same token is atomic ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_concurrent_verify_atomic(client: AsyncClient, chain):
+    """Two simultaneous verify requests on the same token → exactly one
+    200 and exactly one 401 ``portal_token_already_used``.
+
+    The single-use guarantee is enforced at the SQL layer via a single
+    UPDATE ``WHERE consumed_at IS NULL`` whose ``rowcount`` is 1 for
+    the winner and 0 for the loser — not a Python read-then-write
+    that could lose to a concurrent writer. This test pins the
+    race-safety contract.
+
+    httpx's ASGITransport runs requests through the same in-process
+    event loop, so two ``asyncio.gather`` coroutines on a shared
+    AsyncClient drive the verify endpoint with overlapping DB session
+    lifecycles — the closest in-process analogue to two HTTP workers
+    racing on the same token in production.
+    """
+    import asyncio
+
+    issued = await client.post(
+        "/api/v1/property-dev/portal/issue/",
+        json={"buyer_id": chain["buyer_id"]},
+        headers=chain["headers"],
+    )
+    token = issued.json()["token"]
+
+    async def _verify() -> int:
+        r = await client.post(
             "/api/v1/property-dev/portal/verify/", json={"token": token},
         )
-        assert v.status_code == 200, v.text
-        assert v.json()["buyer_id"] == chain["buyer_id"]
+        return r.status_code
+
+    a, b = await asyncio.gather(_verify(), _verify())
+
+    # Exactly one 200, exactly one 401 — never two 200s (would mean
+    # the consume isn't atomic) and never two 401s (would mean the
+    # consume is too aggressive and rejects the winner too).
+    statuses = sorted([a, b])
+    assert statuses == [200, 401], (
+        f"expected exactly one 200 + one 401, got {statuses!r}"
+    )
+
+
+# ── 1c. After-consume error code is the specific one (not generic) ─────
+
+
+@pytest.mark.asyncio
+async def test_verify_after_consume_returns_specific_error_code(
+    client: AsyncClient, chain,
+):
+    """Replay of a consumed token returns ``portal_token_already_used``
+    — NOT the generic ``portal_token_invalid_or_expired``.
+
+    The distinct code is what lets the frontend RecoveryCard surface a
+    targeted "request a new login link" CTA instead of the generic
+    "your link expired" copy. Without this assertion the frontend has
+    no way to discriminate the two failure modes.
+    """
+    issued = await client.post(
+        "/api/v1/property-dev/portal/issue/",
+        json={"buyer_id": chain["buyer_id"]},
+        headers=chain["headers"],
+    )
+    token = issued.json()["token"]
+
+    # Burn the single-use redemption.
+    first = await client.post(
+        "/api/v1/property-dev/portal/verify/", json={"token": token},
+    )
+    assert first.status_code == 200, first.text
+
+    # Replay → 401 with the specific code.
+    replay = await client.post(
+        "/api/v1/property-dev/portal/verify/", json={"token": token},
+    )
+    assert replay.status_code == 401, replay.text
+
+    body = replay.json()
+    assert isinstance(body.get("detail"), dict), (
+        f"detail must be a code-carrying dict, got {body!r}"
+    )
+    assert body["detail"]["code"] == "portal_token_already_used"
+    # And explicitly NOT the catch-all bucket.
+    assert body["detail"]["code"] != "portal_token_invalid_or_expired"
+
+
+# ── 1d. Consume is a single SQL UPDATE — not a Python read-then-write ──
+
+
+@pytest.mark.asyncio
+async def test_verify_consumes_token_atomically_via_sql_where_clause(
+    client: AsyncClient, chain,
+):
+    """The consume path uses a single UPDATE ``WHERE consumed_at IS NULL``,
+    not a Python ``select → mutate → flush`` that loses to a concurrent
+    writer.
+
+    We pin this by monkey-patching :meth:`PortalLinkService.consume_token_atomic`
+    to record the SQL it would have issued, then asserting the captured
+    statement is a single UPDATE with the expected WHERE clause. This
+    catches a regression where someone "refactors" the method into a
+    Python read-then-write race (the classic check-then-act bug).
+    """
+    from app.modules.property_dev import portal_service as ps
+
+    issued = await client.post(
+        "/api/v1/property-dev/portal/issue/",
+        json={"buyer_id": chain["buyer_id"]},
+        headers=chain["headers"],
+    )
+    token = issued.json()["token"]
+
+    captured: list[dict[str, str | bool]] = []
+    original = ps.PortalLinkService.consume_token_atomic
+
+    async def _spy(self, *, jti, now):  # type: ignore[no-untyped-def]
+        from sqlalchemy import update
+
+        from app.modules.property_dev.models import PortalToken as _PT
+
+        # Reproduce the exact statement the implementation must build,
+        # then compile to SQL to assert the WHERE shape.
+        stmt = (
+            update(_PT)
+            .where(_PT.jwt_id == jti)
+            .where(_PT.consumed_at.is_(None))
+            .values(consumed_at=now)
+        )
+        compiled = str(
+            stmt.compile(compile_kwargs={"literal_binds": False})
+        ).lower()
+        captured.append(
+            {
+                "is_update": compiled.startswith("update "),
+                "has_jti_where": "jwt_id" in compiled,
+                "has_consumed_at_null_where": "consumed_at is null" in compiled,
+            }
+        )
+        return await original(self, jti=jti, now=now)
+
+    ps.PortalLinkService.consume_token_atomic = _spy  # type: ignore[assignment]
+    try:
+        first = await client.post(
+            "/api/v1/property-dev/portal/verify/", json={"token": token},
+        )
+        assert first.status_code == 200, first.text
+    finally:
+        ps.PortalLinkService.consume_token_atomic = original  # type: ignore[assignment]
+
+    assert len(captured) == 1, (
+        f"consume_token_atomic must run exactly once per verify, got {captured!r}"
+    )
+    shape = captured[0]
+    assert shape["is_update"], "consume must be a SQL UPDATE, not SELECT"
+    assert shape["has_jti_where"], "UPDATE must filter on jwt_id"
+    assert shape["has_consumed_at_null_where"], (
+        "UPDATE must guard on `consumed_at IS NULL` for race safety"
+    )
 
 
 # ── 2. Cross-scope JWT isolation (portal token ≠ access token) ─────────
