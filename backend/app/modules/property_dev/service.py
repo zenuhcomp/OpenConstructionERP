@@ -142,12 +142,20 @@ _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 _PLOT_TRANSITIONS: dict[str, set[str]] = {
-    "planned": {"reserved", "under_construction", "ready"},
+    # ``held`` + ``blocked`` (task #142 — Inventory Map) are short-lived sales
+    # statuses used by the bulk hold/release workflow. They can only be
+    # entered from an "available" plot (``planned`` / ``ready``) and they
+    # always release back to ``planned``. ``blocked`` is reserved for
+    # admin-flagged plots (legal / structural defect) and cannot be moved
+    # by the bulk-release endpoint — only an explicit PATCH lifts it.
+    "planned": {"reserved", "under_construction", "ready", "held", "blocked"},
     "reserved": {"planned", "under_construction", "ready", "sold"},
     "under_construction": {"ready", "reserved"},
-    "ready": {"reserved", "sold", "under_construction"},
+    "ready": {"reserved", "sold", "under_construction", "held", "blocked"},
     "sold": {"handed_over"},
     "handed_over": set(),
+    "held": {"planned"},
+    "blocked": {"planned"},
 }
 
 _BUYER_TRANSITIONS: dict[str, set[str]] = {
@@ -6399,6 +6407,409 @@ async def _svc_generate_document(
 
 
 PropertyDevService.generate_document = _svc_generate_document  # type: ignore[attr-defined]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Inventory Map (task #142) — sales-floor block / floor / unit grid.
+# ════════════════════════════════════════════════════════════════════════
+#
+# The Inventory Map is the read-side fan-out of the BOQ for a residential
+# Development. The sales desk uses it as their daily index: "show me every
+# Plot, grouped by Block, grouped by floor, coloured by status, with a
+# KPI ribbon and bulk hold / release". This is intentionally a *separate*
+# endpoint from /developments/{dev_id}/dashboard-inventory-heatmap
+# (task #140) — that one is the analytics phase->block view, this one is
+# the sales-desk floor-by-floor view.
+
+
+# Statuses that count as "available" for the bulk-hold workflow + the
+# KPI ribbon. ``planned`` is the default fresh-import status; ``ready``
+# means construction is finished but it's still on the market.
+_INVENTORY_AVAILABLE_STATUSES: frozenset[str] = frozenset({"planned", "ready"})
+
+
+def _inventory_summary(plots: Iterable[Plot]) -> dict[str, int]:
+    """Bucket plots into the ribbon counters for the Inventory Map."""
+    out = {
+        "total": 0,
+        "available": 0,
+        "reserved": 0,
+        "sold": 0,
+        "handed_over": 0,
+        "held": 0,
+        "blocked": 0,
+        "under_construction": 0,
+        "ready": 0,
+    }
+    for plot in plots:
+        out["total"] += 1
+        st = plot.status or ""
+        # "available" is the union of planned + ready — these are the
+        # statuses the bulk-hold endpoint will accept; we surface a
+        # dedicated counter so the UI's primary KPI matches the action.
+        if st in _INVENTORY_AVAILABLE_STATUSES:
+            out["available"] += 1
+        if st in out and st != "total":
+            out[st] += 1
+    return out
+
+
+def _derive_unit_code(plot: Plot, block_code: str | None) -> str:
+    """Build a stable ``B2-04-12`` style unit code for the UI.
+
+    Falls back to ``Plot.plot_number`` when the hierarchy is incomplete
+    (legacy plots without ``block_id`` / ``level_in_block``). Keeps the
+    sales-floor display deterministic — never returns an empty string.
+    """
+    if (
+        block_code
+        and plot.level_in_block is not None
+        and (plot.position_on_floor or plot.plot_number)
+    ):
+        floor_part = f"{int(plot.level_in_block):02d}"
+        pos_part = (plot.position_on_floor or plot.plot_number).strip() or "00"
+        return f"{block_code}-{floor_part}-{pos_part}"
+    return plot.plot_number or "—"
+
+
+async def _svc_inventory_map(
+    svc: "PropertyDevService",
+    dev_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Render the Inventory Map payload for one Development.
+
+    Single read fan-out: one SELECT for plots, one for blocks, one for
+    the parent dev. Plots without ``block_id`` are surfaced under a
+    synthetic "Unassigned" block so legacy data still appears. Sort
+    order: ``block_code`` asc → floor desc (high floors first, matching
+    every real-estate floor plan) → ``unit_code`` asc.
+    """
+    dev = await svc.get_development(dev_id)
+    plots, _ = await svc.plots.list_for_development(
+        dev_id, offset=0, limit=10_000,
+    )
+    blocks = await svc.blocks.list_for_development(dev_id)
+    blocks_by_id: dict[Any, Any] = {b.id: b for b in blocks}
+
+    # Bucket: block_code → floor → list[Plot].
+    # ``block_code`` is None for unassigned plots; we render them last
+    # under a synthetic "—" block code.
+    buckets: dict[tuple[str, str | None], dict[int, list[Plot]]] = {}
+    block_meta: dict[tuple[str, str | None], dict[str, Any]] = {}
+
+    for plot in plots:
+        block = blocks_by_id.get(plot.block_id) if plot.block_id else None
+        block_code = (block.code if block else None) or "—"
+        block_id_key = str(block.id) if block else None
+        key = (block_code, block_id_key)
+        if key not in block_meta:
+            block_meta[key] = {
+                "block_code": block_code,
+                "block_id": (
+                    block.id if block else None
+                ),
+                "name": (block.name if block else "Unassigned"),
+            }
+        floor = int(plot.level_in_block) if plot.level_in_block is not None else 0
+        buckets.setdefault(key, {}).setdefault(floor, []).append(plot)
+
+    # Stable sort: block_code asc, but the synthetic "—" goes last.
+    def _block_key(item: tuple[str, str | None]) -> tuple[int, str]:
+        code = item[0]
+        return (1 if code == "—" else 0, code)
+
+    block_rows: list[dict[str, Any]] = []
+    for key in sorted(buckets.keys(), key=_block_key):
+        meta = block_meta[key]
+        floor_map = buckets[key]
+        floor_rows: list[dict[str, Any]] = []
+        # Floors descending — penthouse on top of the card, matches
+        # how every real-estate brochure prints floor plans.
+        for floor in sorted(floor_map.keys(), reverse=True):
+            plots_on_floor = floor_map[floor]
+            plots_on_floor.sort(
+                key=lambda p: (
+                    (p.position_on_floor or ""),
+                    p.plot_number,
+                ),
+            )
+            floor_rows.append(
+                {
+                    "floor": floor,
+                    "plots": [
+                        {
+                            "id": p.id,
+                            "unit_code": _derive_unit_code(p, meta["block_code"]),
+                            "status": p.status,
+                            "plot_type": p.house_type_label,
+                            "block_code": meta["block_code"],
+                            "floor": floor,
+                            "base_price": Decimal(str(p.price_base or 0)),
+                            "area_m2": Decimal(str(p.area_m2 or 0)),
+                            "currency": (
+                                p.currency
+                                or dev.currency
+                                or ""
+                            ),
+                            "bedrooms": int(p.bedrooms or 0),
+                            "bathrooms": int(p.bathrooms or 0),
+                        }
+                        for p in plots_on_floor
+                    ],
+                }
+            )
+        block_rows.append(
+            {
+                "block_code": meta["block_code"],
+                "block_id": meta["block_id"],
+                "name": meta["name"],
+                "floors": floor_rows,
+            }
+        )
+
+    summary = _inventory_summary(plots)
+    return {
+        "development_id": dev.id,
+        "currency": dev.currency or "",
+        "blocks": block_rows,
+        "summary": summary,
+    }
+
+
+async def _svc_inventory_bulk_hold(
+    svc: "PropertyDevService",
+    dev_id: uuid.UUID,
+    plot_ids: list[uuid.UUID],
+    hold_reason: str,
+    hold_until: str | None,
+    actor_id: uuid.UUID | str | None = None,
+) -> dict[str, Any]:
+    """Atomically move ``plot_ids`` from available → held.
+
+    Atomicity contract (mirrors procurement.create_invoice_from_po):
+        The whole batch runs under a single ``begin_nested`` SAVEPOINT.
+        If ANY plot fails the precondition checks (not in this dev, not
+        available, FK violation) the SAVEPOINT rolls back and NO plot
+        flips status. Rationale: a half-applied hold is worse than a
+        rejected one — the sales desk would otherwise have to manually
+        reconcile "which 6 of 11 went through".
+
+    Skipped (already-held or wrong tenant) plots are silently dropped
+    from the success list and surfaced via ``skipped`` so the UI can
+    show a "5 of 7 held, 2 already held" toast.
+    """
+    # We must verify every requested plot belongs to this dev BEFORE
+    # we mutate anything — otherwise a SAVEPOINT abort can't reverse the
+    # initial check (the check itself doesn't write).
+    await svc.get_development(dev_id)  # 404 if dev doesn't exist
+
+    if not plot_ids:
+        return {
+            "updated_count": 0,
+            "skipped_count": 0,
+            "updated_plot_ids": [],
+            "skipped": [],
+        }
+
+    # Dedup while preserving order.
+    seen: set[uuid.UUID] = set()
+    dedup_ids: list[uuid.UUID] = []
+    for pid in plot_ids:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        dedup_ids.append(pid)
+
+    updated_ids: list[uuid.UUID] = []
+    skipped: list[dict[str, str]] = []
+    iso_now = datetime.now(UTC).isoformat()
+
+    try:
+        async with svc.session.begin_nested():
+            for pid in dedup_ids:
+                plot = await svc.plots.get_by_id(pid)
+                if plot is None or plot.development_id != dev_id:
+                    # Cross-tenant / unknown plot — soft-skip; we
+                    # intentionally do NOT 404 here, because the bulk
+                    # endpoint should not become a UUID-existence
+                    # oracle for other tenants' inventory.
+                    skipped.append(
+                        {
+                            "plot_id": str(pid),
+                            "reason": "not_in_development",
+                        }
+                    )
+                    continue
+                if plot.status == "held":
+                    # Idempotent — already in the requested state.
+                    skipped.append(
+                        {"plot_id": str(pid), "reason": "already_held"}
+                    )
+                    continue
+                if plot.status not in _INVENTORY_AVAILABLE_STATUSES:
+                    # Hard reject — a reserved / sold / handed-over plot
+                    # must NOT be held; that would corrupt the sales
+                    # pipeline. Raise 409 so the *whole* batch rolls back
+                    # — better to fail loud than half-apply.
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Plot {plot.plot_number} is in status "
+                            f"'{plot.status}' and cannot be held"
+                        ),
+                    )
+                # Stash hold metadata on Plot.metadata — no schema migration
+                # needed because metadata is JSON. Audit trail is also
+                # written below.
+                new_metadata = dict(plot.metadata_ or {})
+                new_metadata["hold"] = {
+                    "reason": hold_reason,
+                    "until": hold_until,
+                    "held_by": str(actor_id) if actor_id else None,
+                    "held_at": iso_now,
+                }
+                await svc.plots.update_fields(
+                    pid,
+                    status="held",
+                    metadata_=new_metadata,
+                )
+                updated_ids.append(pid)
+
+            # Audit trail inside the SAVEPOINT so an audit failure
+            # cancels the whole batch (matches procurement pattern).
+            if updated_ids:
+                try:
+                    from app.core.audit_log import log_activity
+
+                    await log_activity(
+                        svc.session,
+                        actor_id=str(actor_id) if actor_id else None,
+                        entity_type="property_dev_development",
+                        entity_id=str(dev_id),
+                        action="inventory_map.bulk_hold",
+                        reason=hold_reason or "bulk_hold",
+                        metadata={
+                            "plot_count": len(updated_ids),
+                            "plot_ids": [str(p) for p in updated_ids],
+                            "hold_until": hold_until or "",
+                        },
+                    )
+                except Exception:  # pragma: no cover — audit best-effort
+                    logger.exception("audit log failed for inventory bulk_hold")
+                    raise
+    except HTTPException:
+        # The SAVEPOINT auto-rolls back; surface the original 409 unchanged.
+        raise
+
+    return {
+        "updated_count": len(updated_ids),
+        "skipped_count": len(skipped),
+        "updated_plot_ids": updated_ids,
+        "skipped": skipped,
+    }
+
+
+async def _svc_inventory_bulk_release(
+    svc: "PropertyDevService",
+    dev_id: uuid.UUID,
+    plot_ids: list[uuid.UUID],
+    actor_id: uuid.UUID | str | None = None,
+) -> dict[str, Any]:
+    """Atomically move ``plot_ids`` from held → planned.
+
+    Idempotent: non-held plots are silently skipped (no 409). Rationale:
+    the sales desk routinely shift-selects a range that may include a
+    plot they already released; a noisy 409 would force them to redo
+    the selection one plot at a time.
+
+    ``blocked`` plots are NEVER released by this endpoint — only an
+    explicit ``PATCH /plots/{id} {"status": "planned"}`` (MANAGER) lifts
+    a block. The bulk path treats them like ``reserved`` / ``sold`` —
+    silently skipped.
+    """
+    await svc.get_development(dev_id)
+
+    if not plot_ids:
+        return {
+            "updated_count": 0,
+            "skipped_count": 0,
+            "updated_plot_ids": [],
+            "skipped": [],
+        }
+
+    seen: set[uuid.UUID] = set()
+    dedup_ids: list[uuid.UUID] = []
+    for pid in plot_ids:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        dedup_ids.append(pid)
+
+    updated_ids: list[uuid.UUID] = []
+    skipped: list[dict[str, str]] = []
+
+    try:
+        async with svc.session.begin_nested():
+            for pid in dedup_ids:
+                plot = await svc.plots.get_by_id(pid)
+                if plot is None or plot.development_id != dev_id:
+                    skipped.append(
+                        {"plot_id": str(pid), "reason": "not_in_development"}
+                    )
+                    continue
+                if plot.status != "held":
+                    # Idempotent — anything that isn't currently held
+                    # (including ``blocked``) is a soft skip.
+                    skipped.append(
+                        {"plot_id": str(pid), "reason": "not_held"}
+                    )
+                    continue
+                new_metadata = dict(plot.metadata_ or {})
+                new_metadata.pop("hold", None)
+                await svc.plots.update_fields(
+                    pid,
+                    status="planned",
+                    metadata_=new_metadata,
+                )
+                updated_ids.append(pid)
+
+            if updated_ids:
+                try:
+                    from app.core.audit_log import log_activity
+
+                    await log_activity(
+                        svc.session,
+                        actor_id=str(actor_id) if actor_id else None,
+                        entity_type="property_dev_development",
+                        entity_id=str(dev_id),
+                        action="inventory_map.bulk_release",
+                        reason="bulk_release",
+                        metadata={
+                            "plot_count": len(updated_ids),
+                            "plot_ids": [str(p) for p in updated_ids],
+                        },
+                    )
+                except Exception:  # pragma: no cover
+                    logger.exception("audit log failed for inventory bulk_release")
+                    raise
+    except HTTPException:
+        raise
+
+    return {
+        "updated_count": len(updated_ids),
+        "skipped_count": len(skipped),
+        "updated_plot_ids": updated_ids,
+        "skipped": skipped,
+    }
+
+
+PropertyDevService.inventory_map = _svc_inventory_map  # type: ignore[attr-defined]
+PropertyDevService.inventory_bulk_hold = (  # type: ignore[attr-defined]
+    _svc_inventory_bulk_hold
+)
+PropertyDevService.inventory_bulk_release = (  # type: ignore[attr-defined]
+    _svc_inventory_bulk_release
+)
 
 
 async def _svc_resolve_development_owner(

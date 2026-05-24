@@ -339,7 +339,7 @@ class PlotCreate(BaseModel):
     currency: str = Field(default="", max_length=8)
     status: str = Field(
         default="planned",
-        pattern=r"^(planned|reserved|under_construction|ready|sold|handed_over)$",
+        pattern=r"^(planned|reserved|under_construction|ready|sold|handed_over|held|blocked)$",
     )
     reservation_deadline: str | None = Field(
         default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"
@@ -376,7 +376,7 @@ class PlotUpdate(BaseModel):
     currency: str | None = Field(default=None, max_length=8)
     status: str | None = Field(
         default=None,
-        pattern=r"^(planned|reserved|under_construction|ready|sold|handed_over)$",
+        pattern=r"^(planned|reserved|under_construction|ready|sold|handed_over|held|blocked)$",
     )
     reservation_deadline: str | None = Field(
         default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"
@@ -3140,4 +3140,112 @@ class PropertyDevHouseTypeResponse(BaseModel):
     created_by: UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Inventory Map (task #142) — sales-floor block / floor / unit grid.
+# ════════════════════════════════════════════════════════════════════════
+#
+# Differs from the analytics ``InventoryHeatmapResponse`` (task #140) on
+# three axes: (a) flat blocks[] (skips the Phase grouping for sales-desk
+# clarity), (b) explicit floor grouping inside each block (the analytics
+# heatmap is one flat strip per block), (c) tighter shape with a
+# top-level ``summary`` counter ribbon. Used by
+# /developments/{dev_id}/inventory-map/ and the React InventoryMapPage.
+
+
+class InventoryMapPlot(BaseModel):
+    """One Plot cell inside a floor strip of the inventory map."""
+
+    id: UUID
+    unit_code: str
+    status: str
+    plot_type: str | None = None
+    block_code: str | None = None
+    floor: int | None = None
+    base_price: Decimal = Decimal("0")
+    area_m2: Decimal = Decimal("0")
+    currency: str = ""
+    bedrooms: int = 0
+    bathrooms: int = 0
+
+    # R7 money-as-string convention (BUG-B-011).
+    @field_serializer("base_price", "area_m2", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
+
+class InventoryMapFloor(BaseModel):
+    """One floor row within a Block (descending floor numbers in UI)."""
+
+    floor: int
+    plots: list[InventoryMapPlot] = Field(default_factory=list)
+
+
+class InventoryMapBlock(BaseModel):
+    """One Block card on the map (collapsible in UI)."""
+
+    block_code: str
+    block_id: UUID | None = None
+    name: str = ""
+    floors: list[InventoryMapFloor] = Field(default_factory=list)
+
+
+class InventoryMapSummary(BaseModel):
+    """KPI ribbon counters — one entry per Plot.status (incl. ``total``)."""
+
+    total: int = 0
+    available: int = 0
+    reserved: int = 0
+    sold: int = 0
+    handed_over: int = 0
+    held: int = 0
+    blocked: int = 0
+    under_construction: int = 0
+    ready: int = 0
+
+
+class InventoryMapResponse(BaseModel):
+    """``GET /developments/{dev_id}/inventory-map/`` envelope."""
+
+    development_id: UUID
+    currency: str = ""
+    blocks: list[InventoryMapBlock] = Field(default_factory=list)
+    summary: InventoryMapSummary = Field(default_factory=InventoryMapSummary)
+
+
+class InventoryMapBulkHoldRequest(BaseModel):
+    """``POST /inventory-map/bulk-hold/`` payload.
+
+    ``plot_ids`` is non-empty (server rejects empty list with 422 so the
+    caller doesn't accidentally fire a no-op + audit-log noise).
+    ``hold_reason`` is free-text but capped at 500 chars (audit-row column
+    width); ``hold_until`` is an optional ISO-8601 date (YYYY-MM-DD).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    plot_ids: list[UUID] = Field(..., min_length=1, max_length=500)
+    hold_reason: str = Field(default="", max_length=500)
+    hold_until: str | None = Field(
+        default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"
+    )
+
+
+class InventoryMapBulkReleaseRequest(BaseModel):
+    """``POST /inventory-map/bulk-release/`` payload."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    plot_ids: list[UUID] = Field(..., min_length=1, max_length=500)
+
+
+class InventoryMapBulkResult(BaseModel):
+    """Outcome of a bulk hold / release call."""
+
+    updated_count: int = 0
+    skipped_count: int = 0
+    updated_plot_ids: list[UUID] = Field(default_factory=list)
+    skipped: list[dict[str, str]] = Field(default_factory=list)
 

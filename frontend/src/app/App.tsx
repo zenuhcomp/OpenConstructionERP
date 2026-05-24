@@ -250,6 +250,9 @@ const CarbonPage = lazy(() =>
 const PropertyDevPage = lazy(() =>
   import('@/features/property-dev').then((m) => ({ default: m.PropertyDevPage }))
 );
+const PropertyDevInventoryMapPage = lazy(() =>
+  import('@/features/property-dev').then((m) => ({ default: m.InventoryMapPage }))
+);
 const AccommodationListPage = lazy(() =>
   import('@/features/accommodation').then((m) => ({
     default: m.AccommodationListPage,
@@ -781,6 +784,7 @@ export default function App() {
         <Route path="/crm" element={<P title="CRM"><CRMPage /></P>} />
         <Route path="/property-dev" element={<P title="Property Development"><PropertyDevPage /></P>} />
         <Route path="/property-dev/developments/:devId/geo" element={<P title="Development map"><DevelopmentGeoPage /></P>} />
+        <Route path="/property-dev/developments/:devId/inventory-map" element={<P title="Inventory Map"><PropertyDevInventoryMapPage /></P>} />
         <Route path="/property-dev/dashboards" element={<P title="Property Development Dashboards"><PropertyDevDashboardsHub /></P>} />
         <Route
           path="/property-dev/settings/house-types"
