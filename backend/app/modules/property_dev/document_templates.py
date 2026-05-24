@@ -1529,6 +1529,715 @@ def render_no_objection_certificate_pdf(
     return _render(doc, frame, story, ctx, buf)
 
 
+# ════════════════════════════════════════════════════════════════════════
+#  Generator 7 — Tenant Lease Agreement
+# ════════════════════════════════════════════════════════════════════════
+
+
+def render_tenant_lease_agreement_pdf(
+    lease: Any,
+    plot: Any,
+    development: Any,
+    tenants: list[Any],
+    locale: str = "en",
+) -> bytes:
+    """Multi-page rental contract for a tenant occupying a developer unit.
+
+    Useful for build-to-rent and post-handover developer-owned inventory.
+    Pulls term length / rent / deposit from the ``lease`` blob (free
+    duck-typed shape — works against ORM rows OR dicts) and emits a
+    standard residential lease body with a signature block per tenant.
+    """
+    if locale not in SUPPORTED_LOCALES:
+        locale = "en"
+    styles = _styles(locale)
+    buf = BytesIO()
+    doc_ref = _doc_ref("LEA", entity=lease)
+
+    doc, frame = _build_doc(
+        buf,
+        title=_t(locale, "tenant_lease_agreement.title", "Tenant Lease Agreement"),
+        author=_development_name(development) or "OpenConstructionERP",
+        subject=f"Lease {_attr(lease, 'lease_number', '')}",
+        keywords=["lease", "tenant", "rental", doc_ref],
+    )
+    ctx = _PageContext(
+        developer_name=_development_name(development),
+        developer_logo_url=_development_logo(development),
+        unit_code=_unit_code(plot, development),
+        doc_ref=doc_ref,
+        locale=locale,
+        watermark=_is_draft(lease),
+    )
+
+    ccy = _attr(lease, "currency", "") or _attr(plot, "currency", "") or ""
+    monthly_rent = _attr(lease, "monthly_rent", Decimal("0"))
+    security_deposit = _attr(lease, "security_deposit", Decimal("0"))
+    start_date = _format_date(_attr(lease, "start_date", None), locale) or "—"
+    end_date = _format_date(_attr(lease, "end_date", None), locale) or "—"
+    term_months = _attr(lease, "term_months", 12)
+
+    tenant_lines = "<br/>".join(
+        f"{_attr(t, 'full_name', '')} ({_attr(t, 'email', '')})"
+        for t in (tenants or [])
+        if _attr(t, "full_name", "") or _attr(t, "email", "")
+    )
+
+    rows = [
+        [
+            Paragraph(_t(locale, "tenant_lease_agreement.headings.lease_number",
+                         "Lease No."), styles["label"]),
+            Paragraph(str(_attr(lease, "lease_number", "—")), styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "tenant_lease_agreement.headings.tenant",
+                         "Tenant"), styles["label"]),
+            Paragraph(tenant_lines or "—", styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "tenant_lease_agreement.headings.property",
+                         "Property"), styles["label"]),
+            Paragraph(
+                f"{_development_name(development)} — "
+                f"{_attr(plot, 'plot_number', '')} "
+                f"({_attr(plot, 'area_m2', '')} m²)",
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "tenant_lease_agreement.headings.term",
+                         "Term"), styles["label"]),
+            Paragraph(
+                f"{int(term_months or 0)} months — {start_date} → {end_date}",
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "tenant_lease_agreement.headings.monthly_rent",
+                         "Monthly Rent"), styles["label"]),
+            Paragraph(
+                f"{_format_money(monthly_rent, locale)} {ccy}".strip(),
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "tenant_lease_agreement.headings.security_deposit",
+                         "Security Deposit"), styles["label"]),
+            Paragraph(
+                f"{_format_money(security_deposit, locale)} {ccy}".strip(),
+                styles["body"],
+            ),
+        ],
+    ]
+    tbl = Table(rows, colWidths=[60 * mm, 100 * mm])
+    tbl.setStyle(_kv_table_style())
+
+    story: list[Any] = [
+        Paragraph(_t(locale, "tenant_lease_agreement.title",
+                     "Tenant Lease Agreement"), styles["title"]),
+        Spacer(1, 4 * mm),
+        Paragraph(_t(locale, "tenant_lease_agreement.intro", ""), styles["body"]),
+        Spacer(1, 4 * mm),
+        tbl,
+        Spacer(1, 6 * mm),
+        Paragraph(_t(locale, "tenant_lease_agreement.headings.use_clause",
+                     "Use of the Property"), styles["heading"]),
+        Paragraph(_t(locale, "tenant_lease_agreement.use_clause_text", ""),
+                  styles["body"]),
+        Paragraph(_t(locale, "tenant_lease_agreement.headings.maintenance",
+                     "Maintenance"), styles["heading"]),
+        Paragraph(_t(locale, "tenant_lease_agreement.maintenance_text", ""),
+                  styles["body"]),
+        Paragraph(_t(locale, "tenant_lease_agreement.headings.termination",
+                     "Termination"), styles["heading"]),
+        Paragraph(_t(locale, "tenant_lease_agreement.termination_text", ""),
+                  styles["body"]),
+        Spacer(1, 14 * mm),
+        Table(
+            [[
+                Paragraph(
+                    f"{_t(locale, 'tenant_lease_agreement.tenant_signature', 'Tenant Signature')}<br/>"
+                    "________________________________",
+                    styles["body"],
+                ),
+                Paragraph(
+                    f"{_t(locale, 'common.developer_signature', 'Developer Signature')}<br/>"
+                    "________________________________",
+                    styles["body"],
+                ),
+            ]],
+            colWidths=[75 * mm, 75 * mm],
+        ),
+    ]
+    return _render(doc, frame, story, ctx, buf)
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Generator 8 — Move-in Checklist (room-by-room condition report)
+# ════════════════════════════════════════════════════════════════════════
+
+
+def render_move_in_checklist_pdf(
+    handover: Any,
+    sales_contract: Any,
+    plot: Any,
+    development: Any,
+    rooms: list[Any] | None,
+    locale: str = "en",
+) -> bytes:
+    """Itemised property-condition report at handover.
+
+    Companion to the handover certificate — focuses on furnishings /
+    appliance state per room. Each row in ``rooms`` is treated as a
+    dict-like with ``name``, ``items`` (list of dict ``{label,
+    condition, notes}``).
+    """
+    if locale not in SUPPORTED_LOCALES:
+        locale = "en"
+    styles = _styles(locale)
+    buf = BytesIO()
+    doc_ref = _doc_ref("MIC", entity=handover)
+
+    doc, frame = _build_doc(
+        buf,
+        title=_t(locale, "move_in_checklist.title", "Move-in Checklist"),
+        author=_development_name(development) or "OpenConstructionERP",
+        subject=f"Move-in for SPA {_attr(sales_contract, 'contract_number', '')}",
+        keywords=["move-in", "checklist", "handover", doc_ref],
+    )
+    ctx = _PageContext(
+        developer_name=_development_name(development),
+        developer_logo_url=_development_logo(development),
+        unit_code=_unit_code(plot, development),
+        doc_ref=doc_ref,
+        locale=locale,
+        watermark=_is_draft(sales_contract),
+    )
+
+    story: list[Any] = [
+        Paragraph(_t(locale, "move_in_checklist.title", "Move-in Checklist"),
+                  styles["title"]),
+        Spacer(1, 4 * mm),
+        Paragraph(_t(locale, "move_in_checklist.intro", ""), styles["body"]),
+        Spacer(1, 4 * mm),
+    ]
+
+    meta_rows = [
+        [
+            Paragraph(_t(locale, "move_in_checklist.headings.spa_ref",
+                         "Agreement No."), styles["label"]),
+            Paragraph(str(_attr(sales_contract, "contract_number", "—")),
+                      styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "move_in_checklist.headings.inspection_date",
+                         "Inspection Date"), styles["label"]),
+            Paragraph(
+                _format_date(_attr(handover, "completed_at", None), locale)
+                or _format_date(_attr(handover, "scheduled_at", None), locale)
+                or "—",
+                styles["body"],
+            ),
+        ],
+    ]
+    meta_tbl = Table(meta_rows, colWidths=[60 * mm, 100 * mm])
+    meta_tbl.setStyle(_kv_table_style())
+    story.append(meta_tbl)
+    story.append(Spacer(1, 4 * mm))
+
+    if rooms:
+        for room in rooms:
+            room_name = _attr(room, "name", "") or "—"
+            items = _attr(room, "items", None) or []
+            story.append(
+                Paragraph(str(room_name), styles["heading"])
+            )
+            room_rows: list[list[Any]] = [[
+                Paragraph(_t(locale, "move_in_checklist.columns.item",
+                             "Item"), styles["label"]),
+                Paragraph(_t(locale, "move_in_checklist.columns.condition",
+                             "Condition"), styles["label"]),
+                Paragraph(_t(locale, "move_in_checklist.columns.notes",
+                             "Notes"), styles["label"]),
+            ]]
+            for it in items:
+                room_rows.append([
+                    Paragraph(str(_attr(it, "label", "") or "—"), styles["body"]),
+                    Paragraph(str(_attr(it, "condition", "") or "—"),
+                              styles["body"]),
+                    Paragraph(str(_attr(it, "notes", "") or ""), styles["body"]),
+                ])
+            tbl = Table(
+                room_rows, colWidths=[55 * mm, 30 * mm, 70 * mm], repeatRows=1,
+            )
+            tbl.setStyle(_grid_table_style())
+            story.append(tbl)
+            story.append(Spacer(1, 3 * mm))
+    else:
+        story.append(
+            Paragraph(_t(locale, "move_in_checklist.empty_rooms",
+                         "No room data supplied."), styles["small"])
+        )
+
+    story.extend([
+        Spacer(1, 6 * mm),
+        Paragraph(_t(locale, "move_in_checklist.acceptance_text", ""),
+                  styles["body"]),
+        Spacer(1, 14 * mm),
+        Table(
+            [[
+                Paragraph(
+                    f"{_t(locale, 'common.buyer_signature', 'Buyer Signature')}<br/>"
+                    "________________________________",
+                    styles["body"],
+                ),
+                Paragraph(
+                    f"{_t(locale, 'common.developer_signature', 'Developer Signature')}<br/>"
+                    "________________________________",
+                    styles["body"],
+                ),
+            ]],
+            colWidths=[75 * mm, 75 * mm],
+        ),
+    ])
+    return _render(doc, frame, story, ctx, buf)
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Generator 9 — Mortgage Clearance Letter
+# ════════════════════════════════════════════════════════════════════════
+
+
+def render_mortgage_clearance_letter_pdf(
+    sales_contract: Any,
+    plot: Any,
+    development: Any,
+    bank_name: str,
+    locale: str = "en",
+) -> bytes:
+    """Bank-facing letter confirming the unit has no encumbrances.
+
+    Required by most mortgage lenders before they release final draw-down.
+    """
+    if locale not in SUPPORTED_LOCALES:
+        locale = "en"
+    styles = _styles(locale)
+    buf = BytesIO()
+    doc_ref = _doc_ref("MCL", entity=sales_contract)
+
+    doc, frame = _build_doc(
+        buf,
+        title=_t(locale, "mortgage_clearance_letter.title",
+                 "Mortgage Clearance Letter"),
+        author=_development_name(development) or "OpenConstructionERP",
+        subject=f"Mortgage clearance for SPA {_attr(sales_contract, 'contract_number', '')}",
+        keywords=["mortgage", "clearance", "letter", doc_ref],
+    )
+    ctx = _PageContext(
+        developer_name=_development_name(development),
+        developer_logo_url=_development_logo(development),
+        unit_code=_unit_code(plot, development),
+        doc_ref=doc_ref,
+        locale=locale,
+        watermark=_is_draft(sales_contract),
+    )
+
+    issued_at = date.today().isoformat()
+    rows = [
+        [
+            Paragraph(_t(locale, "mortgage_clearance_letter.headings.bank",
+                         "Issued To (Bank)"), styles["label"]),
+            Paragraph(str(bank_name or "—"), styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "mortgage_clearance_letter.headings.spa_ref",
+                         "Agreement No."), styles["label"]),
+            Paragraph(str(_attr(sales_contract, "contract_number", "—")),
+                      styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "mortgage_clearance_letter.headings.unit",
+                         "Unit"), styles["label"]),
+            Paragraph(
+                f"{_development_name(development)} — "
+                f"{_attr(plot, 'plot_number', '')}",
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "common.date", "Date"), styles["label"]),
+            Paragraph(issued_at, styles["body"]),
+        ],
+    ]
+    tbl = Table(rows, colWidths=[60 * mm, 100 * mm])
+    tbl.setStyle(_kv_table_style())
+
+    story: list[Any] = [
+        Paragraph(_t(locale, "mortgage_clearance_letter.title",
+                     "Mortgage Clearance Letter"), styles["title"]),
+        Spacer(1, 4 * mm),
+        Paragraph(_t(locale, "mortgage_clearance_letter.intro", ""),
+                  styles["body"]),
+        Spacer(1, 4 * mm),
+        tbl,
+        Spacer(1, 6 * mm),
+        Paragraph(_t(locale, "mortgage_clearance_letter.no_encumbrance_text", ""),
+                  styles["body"]),
+        Spacer(1, 4 * mm),
+        Paragraph(_t(locale, "mortgage_clearance_letter.purpose_text", ""),
+                  styles["body"]),
+        Spacer(1, 14 * mm),
+        Paragraph(
+            f"{_t(locale, 'common.developer_signature', 'Developer Signature')}: "
+            "________________________________",
+            styles["body"],
+        ),
+    ]
+    return _render(doc, frame, story, ctx, buf)
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Generator 10 — Title Deed Transfer Request
+# ════════════════════════════════════════════════════════════════════════
+
+
+def render_title_deed_transfer_request_pdf(
+    sales_contract: Any,
+    plot: Any,
+    development: Any,
+    parties: list[Any],
+    registry_name: str,
+    locale: str = "en",
+    *,
+    buyer_lookup: dict[Any, Any] | None = None,
+) -> bytes:
+    """Request to the land registry to transfer title from developer to buyer.
+
+    ``registry_name`` is free-text: ``"Grundbuchamt Berlin"`` /
+    ``"Росреестр"`` / ``"Dubai Land Department"`` / ``"HM Land Registry"``.
+    """
+    if locale not in SUPPORTED_LOCALES:
+        locale = "en"
+    styles = _styles(locale)
+    buf = BytesIO()
+    doc_ref = _doc_ref("TDT", entity=sales_contract)
+
+    doc, frame = _build_doc(
+        buf,
+        title=_t(locale, "title_deed_transfer_request.title",
+                 "Title Deed Transfer Request"),
+        author=_development_name(development) or "OpenConstructionERP",
+        subject=f"Title deed transfer for SPA {_attr(sales_contract, 'contract_number', '')}",
+        keywords=["title", "deed", "transfer", doc_ref],
+    )
+    ctx = _PageContext(
+        developer_name=_development_name(development),
+        developer_logo_url=_development_logo(development),
+        unit_code=_unit_code(plot, development),
+        doc_ref=doc_ref,
+        locale=locale,
+        watermark=_is_draft(sales_contract),
+    )
+
+    party_names: list[str] = []
+    for p in (parties or []):
+        buyer_id = _attr(p, "buyer_id", None)
+        buyer = (buyer_lookup or {}).get(buyer_id) if buyer_lookup else None
+        name = _attr(buyer, "full_name", "") or _attr(p, "full_name", "") or "—"
+        pct = _attr(p, "ownership_pct", "") or ""
+        party_names.append(f"{name} ({pct}%)" if pct else str(name))
+
+    rows = [
+        [
+            Paragraph(_t(locale, "title_deed_transfer_request.headings.registry",
+                         "Land Registry"), styles["label"]),
+            Paragraph(str(registry_name or "—"), styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "title_deed_transfer_request.headings.spa_ref",
+                         "Agreement No."), styles["label"]),
+            Paragraph(str(_attr(sales_contract, "contract_number", "—")),
+                      styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "title_deed_transfer_request.headings.unit",
+                         "Unit"), styles["label"]),
+            Paragraph(
+                f"{_development_name(development)} — "
+                f"{_attr(plot, 'plot_number', '')} "
+                f"({_attr(plot, 'area_m2', '')} m²)",
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "title_deed_transfer_request.headings.new_owners",
+                         "New Owner(s)"), styles["label"]),
+            Paragraph(
+                "<br/>".join(party_names) if party_names else "—",
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "common.date", "Date"), styles["label"]),
+            Paragraph(date.today().isoformat(), styles["body"]),
+        ],
+    ]
+    tbl = Table(rows, colWidths=[60 * mm, 100 * mm])
+    tbl.setStyle(_kv_table_style())
+
+    story: list[Any] = [
+        Paragraph(_t(locale, "title_deed_transfer_request.title",
+                     "Title Deed Transfer Request"), styles["title"]),
+        Spacer(1, 4 * mm),
+        Paragraph(_t(locale, "title_deed_transfer_request.intro", ""),
+                  styles["body"]),
+        Spacer(1, 4 * mm),
+        tbl,
+        Spacer(1, 6 * mm),
+        Paragraph(_t(locale, "title_deed_transfer_request.headings.request_body",
+                     "Request"), styles["heading"]),
+        Paragraph(_t(locale, "title_deed_transfer_request.request_text", ""),
+                  styles["body"]),
+        Spacer(1, 4 * mm),
+        Paragraph(_t(locale, "title_deed_transfer_request.headings.attachments",
+                     "Attachments"), styles["heading"]),
+        Paragraph(_t(locale, "title_deed_transfer_request.attachments_text", ""),
+                  styles["body"]),
+        Spacer(1, 14 * mm),
+        Paragraph(
+            f"{_t(locale, 'common.developer_signature', 'Developer Signature')}: "
+            "________________________________",
+            styles["body"],
+        ),
+    ]
+    return _render(doc, frame, story, ctx, buf)
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Generator 11 — Escrow Release Authorization
+# ════════════════════════════════════════════════════════════════════════
+
+
+def render_escrow_release_authorization_pdf(
+    sales_contract: Any,
+    plot: Any,
+    development: Any,
+    escrow_account_no: str,
+    amount: Decimal | int | float,
+    release_reason: str,
+    locale: str = "en",
+) -> bytes:
+    """Instruction to the escrow agent to release funds for a milestone."""
+    if locale not in SUPPORTED_LOCALES:
+        locale = "en"
+    styles = _styles(locale)
+    buf = BytesIO()
+    doc_ref = _doc_ref("ERA", entity=sales_contract)
+
+    doc, frame = _build_doc(
+        buf,
+        title=_t(locale, "escrow_release_authorization.title",
+                 "Escrow Release Authorization"),
+        author=_development_name(development) or "OpenConstructionERP",
+        subject=f"Escrow release for SPA {_attr(sales_contract, 'contract_number', '')}",
+        keywords=["escrow", "release", "authorization", doc_ref],
+    )
+    ctx = _PageContext(
+        developer_name=_development_name(development),
+        developer_logo_url=_development_logo(development),
+        unit_code=_unit_code(plot, development),
+        doc_ref=doc_ref,
+        locale=locale,
+        watermark=_is_draft(sales_contract),
+    )
+
+    ccy = _attr(sales_contract, "currency", "") or _attr(plot, "currency", "") or ""
+
+    rows = [
+        [
+            Paragraph(_t(locale, "escrow_release_authorization.headings.escrow_account",
+                         "Escrow Account No."), styles["label"]),
+            Paragraph(str(escrow_account_no or "—"), styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "escrow_release_authorization.headings.spa_ref",
+                         "Agreement No."), styles["label"]),
+            Paragraph(str(_attr(sales_contract, "contract_number", "—")),
+                      styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "escrow_release_authorization.headings.unit",
+                         "Unit"), styles["label"]),
+            Paragraph(
+                f"{_development_name(development)} — "
+                f"{_attr(plot, 'plot_number', '')}",
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "escrow_release_authorization.headings.amount_to_release",
+                         "Amount to Release"), styles["label"]),
+            Paragraph(
+                f"{_format_money(amount, locale)} {ccy}".strip(),
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "escrow_release_authorization.headings.release_reason",
+                         "Release Reason"), styles["label"]),
+            Paragraph(str(release_reason or "—"), styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "common.date", "Date"), styles["label"]),
+            Paragraph(date.today().isoformat(), styles["body"]),
+        ],
+    ]
+    tbl = Table(rows, colWidths=[60 * mm, 100 * mm])
+    tbl.setStyle(_kv_table_style())
+
+    story: list[Any] = [
+        Paragraph(_t(locale, "escrow_release_authorization.title",
+                     "Escrow Release Authorization"), styles["title"]),
+        Spacer(1, 4 * mm),
+        Paragraph(_t(locale, "escrow_release_authorization.intro", ""),
+                  styles["body"]),
+        Spacer(1, 4 * mm),
+        tbl,
+        Spacer(1, 6 * mm),
+        Paragraph(_t(locale, "escrow_release_authorization.instruction_text", ""),
+                  styles["body"]),
+        Spacer(1, 14 * mm),
+        Paragraph(
+            f"{_t(locale, 'common.developer_signature', 'Developer Signature')}: "
+            "________________________________",
+            styles["body"],
+        ),
+    ]
+    return _render(doc, frame, story, ctx, buf)
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Generator 12 — Refund Authorization
+# ════════════════════════════════════════════════════════════════════════
+
+
+def render_refund_authorization_pdf(
+    sales_contract: Any,
+    plot: Any,
+    development: Any,
+    refund_amount: Decimal | int | float,
+    refund_reason: str,
+    payment_method: str,
+    locale: str = "en",
+    *,
+    reservation: Any = None,
+) -> bytes:
+    """Formal refund instruction (reservation or contract cancelled).
+
+    Either ``sales_contract`` OR ``reservation`` may be the source — the
+    title bar shows whichever is non-empty.
+    """
+    if locale not in SUPPORTED_LOCALES:
+        locale = "en"
+    styles = _styles(locale)
+    buf = BytesIO()
+    source_entity = sales_contract if _attr(sales_contract, "id", None) else reservation
+    doc_ref = _doc_ref("REF", entity=source_entity or sales_contract)
+
+    doc, frame = _build_doc(
+        buf,
+        title=_t(locale, "refund_authorization.title", "Refund Authorization"),
+        author=_development_name(development) or "OpenConstructionERP",
+        subject=(
+            f"Refund for SPA {_attr(sales_contract, 'contract_number', '')}"
+            if _attr(sales_contract, "contract_number", None)
+            else f"Refund for reservation {_attr(reservation, 'reservation_number', '')}"
+        ),
+        keywords=["refund", "authorization", doc_ref],
+    )
+    ctx = _PageContext(
+        developer_name=_development_name(development),
+        developer_logo_url=_development_logo(development),
+        unit_code=_unit_code(plot, development),
+        doc_ref=doc_ref,
+        locale=locale,
+        watermark=_is_draft(sales_contract),
+    )
+
+    ccy = (
+        _attr(sales_contract, "currency", "")
+        or _attr(reservation, "currency", "")
+        or _attr(plot, "currency", "")
+        or ""
+    )
+
+    ref_value = (
+        _attr(sales_contract, "contract_number", "")
+        or _attr(reservation, "reservation_number", "")
+        or "—"
+    )
+
+    rows = [
+        [
+            Paragraph(_t(locale, "refund_authorization.headings.reference",
+                         "Reference"), styles["label"]),
+            Paragraph(str(ref_value), styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "refund_authorization.headings.unit",
+                         "Unit"), styles["label"]),
+            Paragraph(
+                f"{_development_name(development)} — "
+                f"{_attr(plot, 'plot_number', '')}",
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "refund_authorization.headings.amount",
+                         "Refund Amount"), styles["label"]),
+            Paragraph(
+                f"{_format_money(refund_amount, locale)} {ccy}".strip(),
+                styles["body"],
+            ),
+        ],
+        [
+            Paragraph(_t(locale, "refund_authorization.headings.reason",
+                         "Reason"), styles["label"]),
+            Paragraph(str(refund_reason or "—"), styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "refund_authorization.headings.payment_method",
+                         "Payment Method"), styles["label"]),
+            Paragraph(str(payment_method or "—"), styles["body"]),
+        ],
+        [
+            Paragraph(_t(locale, "common.date", "Date"), styles["label"]),
+            Paragraph(date.today().isoformat(), styles["body"]),
+        ],
+    ]
+    tbl = Table(rows, colWidths=[60 * mm, 100 * mm])
+    tbl.setStyle(_kv_table_style())
+
+    story: list[Any] = [
+        Paragraph(_t(locale, "refund_authorization.title", "Refund Authorization"),
+                  styles["title"]),
+        Spacer(1, 4 * mm),
+        Paragraph(_t(locale, "refund_authorization.intro", ""), styles["body"]),
+        Spacer(1, 4 * mm),
+        tbl,
+        Spacer(1, 6 * mm),
+        Paragraph(_t(locale, "refund_authorization.authorisation_text", ""),
+                  styles["body"]),
+        Spacer(1, 14 * mm),
+        Paragraph(
+            f"{_t(locale, 'common.developer_signature', 'Developer Signature')}: "
+            "________________________________",
+            styles["body"],
+        ),
+    ]
+    return _render(doc, frame, story, ctx, buf)
+
+
 # ── Public exports ──────────────────────────────────────────────────────
 
 
@@ -1537,10 +2246,16 @@ __all__ = [
     "RTL_LOCALES",
     "SUPPORTED_LOCALES",
     "SUPPORTED_REGULATORS",
+    "render_escrow_release_authorization_pdf",
     "render_handover_certificate_pdf",
+    "render_mortgage_clearance_letter_pdf",
+    "render_move_in_checklist_pdf",
     "render_no_objection_certificate_pdf",
     "render_payment_receipt_pdf",
+    "render_refund_authorization_pdf",
     "render_reservation_receipt_pdf",
     "render_sales_contract_pdf",
+    "render_tenant_lease_agreement_pdf",
+    "render_title_deed_transfer_request_pdf",
     "render_warranty_certificate_pdf",
 ]

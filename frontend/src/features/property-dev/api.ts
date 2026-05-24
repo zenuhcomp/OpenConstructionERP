@@ -2480,7 +2480,16 @@ export type PropDevDocType =
   | 'payment_receipt'
   | 'handover_certificate'
   | 'warranty_certificate'
-  | 'noc';
+  | 'noc'
+  // New built-ins shipped in v3124 — sample-preview only today; live
+  // ``/documents/{doc_type}`` rendering for these flows lands per-event
+  // in follow-up commits.
+  | 'tenant_lease_agreement'
+  | 'move_in_checklist'
+  | 'mortgage_clearance_letter'
+  | 'title_deed_transfer_request'
+  | 'escrow_release_authorization'
+  | 'refund_authorization';
 
 export interface PropDevDocParams {
   doc_type: PropDevDocType;
@@ -2679,6 +2688,70 @@ export function sampleDocumentPreview(
   return apiPost<SampleDocumentPreview>(
     `${BASE}/document-templates/${docType}/sample-preview`,
     { locale, regulator },
+  );
+}
+
+/* ── In-browser editor for HTML / Markdown custom templates ──────────── */
+
+export type CustomTemplateTextContentType =
+  | 'text/html'
+  | 'text/markdown'
+  | 'text/plain';
+
+export interface SaveTextTemplateRequest {
+  name: string;
+  doc_type: string;
+  entity: string;
+  trigger?: string;
+  description?: string;
+  content_type: CustomTemplateTextContentType;
+  content_text: string;
+  project_id?: string;
+  development_id?: string;
+  /** When present, REPLACE the named row in place (PATCH semantics). */
+  template_id?: string;
+}
+
+/**
+ * Save in-browser-edited HTML / Markdown / plain text as a custom
+ * template. Same row shape as the multipart upload, but the source is a
+ * JSON body so the user never needs to leave the editor.
+ */
+export function saveTextCustomDocumentTemplate(
+  payload: SaveTextTemplateRequest,
+): Promise<DocumentTemplateEntry> {
+  return apiPost<DocumentTemplateEntry, SaveTextTemplateRequest>(
+    `${BASE}/document-templates/save-text`,
+    payload,
+  );
+}
+
+export interface CustomTemplateContent {
+  id: string;
+  doc_type: string;
+  title: string;
+  description: string;
+  trigger: string;
+  entity: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  content_text: string;
+  development_id: string | null;
+  project_id: string | null;
+}
+
+/**
+ * Fetch the raw text content of a custom template for the editor.
+ * Returns 415 from the backend if the template was uploaded as a binary
+ * file (.docx / .pdf / .odt) — those can't be round-tripped through the
+ * in-browser editor.
+ */
+export function getCustomDocumentTemplateContent(
+  templateId: string,
+): Promise<CustomTemplateContent> {
+  return apiGet<CustomTemplateContent>(
+    `${BASE}/document-templates/custom/${encodeURIComponent(templateId)}/content`,
   );
 }
 
