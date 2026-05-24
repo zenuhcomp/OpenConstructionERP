@@ -16,7 +16,8 @@ import {
   Sparkles,
   Globe,
 } from 'lucide-react';
-import { Button, Card, Badge, Breadcrumb, CountryFlag } from '@/shared/ui';
+import { Button, Card, Badge, Breadcrumb, ConfirmDialog, CountryFlag } from '@/shared/ui';
+import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useToastStore } from '@/stores/useToastStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { apiGet, apiPost, apiDelete, triggerDownload, extractErrorMessageFromBody } from '@/shared/lib/api';
@@ -683,6 +684,7 @@ function LoadedDatabasesSection() {
   const addToast = useToastStore((s) => s.addToast);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [deletingRegion, setDeletingRegion] = useState<string | null>(null);
+  const { confirm, ...confirmProps } = useConfirm();
 
   // Fetch real per-region stats from backend.
   // ``.catch(() => [])`` so a transient 401/500 doesn't leave ``data`` undefined
@@ -899,13 +901,18 @@ function LoadedDatabasesSection() {
                         <Loader2 size={14} className="animate-spin text-semantic-error mx-auto" />
                       ) : (
                         <button
-                          onClick={() => {
-                            const ok = window.confirm(
-                              t('costs.confirm_delete_region', {
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: t('costs.confirm_delete_region_title', {
+                                defaultValue: 'Delete region cost items?',
+                              }),
+                              message: t('costs.confirm_delete_region', {
                                 defaultValue: 'Delete all cost items for {{region}}? This cannot be undone.',
                                 region: db?.name ?? rs.region,
                               }),
-                            );
+                              confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+                              variant: 'danger',
+                            });
                             if (!ok) return;
                             setDeletingRegion(rs.region);
                             deleteRegionMutation.mutate(rs.region);
@@ -962,6 +969,7 @@ function LoadedDatabasesSection() {
           </div>
         )}
       </div>
+      <ConfirmDialog {...confirmProps} />
     </Card>
   );
 }

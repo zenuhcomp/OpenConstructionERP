@@ -6,7 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, ShieldCheck } from 'lucide-react';
 
-import { Button, Card, EmptyState, Skeleton } from '@/shared/ui';
+import { Button, Card, ConfirmDialog, EmptyState, Skeleton } from '@/shared/ui';
+import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useToastStore } from '@/stores/useToastStore';
 
 import { deleteComplianceDoc, listComplianceDocs } from './api';
@@ -30,6 +31,7 @@ export function CompliancePage({ projectId }: CompliancePageProps) {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<string>('');
   const [showCreate, setShowCreate] = useState(false);
+  const { confirm, ...confirmProps } = useConfirm();
 
   const query = useQuery({
     queryKey: [
@@ -247,17 +249,20 @@ export function CompliancePage({ projectId }: CompliancePageProps) {
                   <td className="px-3 py-2 text-right">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            t('compliance.confirm.delete', {
-                              defaultValue:
-                                'Delete this compliance document?',
-                            }),
-                          )
-                        ) {
-                          removeMutation.mutate(row.id);
-                        }
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: t('compliance.confirm.delete_title', {
+                            defaultValue: 'Delete compliance document?',
+                          }),
+                          message: t('compliance.confirm.delete', {
+                            defaultValue:
+                              'Delete this compliance document?',
+                          }),
+                          confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+                          variant: 'danger',
+                        });
+                        if (!ok) return;
+                        removeMutation.mutate(row.id);
                       }}
                       className="rounded-md p-1 text-content-tertiary hover:bg-surface-secondary hover:text-semantic-error"
                       aria-label={t('common.delete', {
@@ -281,6 +286,7 @@ export function CompliancePage({ projectId }: CompliancePageProps) {
           onClose={() => setShowCreate(false)}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

@@ -33,12 +33,15 @@ import {
   Card,
   CardContent,
   CardHeader,
+  ConfirmDialog,
   EmptyState,
   Input,
   WideModal,
   WideModalSection,
   WideModalField,
 } from '@/shared/ui';
+import { useConfirm } from '@/shared/hooks/useConfirm';
+import { useToastStore } from '@/stores/useToastStore';
 
 import { FederationTypeTree } from './FederationTypeTree';
 import { FederatedViewer, type FederatedViewerHandle } from './FederatedViewer';
@@ -654,6 +657,8 @@ function FederationDetailDrawer({
 export function FederationsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const addToast = useToastStore((s) => s.addToast);
+  const { confirm, ...confirmProps } = useConfirm();
   const [projectId, setProjectId] = useState<string>('');
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedFedId, setSelectedFedId] = useState<string | null>(null);
@@ -686,17 +691,33 @@ export function FederationsPage() {
 
   const handleDelete = useCallback(
     async (id: string) => {
-      const confirmed = window.confirm(t('bim.federation.confirm_delete'));
+      const confirmed = await confirm({
+        title: t('bim.federation.confirm_delete_title', {
+          defaultValue: 'Delete federation?',
+        }),
+        message: t('bim.federation.confirm_delete', {
+          defaultValue:
+            'Delete this federation? Members will not be deleted, only the grouping.',
+        }),
+        confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+        variant: 'danger',
+      });
       if (!confirmed) return;
       try {
         await deleteFederation(id);
         void refetch();
         if (selectedFedId === id) setSelectedFedId(null);
       } catch (e) {
-        window.alert(e instanceof Error ? e.message : String(e));
+        addToast({
+          type: 'error',
+          title: t('bim.federation.delete_failed', {
+            defaultValue: 'Could not delete federation',
+          }),
+          message: e instanceof Error ? e.message : String(e),
+        });
       }
     },
-    [refetch, selectedFedId, t],
+    [addToast, confirm, refetch, selectedFedId, t],
   );
 
   return (
@@ -818,6 +839,8 @@ export function FederationsPage() {
         onClose={() => setSelectedFedId(null)}
         onChanged={invalidate}
       />
+
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

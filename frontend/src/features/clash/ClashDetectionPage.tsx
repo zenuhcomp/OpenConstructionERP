@@ -71,6 +71,8 @@ import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { EmptyState } from '@/shared/ui/EmptyState';
 import { MiniGeometryPreview } from '@/shared/ui/MiniGeometryPreview';
+import { ConfirmDialog } from '@/shared/ui/ConfirmDialog';
+import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useToastStore } from '@/stores/useToastStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -457,6 +459,7 @@ export function ClashDetectionPage() {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
   const qc = useQueryClient();
+  const { confirm, ...confirmProps } = useConfirm();
   const [params, setParams] = useSearchParams();
   // The active project is chosen once, globally, from the selector at the
   // top of the app â€” clash does NOT show its own project picker. We fall
@@ -3610,14 +3613,21 @@ export function ClashDetectionPage() {
                       assignMut.isPending ||
                       statusMut.isPending
                     }
-                    onSetSeverity={(sv) => {
-                      const msg = t('clash.bulk_severity_confirm', {
-                        defaultValue:
-                          'Set severity to "{{s}}" for {{n}} selected clash(es)?â€Œâ â€',
-                        s: sv,
-                        n: selResults.size,
+                    onSetSeverity={async (sv) => {
+                      const ok = await confirm({
+                        title: t('clash.bulk_severity_title', {
+                          defaultValue: 'Update severity?',
+                        }),
+                        message: t('clash.bulk_severity_confirm', {
+                          defaultValue:
+                            'Set severity to "{{s}}" for {{n}} selected clash(es)?',
+                          s: sv,
+                          n: selResults.size,
+                        }),
+                        confirmLabel: t('common.apply', { defaultValue: 'Apply' }),
+                        variant: 'warning',
                       });
-                      if (!window.confirm(msg)) return;
+                      if (!ok) return;
                       for (const id of selResults) {
                         severityMut.mutate({ id, severity: sv });
                       }
@@ -3739,6 +3749,7 @@ export function ClashDetectionPage() {
           t={t}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

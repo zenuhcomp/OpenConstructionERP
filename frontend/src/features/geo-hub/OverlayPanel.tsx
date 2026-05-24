@@ -36,6 +36,8 @@ import {
 import { useToastStore } from '@/stores/useToastStore';
 import { getErrorMessage } from '@/shared/lib/api';
 import { useFocusTrap } from '@/shared/hooks/useFocusTrap';
+import { useConfirm } from '@/shared/hooks/useConfirm';
+import { ConfirmDialog } from '@/shared/ui/ConfirmDialog';
 
 import {
   deleteRasterOverlay,
@@ -81,6 +83,7 @@ export function OverlayPanel({
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState<boolean>(readPanelCollapsed);
   const [showUpload, setShowUpload] = useState(false);
+  const { confirm, ...confirmProps } = useConfirm();
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -439,17 +442,19 @@ export function OverlayPanel({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (
-                            !window.confirm(
-                              t('geo.overlays.delete_confirm', {
-                                defaultValue:
-                                  'Delete this overlay? You can re-upload it later.',
-                              }),
-                            )
-                          ) {
-                            return;
-                          }
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: t('geo.overlays.delete_title', {
+                              defaultValue: 'Delete overlay?',
+                            }),
+                            message: t('geo.overlays.delete_confirm', {
+                              defaultValue:
+                                'Delete this overlay? You can re-upload it later.',
+                            }),
+                            confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+                            variant: 'danger',
+                          });
+                          if (!ok) return;
                           deleteMutation.mutate(o.id);
                           if (activeOverlayId === o.id) {
                             onSelectOverlay(null);
@@ -481,6 +486,7 @@ export function OverlayPanel({
           }}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </aside>
   );
 }

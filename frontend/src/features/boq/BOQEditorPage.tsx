@@ -4,7 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 // lucide-react icons used by sub-components (BOQToolbar, BOQGrid, etc.) — none needed directly here
 import { Database, Download, ExternalLink, X, Sparkles, AlertTriangle as WarnTriangle, Lock, Copy, Wallet, Keyboard, GitCompare, RefreshCw } from 'lucide-react';
-import { Button, Badge, Breadcrumb, ModuleHelpButton } from '@/shared/ui';
+import { Button, Badge, Breadcrumb, ModuleHelpButton, ConfirmDialog } from '@/shared/ui';
+import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useProgressStore } from '@/shared/ui/GlobalProgress';
 import { apiGet, apiPost, triggerDownload } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
@@ -131,6 +132,7 @@ export function BOQEditorPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const highlightPositionId = searchParams.get('highlight');
+  const { confirm, ...confirmProps } = useConfirm();
 
   /* ── Data fetching ─────────────────────────────────────────────────── */
 
@@ -694,17 +696,20 @@ export function BOQEditorPage() {
     },
   });
 
-  const handleLock = useCallback(() => {
+  const handleLock = useCallback(async () => {
     // Lock is irreversible without admin unlock — confirm before mutating (Bug 8).
-    const ok = window.confirm(
-      t('boq.lock_confirm', {
+    const ok = await confirm({
+      title: t('boq.lock_title', { defaultValue: 'Lock estimate?' }),
+      message: t('boq.lock_confirm', {
         defaultValue:
-          'Lock this estimate?\n\nLocked estimates cannot be edited. Unlocking requires admin privileges.',
+          'Lock this estimate? Locked estimates cannot be edited. Unlocking requires admin privileges.',
       }),
-    );
+      confirmLabel: t('boq.lock', { defaultValue: 'Lock' }),
+      variant: 'warning',
+    });
     if (!ok) return;
     lockMutation.mutate();
-  }, [lockMutation, t]);
+  }, [confirm, lockMutation, t]);
 
   const unlockMutation = useMutation({
     mutationFn: () => apiPost(`/v1/boq/boqs/${boqId}/unlock/`, {}),
@@ -1581,6 +1586,19 @@ export function BOQEditorPage() {
         const kids = childrenByParent.get(id);
         if (kids) stack.push(...kids);
       }
+      const ok = await confirm({
+        title: t('boq.delete_section_title', {
+          defaultValue: 'Delete section?',
+        }),
+        message: t('boq.confirm_delete_section', {
+          defaultValue:
+            'Delete this section and all {{count}} positions inside it?',
+          count: descendantCount,
+        }),
+        confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+        variant: 'danger',
+      });
+      if (!ok) return;
       // One recursive cascade delete — the backend removes the whole
       // subtree (nested sub-sections + their positions) leaves-first.
       // The previous per-child loop relied on the flat `grouped` view,
@@ -1608,7 +1626,7 @@ export function BOQEditorPage() {
         }),
       });
     },
-    [boq, invalidateAll, addToast, t],
+    [boq, confirm, invalidateAll, addToast, t],
   );
 
   /* Build flat position list for keyboard navigation — reserved for future use
@@ -4697,6 +4715,7 @@ export function BOQEditorPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

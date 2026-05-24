@@ -50,6 +50,7 @@ import {
 } from '@/shared/ui/WideModal';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
+import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useToastStore } from '@/stores/useToastStore';
 import { getErrorMessage } from '@/shared/lib/api';
 import {
@@ -1777,6 +1778,7 @@ export function PriceMatrixTab({
   const [editing, setEditing] = useState<PriceMatrix | null>(null);
   const [deleting, setDeleting] = useState<PriceMatrix | null>(null);
   const [previewing, setPreviewing] = useState<PriceMatrix | null>(null);
+  const { confirm, ...confirmProps } = useConfirm();
 
   useSubEntityCreateBroadcast('price_matrix', () => setCreateOpen(true));
 
@@ -1986,17 +1988,22 @@ export function PriceMatrixTab({
                             size="sm"
                             variant="primary"
                             icon={<ArrowRightCircle size={12} />}
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  t('propdev.matrix.apply_confirm', {
-                                    defaultValue:
-                                      'Apply this matrix to every plot in the development? Plot prices will be overwritten.',
-                                  }),
-                                )
-                              ) {
-                                recomputeMu.mutate(m.id);
-                              }
+                            onClick={async () => {
+                              const ok = await confirm({
+                                title: t('propdev.matrix.apply_title', {
+                                  defaultValue: 'Apply price matrix?',
+                                }),
+                                message: t('propdev.matrix.apply_confirm', {
+                                  defaultValue:
+                                    'Apply this matrix to every plot in the development? Plot prices will be overwritten.',
+                                }),
+                                confirmLabel: t('propdev.matrix.apply', {
+                                  defaultValue: 'Apply to all plots',
+                                }),
+                                variant: 'warning',
+                              });
+                              if (!ok) return;
+                              recomputeMu.mutate(m.id);
                             }}
                             disabled={recomputeMu.isPending}
                             loading={recomputeMu.isPending}
@@ -2087,6 +2094,7 @@ export function PriceMatrixTab({
           onClose={() => setPreviewing(null)}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

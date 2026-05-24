@@ -32,12 +32,13 @@ import {
   Loader2,
 } from 'lucide-react';
 
-import { Button, Badge } from '@/shared/ui';
+import { Button, Badge, ConfirmDialog } from '@/shared/ui';
 import {
   WideModal,
   WideModalSection,
   WideModalField,
 } from '@/shared/ui/WideModal';
+import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useToastStore } from '@/stores/useToastStore';
 import { getErrorMessage } from '@/shared/lib/api';
 
@@ -94,6 +95,7 @@ export function SnagsBlock({
   const addToast = useToastStore((s) => s.addToast);
   const [expanded, setExpanded] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const { confirm, ...confirmProps } = useConfirm();
 
   const snagsQ = useQuery({
     queryKey: ['propdev', 'snags', handover.id],
@@ -309,16 +311,19 @@ export function SnagsBlock({
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            t('propdev.snag.confirm_delete', {
-                              defaultValue: 'Delete this snag?',
-                            }),
-                          )
-                        ) {
-                          deleteMu.mutate(s.id);
-                        }
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: t('propdev.snag.confirm_delete_title', {
+                            defaultValue: 'Delete snag?',
+                          }),
+                          message: t('propdev.snag.confirm_delete', {
+                            defaultValue: 'Delete this snag?',
+                          }),
+                          confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+                          variant: 'danger',
+                        });
+                        if (!ok) return;
+                        deleteMu.mutate(s.id);
                       }}
                       disabled={deleteMu.isPending}
                     >
@@ -339,6 +344,7 @@ export function SnagsBlock({
           onClose={() => setAddOpen(false)}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }
