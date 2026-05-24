@@ -9,8 +9,9 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
+  Building2,
   Grid3X3,
   LineChart as LineChartIcon,
   Coins,
@@ -19,14 +20,14 @@ import {
   Compass,
   Sparkles,
 } from 'lucide-react';
-import { Breadcrumb, Card } from '@/shared/ui';
+import { Breadcrumb, Card, EmptyState, SkeletonGrid } from '@/shared/ui';
 import { listDevelopments, type Development } from '../api';
 import { InventoryHeatmap } from './InventoryHeatmap';
 import { SalesVelocity } from './SalesVelocity';
 import { CashFlowWaterfall } from './CashFlowWaterfall';
 import { InventoryAgeing } from './InventoryAgeing';
 import { FunnelConversion } from './FunnelConversion';
-import { DashboardLoading, DashboardEmpty } from './_shared';
+import { DashboardError } from './_shared';
 
 interface DashboardTileProps {
   title: string;
@@ -57,9 +58,16 @@ function DashboardTile({ title, icon, to, children }: DashboardTileProps) {
 
 export function DashboardsHub() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [developmentId, setDevelopmentId] = useState<string>('');
 
-  const { data: developments, isLoading } = useQuery({
+  const {
+    data: developments,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ['propdev-developments'],
     queryFn: () => listDevelopments({ limit: 100 }),
   });
@@ -74,18 +82,43 @@ export function DashboardsHub() {
     }
   }, [developments, developmentId]);
 
-  if (isLoading) return <DashboardLoading />;
+  if (isLoading)
+    return (
+      <div className="p-4">
+        <SkeletonGrid items={6} gridCols="md:grid-cols-2" />
+      </div>
+    );
+  if (isError) {
+    return (
+      <div className="p-4">
+        <DashboardError
+          title={t('propdev.dashboards.load_developments_error', {
+            defaultValue: 'Could not load developments',
+          })}
+          message={error instanceof Error ? error.message : undefined}
+          onRetry={() => refetch()}
+        />
+      </div>
+    );
+  }
   if (!developments || developments.length === 0) {
     return (
-      <DashboardEmpty
-        title={t('propdev.dashboards.hub.no_developments_title', {
-          defaultValue: 'No developments yet',
-        })}
-        description={t('propdev.dashboards.hub.no_developments_desc', {
-          defaultValue:
-            'Create your first development on the main Property Development page.',
-        })}
-      />
+      <div className="p-4">
+        <EmptyState
+          icon={<Building2 size={22} />}
+          title={t('propdev.dashboards.hub.no_developments_title', {
+            defaultValue: 'No developments yet',
+          })}
+          description={t('propdev.dashboards.hub.no_developments_desc', {
+            defaultValue:
+              'Dashboards roll up data per development. Create your first one to populate these views.',
+          })}
+          action={{
+            label: t('propdev.new_development', { defaultValue: 'New Development' }),
+            onClick: () => navigate('/property-dev'),
+          }}
+        />
+      </div>
     );
   }
 

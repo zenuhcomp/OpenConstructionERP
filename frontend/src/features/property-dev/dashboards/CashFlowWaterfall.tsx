@@ -7,7 +7,7 @@
  *   - ``actual_disbursed`` = sum of EscrowTransaction direction=debit
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   CashflowMonthBucket,
@@ -17,7 +17,8 @@ import type {
 import { getCashflowWaterfall } from '../api';
 import {
   DashboardEmpty,
-  DashboardLoading,
+  DashboardError,
+  DashboardSkeleton,
   fmtCompactNumber,
   num,
 } from './_shared';
@@ -42,6 +43,9 @@ export function CashFlowWaterfall({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [reloadKey, setReloadKey] = useState(0);
+  const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -59,7 +63,7 @@ export function CashFlowWaterfall({
     return () => {
       cancelled = true;
     };
-  }, [developmentId, monthsWindow]);
+  }, [developmentId, monthsWindow, reloadKey]);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -89,14 +93,15 @@ export function CashFlowWaterfall({
       )
     : 1;
 
-  if (loading) return <DashboardLoading />;
+  if (loading) return <DashboardSkeleton variant="bars" rows={monthsWindow ? Math.min(monthsWindow, 6) : 6} />;
   if (error)
     return (
-      <DashboardEmpty
+      <DashboardError
         title={t('propdev.dashboards.cashflow.error', {
           defaultValue: 'Could not load cash-flow waterfall',
         })}
-        description={error}
+        message={error}
+        onRetry={refetch}
       />
     );
   if (!data || data.series.length === 0)

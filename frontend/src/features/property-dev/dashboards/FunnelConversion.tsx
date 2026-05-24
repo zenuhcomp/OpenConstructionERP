@@ -6,13 +6,14 @@
  * each stage's drop_pct.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { FunnelConversionResponse } from '../api';
 import { getFunnelConversion } from '../api';
 import {
   DashboardEmpty,
-  DashboardLoading,
+  DashboardError,
+  DashboardSkeleton,
   dropQuartile,
   num,
 } from './_shared';
@@ -37,6 +38,9 @@ export function FunnelConversion({ developmentId }: FunnelConversionProps) {
   const [error, setError] = useState<string | null>(null);
   const [periodDays, setPeriodDays] = useState<number>(90);
 
+  const [reloadKey, setReloadKey] = useState(0);
+  const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -54,21 +58,22 @@ export function FunnelConversion({ developmentId }: FunnelConversionProps) {
     return () => {
       cancelled = true;
     };
-  }, [developmentId, periodDays]);
+  }, [developmentId, periodDays, reloadKey]);
 
   const max = useMemo(() => {
     if (!data) return 1;
     return Math.max(1, ...data.stages.map((s) => s.count));
   }, [data]);
 
-  if (loading) return <DashboardLoading />;
+  if (loading) return <DashboardSkeleton variant="bars" rows={5} />;
   if (error)
     return (
-      <DashboardEmpty
+      <DashboardError
         title={t('propdev.dashboards.funnel.error', {
           defaultValue: 'Could not load funnel',
         })}
-        description={error}
+        message={error}
+        onRetry={refetch}
       />
     );
   if (!data || data.totals.leads === 0)

@@ -855,6 +855,19 @@ export function PropertyDevPage() {
           onClose={() => setCreateOpen(false)}
         />
       )}
+
+      {/* PropDev guided walkthrough — the global <ProductTour /> mounted
+       *  in App.tsx already listens for the `oe:start-tour` event with a
+       *  `tourId: 'propdev'` detail. The Tour pill rendered by the
+       *  ModuleHelpButton (next to the page title above) fires that event
+       *  via `dispatchEvent`. Per-tour dismissal already persists via
+       *  ``/api/v1/users/me/tour-state/`` so there is nothing to wire up
+       *  here — the 7-step PROPDEV_TOUR_STEPS playlist is auto-resolved
+       *  from the TOUR_REGISTRY. The auto-start behaviour stays scoped to
+       *  the dashboard route only; on /property-dev the tour is purely
+       *  opt-in. Leaving this comment as a breadcrumb for the next
+       *  refactor — duplicating ProductTour here would double-render the
+       *  spotlight overlay. */}
     </div>
   );
 }
@@ -2626,7 +2639,16 @@ function LeadDetailDrawer({
               onChange={(e) =>
                 setForm({ ...form, lead_score: e.target.value })
               }
+              title={t('propdev.lead_score_hint', {
+                defaultValue:
+                  'Your qualification confidence — 0 = cold, 50 = warm, 100 = hot. Drives the Leads list sort order.',
+              })}
             />
+            <span className="mt-0.5 text-2xs text-content-tertiary">
+              {t('propdev.lead_score_hint_short', {
+                defaultValue: '0 = cold · 50 = warm · 100 = hot',
+              })}
+            </span>
           </label>
           <label className="flex flex-col gap-1">
             <span className={labelCls}>
@@ -3009,6 +3031,10 @@ function ConvertLeadModal({
           </WideModalField>
           <WideModalField
             label={t('propdev.expires_at', { defaultValue: 'Expires at' })}
+            hint={t('propdev.expires_at_hint', {
+              defaultValue:
+                'Date the reservation auto-expires unless converted to SPA. Defaults to today + 30 days.',
+            })}
           >
             <input
               type="date"
@@ -7481,6 +7507,10 @@ function CreateModal({
           </WideModalField>
           <WideModalField
             label={t('propdev.lead_score', { defaultValue: 'Score (0-100)' })}
+            hint={t('propdev.lead_score_hint', {
+              defaultValue:
+                'Your qualification confidence — 0 = cold, 50 = warm, 100 = hot. Drives the Leads list sort order.',
+            })}
           >
             <input
               type="number"

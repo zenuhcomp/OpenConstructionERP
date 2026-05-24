@@ -24,7 +24,7 @@ import {
   Loader2,
   Play,
 } from 'lucide-react';
-import { Button, Card, Badge } from '@/shared/ui';
+import { Button, Card, Badge, EmptyState, SkeletonTable } from '@/shared/ui';
 import { useToastStore } from '@/stores/useToastStore';
 import { getErrorMessage } from '@/shared/lib/api';
 import {
@@ -254,14 +254,36 @@ export function CompliancePage({
           </h2>
         </div>
         {dashboardQuery.isLoading ? (
-          <div className="flex items-center gap-2 p-6 text-sm text-zinc-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            {t('propdev.compliance.loading')}
+          <div className="p-4">
+            <SkeletonTable rows={5} columns={3} />
+          </div>
+        ) : dashboardQuery.isError ? (
+          <div className="p-4">
+            <EmptyState
+              icon={<AlertOctagon size={22} />}
+              title={t('propdev.compliance.load_error_title', {
+                defaultValue: 'Could not load compliance results',
+              })}
+              description={getErrorMessage(dashboardQuery.error)}
+              action={{
+                label: t('common.retry', { defaultValue: 'Retry' }),
+                onClick: () => dashboardQuery.refetch(),
+              }}
+            />
           </div>
         ) : groupedByRule.length === 0 ? (
-          <p className="p-6 text-sm text-zinc-500">
-            {t('propdev.compliance.no_rules')}
-          </p>
+          <div className="p-4">
+            <EmptyState
+              icon={<CheckCircle2 size={22} />}
+              title={t('propdev.compliance.no_rules_title', {
+                defaultValue: 'No compliance checks run yet',
+              })}
+              description={t('propdev.compliance.no_rules_desc', {
+                defaultValue:
+                  'Click "Run checks" above to evaluate this development against the configured rule sets.',
+              })}
+            />
+          </div>
         ) : (
           <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
             {groupedByRule.map((rule) => {

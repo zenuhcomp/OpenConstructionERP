@@ -6,11 +6,11 @@
  * deep-links to the underlying entity.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BuyerJourneyEvent, BuyerJourneyResponse } from '../api';
 import { getBuyerJourney } from '../api';
-import { DashboardEmpty, DashboardLoading } from './_shared';
+import { DashboardEmpty, DashboardError, DashboardSkeleton } from './_shared';
 
 interface BuyerJourneyTimelineProps {
   buyerId: string;
@@ -32,6 +32,9 @@ export function BuyerJourneyTimeline({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [reloadKey, setReloadKey] = useState(0);
+  const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -49,16 +52,17 @@ export function BuyerJourneyTimeline({
     return () => {
       cancelled = true;
     };
-  }, [buyerId]);
+  }, [buyerId, reloadKey]);
 
-  if (loading) return <DashboardLoading />;
+  if (loading) return <DashboardSkeleton variant="timeline" rows={5} />;
   if (error)
     return (
-      <DashboardEmpty
+      <DashboardError
         title={t('propdev.dashboards.journey.error', {
           defaultValue: 'Could not load buyer journey',
         })}
-        description={error}
+        message={error}
+        onRetry={refetch}
       />
     );
   if (!data || data.events.length === 0)
