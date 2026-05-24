@@ -7459,6 +7459,12 @@ const resource = {
     "propdev.pricing.history.col_buyer": "Buyer",
     "propdev.pricing.history.col_plot": "Plot",
     // --- /Pricing engine polish ---
+
+    // --- Property Development → Document Templates (worldwide combobox) ---
+    "property_dev.doc_templates.doctype_placeholder": "pick or type any slug",
+    "property_dev.doc_templates.entity_placeholder": "pick or type any slug",
+    "property_dev.doc_templates.regulator_hint": "Pick a preset or type any compliance authority code.",
+    // --- /Property Development → Document Templates ---
   }
 } as { translation: Record<string, string> };
 

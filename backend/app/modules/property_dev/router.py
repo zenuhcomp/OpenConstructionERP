@@ -6,6 +6,7 @@ All routes are RBAC-gated and mounted by the module loader at
 
 from __future__ import annotations
 
+import re
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -4672,7 +4673,13 @@ def _validate_custom_template_magic(ext: str, content: bytes, filename: str) -> 
             f"{', '.join(_ALLOWED_CUSTOM_TEMPLATE_EXTENSIONS)}"
         ),
     )
-_ALLOWED_CUSTOM_DOC_TYPES: tuple[str, ...] = (
+# Suggested doc_type slugs. The settings page surfaces these as combobox
+# presets BUT the value is no longer constrained to this list — any
+# tenant (Brazil / Japan / Mexico / Australia / Vietnam / …) can supply
+# a jurisdiction-specific slug such as ``escritura_publica`` or
+# ``juyo_jiko_setsumeisho`` without us shipping a new release. The list
+# only documents the slugs the built-in PDF renderers know about.
+_DOC_TYPE_PRESETS: tuple[str, ...] = (
     "custom",
     "reservation_receipt",
     "sales_contract",
@@ -4692,11 +4699,70 @@ _ALLOWED_CUSTOM_DOC_TYPES: tuple[str, ...] = (
     "escrow_release_authorization",
     "refund_authorization",
 )
-_ALLOWED_CUSTOM_ENTITIES: tuple[str, ...] = (
+# Suggested entity slugs. Same parameterization story as
+# ``_DOC_TYPE_PRESETS`` — combobox presets only, free-text accepted.
+_ENTITY_PRESETS: tuple[str, ...] = (
     "custom", "reservation", "sales_contract", "instalment", "handover",
     "snag", "broker", "buyer", "plot", "development", "tenant",
 )
+
+# Backwards-compatible aliases — kept for any third-party module that
+# imported the legacy whitelist names. New code should consult the
+# preset tuples above and the ``_validate_template_slug`` helper.
+_ALLOWED_CUSTOM_DOC_TYPES: tuple[str, ...] = _DOC_TYPE_PRESETS
+_ALLOWED_CUSTOM_ENTITIES: tuple[str, ...] = _ENTITY_PRESETS
+
+# Permissive slug pattern: lowercase letters, digits, underscore, dash,
+# dot — long enough to fit ``juyo_jiko_setsumeisho`` (24 chars) but
+# bounded to keep DB columns sane and to reject SQL/path injection.
+# Cap matches the ``doc_type`` / ``entity`` ``String(40)`` columns on
+# ``PropertyDevCustomTemplate`` so the API rejects oversized values
+# before the DB driver does.
+_TEMPLATE_SLUG_MAX_LEN = 40
+_TEMPLATE_SLUG_RE = re.compile(
+    rf"^[a-z0-9][a-z0-9_.\-]{{0,{_TEMPLATE_SLUG_MAX_LEN - 1}}}$"
+)
+
+# Slugs with built-in PDF renderers. Used to set ``has_pdf_renderer``
+# on each catalogue entry so the frontend gates the "Preview / Download
+# sample" buttons on real data instead of a hardcoded set.
+_BUILTIN_RENDERER_DOC_TYPES: frozenset[str] = frozenset({
+    entry["doc_type"] for entry in _DOC_TEMPLATE_CATALOGUE
+})
+
 _CUSTOM_TEMPLATE_LOG = logging.getLogger(__name__ + ".custom_templates")
+
+
+def _serialize_custom_template_row(row: Any) -> dict[str, Any]:
+    """Convert a ``PropertyDevCustomTemplate`` ORM row into the shared
+    catalogue dict shape used by the upload / save-text / list endpoints.
+
+    Centralised so the ``has_pdf_renderer`` flag (added in v4.7 for the
+    worldwide-parameterized settings page) stays consistent across every
+    code path that returns a custom-template entry. Text uploads (.html
+    / .md / .txt) are renderable in-browser; binary uploads (.docx /
+    .pdf / .odt) require the original download.
+    """
+    content_type = (row.content_type or "")
+    return {
+        "id": str(row.id),
+        "doc_type": row.doc_type,
+        "title": row.name,
+        "description": row.description or "",
+        "trigger": row.trigger,
+        "entity": row.entity,
+        "pages": "—",
+        "is_custom": True,
+        "has_pdf_renderer": content_type.startswith("text/"),
+        "filename": row.filename,
+        "content_type": row.content_type,
+        "size_bytes": row.size_bytes,
+        "development_id": (
+            str(row.development_id) if row.development_id else None
+        ),
+        "project_id": str(row.project_id) if row.project_id else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
 
 
 # Documentation block for the "{i} Variables" modal in the settings
@@ -4843,42 +4909,71 @@ async def list_document_templates(
         )
 
     rows = (await session.execute(stmt)).scalars().all()
-    custom_entries: list[dict[str, Any]] = []
-    for row in rows:
-        custom_entries.append({
-            "id": str(row.id),
-            "doc_type": row.doc_type,
-            "title": row.name,
-            "description": row.description or "",
-            "trigger": row.trigger,
-            "entity": row.entity,
-            "pages": "—",
-            "is_custom": True,
-            "filename": row.filename,
-            "content_type": row.content_type,
-            "size_bytes": row.size_bytes,
-            "development_id": (
-                str(row.development_id) if row.development_id else None
-            ),
-            "project_id": str(row.project_id) if row.project_id else None,
-            "created_at": row.created_at.isoformat()
-            if row.created_at else None,
-        })
+    custom_entries: list[dict[str, Any]] = [
+        _serialize_custom_template_row(row) for row in rows
+    ]
 
     builtin_entries = [
-        {**tpl, "is_custom": False} for tpl in _DOC_TEMPLATE_CATALOGUE
+        {
+            **tpl,
+            "is_custom": False,
+            # All entries in ``_DOC_TEMPLATE_CATALOGUE`` correspond 1:1 to
+            # reportlab renderers in ``document_templates.py``. Expose the
+            # flag so the frontend can stop gating Preview on a hardcoded
+            # ``BUILTIN_DOC_TYPES`` set.
+            "has_pdf_renderer": tpl["doc_type"] in _BUILTIN_RENDERER_DOC_TYPES,
+        }
+        for tpl in _DOC_TEMPLATE_CATALOGUE
     ]
 
     return {
         "templates": builtin_entries + custom_entries,
         "locales": list(SUPPORTED_LOCALES),
         "regulators": list(SUPPORTED_REGULATORS),
+        # Combobox suggestions for the upload + editor forms. The forms
+        # accept any reasonably-shaped slug (see
+        # ``_validate_template_slug``) so tenants outside the DACH / UK /
+        # UAE / RU / IN markets that shipped the original list can wire
+        # their own jurisdiction-specific document types without us
+        # rolling a release.
+        "doc_type_presets": list(_DOC_TYPE_PRESETS),
+        "entity_presets": list(_ENTITY_PRESETS),
         "variables": _TEMPLATE_VARIABLES_DOCUMENTATION,
         "upload": {
             "allowed_extensions": list(_ALLOWED_CUSTOM_TEMPLATE_EXTENSIONS),
             "max_size_mb": _CUSTOM_TEMPLATE_MAX_MB,
         },
     }
+
+
+def _validate_template_slug(value: str, *, field: str) -> str:
+    """Validate a doc_type / entity slug for shape only, not membership.
+
+    The slug whitelist used to be the source-of-truth for which doc_type
+    values a tenant could persist. That model didn't survive contact
+    with the global market: Brazilian developers need
+    ``escritura_publica``, Japanese sales offices need
+    ``juyo_jiko_setsumeisho``, Mexican notaries need ``acta_de_entrega``,
+    and so on. Instead of patching the whitelist for every new country,
+    we now accept any reasonably-shaped slug (``[a-z0-9_.-]``, 1-80 chars,
+    leading alphanumeric) and let the presets in
+    ``_DOC_TYPE_PRESETS`` / ``_ENTITY_PRESETS`` act as combobox
+    suggestions only.
+
+    Raises 422 if the value is empty, malformed, or longer than 80 chars
+    (the DB column cap for ``doc_type`` and ``entity``).
+    """
+    value = (value or "custom").strip().lower()
+    if not _TEMPLATE_SLUG_RE.match(value):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Invalid {field} '{value}'. Use 1-{_TEMPLATE_SLUG_MAX_LEN} "
+                "lowercase letters, digits, dots, dashes or underscores; "
+                "must start with a letter or digit."
+            ),
+        )
+    return value
 
 
 def _validate_custom_template_metadata(
@@ -4890,7 +4985,10 @@ def _validate_custom_template_metadata(
     """Validate + normalise the upload's text metadata.
 
     Raises 422 on any field that's empty, too long, or carries
-    characters that wouldn't make sense as a doc_type / entity.
+    characters that wouldn't make sense as a doc_type / entity. The
+    doc_type / entity slugs are validated for SHAPE only — see
+    ``_validate_template_slug`` — so tenants are free to add
+    jurisdiction-specific document types without a code release.
     """
     name = (name or "").strip()
     if not name:
@@ -4903,24 +5001,8 @@ def _validate_custom_template_metadata(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Template name must be 200 characters or fewer",
         )
-    doc_type = (doc_type or "custom").strip().lower()
-    if doc_type not in _ALLOWED_CUSTOM_DOC_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Unknown doc_type '{doc_type}'. Allowed: "
-                f"{', '.join(_ALLOWED_CUSTOM_DOC_TYPES)}"
-            ),
-        )
-    entity = (entity or "custom").strip().lower()
-    if entity not in _ALLOWED_CUSTOM_ENTITIES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Unknown entity '{entity}'. Allowed: "
-                f"{', '.join(_ALLOWED_CUSTOM_ENTITIES)}"
-            ),
-        )
+    doc_type = _validate_template_slug(doc_type, field="doc_type")
+    entity = _validate_template_slug(entity, field="entity")
     trigger = (trigger or "manual").strip()
     if len(trigger) > 200:
         trigger = trigger[:200]
@@ -5063,26 +5145,7 @@ async def upload_custom_document_template(
     await session.commit()
     await session.refresh(row)
 
-    return {
-        "id": str(row.id),
-        "doc_type": row.doc_type,
-        "title": row.name,
-        "description": row.description or "",
-        "trigger": row.trigger,
-        "entity": row.entity,
-        "pages": "—",
-        "is_custom": True,
-        "filename": row.filename,
-        "content_type": row.content_type,
-        "size_bytes": row.size_bytes,
-        "development_id": (
-            str(row.development_id) if row.development_id else None
-        ),
-        "project_id": (
-            str(row.project_id) if row.project_id else None
-        ),
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-    }
+    return _serialize_custom_template_row(row)
 
 
 @router.delete("/document-templates/custom/{template_id}", status_code=204)
@@ -5456,26 +5519,7 @@ async def save_text_custom_document_template(
         await session.commit()
         await session.refresh(row)
 
-    return {
-        "id": str(row.id),
-        "doc_type": row.doc_type,
-        "title": row.name,
-        "description": row.description or "",
-        "trigger": row.trigger,
-        "entity": row.entity,
-        "pages": "—",
-        "is_custom": True,
-        "filename": row.filename,
-        "content_type": row.content_type,
-        "size_bytes": row.size_bytes,
-        "development_id": (
-            str(row.development_id) if row.development_id else None
-        ),
-        "project_id": (
-            str(row.project_id) if row.project_id else None
-        ),
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-    }
+    return _serialize_custom_template_row(row)
 
 
 @router.get("/document-templates/custom/{template_id}/content")

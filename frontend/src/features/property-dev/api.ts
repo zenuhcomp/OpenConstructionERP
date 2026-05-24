@@ -2730,6 +2730,15 @@ export interface DocumentTemplateEntry {
   entity: string;
   pages: string;
   is_custom?: boolean;
+  /**
+   * True iff the backend can render this template into a PDF. Built-in
+   * templates set this from the reportlab renderer registry; custom
+   * uploads set it based on content_type (text/* → renderable). Older
+   * backends omit the field — the frontend falls back to a built-in
+   * doc_type table for jurisdictions that shipped before the field
+   * landed.
+   */
+  has_pdf_renderer?: boolean;
   // Present only when is_custom === true
   id?: string;
   filename?: string;
@@ -2755,6 +2764,17 @@ export interface DocumentTemplateCatalogue {
   templates: DocumentTemplateEntry[];
   locales: string[];
   regulators: string[];
+  /**
+   * Suggested doc_type slugs the upload + editor combobox surfaces as
+   * presets. Backend-driven so the list can grow without a frontend
+   * release; the form accepts any reasonably-shaped slug regardless.
+   */
+  doc_type_presets?: string[];
+  /**
+   * Suggested entity slugs (combobox presets). Same parameterization
+   * story as ``doc_type_presets`` — accept any slug.
+   */
+  entity_presets?: string[];
   variables?: DocumentTemplateVariableGroup[];
   upload?: DocumentTemplateUploadConfig;
 }

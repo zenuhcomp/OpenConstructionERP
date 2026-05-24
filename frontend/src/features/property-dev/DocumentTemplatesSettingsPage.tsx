@@ -86,8 +86,11 @@ import {
   type PropDevDocType,
 } from './api';
 
-// Static icon map for built-ins. Custom uploads always render a
-// generic FileText so the grid stays visually balanced.
+// Static icon map for the known built-in doc_types. Custom or
+// jurisdiction-specific doc_types (e.g. ``escritura_publica``,
+// ``juyo_jiko_setsumeisho``, ``acta_de_entrega``) fall back to a
+// generic FileText so the grid stays visually balanced regardless of
+// which country the tenant operates in.
 const ICON_FOR_DOC: Record<string, React.ReactNode> = {
   reservation_receipt: <FileText size={16} />,
   sales_contract: <FileSignature size={16} />,
@@ -103,10 +106,13 @@ const ICON_FOR_DOC: Record<string, React.ReactNode> = {
   refund_authorization: <RotateCcw size={16} />,
 };
 
-// Built-in PropDev doc_types — the only ones the backend can render a
-// PDF preview for today. Used to gate the Preview button on custom
-// rows (uploaded .docx files don't go through the reportlab pipeline).
-const BUILTIN_DOC_TYPES = new Set<string>([
+// Fallback set of doc_types known to have a built-in reportlab renderer.
+// Used ONLY when the backend response omits ``has_pdf_renderer`` (older
+// API contract). The authoritative source-of-truth is the backend's
+// catalogue entry, which already mirrors the renderer registry; this
+// list documents the shipping defaults so a brand-new client paired
+// with an older server still gates Preview / Download-sample correctly.
+const RENDERABLE_BUILTIN_DOC_TYPES_FALLBACK = new Set<string>([
   'reservation_receipt',
   'sales_contract',
   'payment_receipt',
@@ -120,6 +126,18 @@ const BUILTIN_DOC_TYPES = new Set<string>([
   'escrow_release_authorization',
   'refund_authorization',
 ]);
+
+/**
+ * Decide whether a catalogue entry should expose the Preview /
+ * Download-sample buttons. Prefers the server-supplied
+ * ``has_pdf_renderer`` flag (worldwide-parameterized as of v4.7); falls
+ * back to the legacy built-in slug list when the field is absent.
+ */
+function templateHasPdfRenderer(tpl: DocumentTemplateEntry): boolean {
+  if (typeof tpl.has_pdf_renderer === 'boolean') return tpl.has_pdf_renderer;
+  if (tpl.is_custom) return false;
+  return RENDERABLE_BUILTIN_DOC_TYPES_FALLBACK.has(String(tpl.doc_type));
+}
 
 const ACTIVE_DEV_LS_KEY = 'propdev:doc-templates:active-dev';
 const DEFAULT_TPL_LS_PREFIX = 'propdev:doc-templates:default-for-dev:';
@@ -348,6 +366,12 @@ export function DocumentTemplatesSettingsPage() {
         }
         maxSizeMb={dataQ.data?.upload?.max_size_mb ?? 10}
         activeDevId={activeDevId}
+        docTypePresets={
+          dataQ.data?.doc_type_presets ?? DOC_TYPE_PRESETS_FALLBACK
+        }
+        entityPresets={
+          dataQ.data?.entity_presets ?? ENTITY_PRESETS_FALLBACK
+        }
       />
 
       {/* Catalogue grid */}
@@ -440,6 +464,12 @@ export function DocumentTemplatesSettingsPage() {
           session={editorSession}
           variableGroups={dataQ.data?.variables ?? []}
           activeDevId={activeDevId}
+          docTypePresets={
+            dataQ.data?.doc_type_presets ?? DOC_TYPE_PRESETS_FALLBACK
+          }
+          entityPresets={
+            dataQ.data?.entity_presets ?? ENTITY_PRESETS_FALLBACK
+          }
           onClose={() => setEditorSession(null)}
           onSaved={() => {
             setEditorSession(null);
@@ -448,6 +478,91 @@ export function DocumentTemplatesSettingsPage() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Datalist-backed free-text combobox used for ``doc_type`` / ``entity``
+ * / regulator slugs.
+ *
+ * Why a native ``<input list>`` instead of a custom dropdown:
+ *
+ *   - **Zero dependencies** — fits the LIGHTWEIGHT principle. Existing
+ *     dropdowns on this page use plain native ``<select>``; adopting a
+ *     headless-UI combobox just for this would balloon the bundle.
+ *   - **Accept any string** — the user can pick a preset OR type their
+ *     own jurisdiction-specific slug (``escritura_publica``,
+ *     ``juyo_jiko_setsumeisho``, ``acta_de_entrega``, …). The backend
+ *     validates shape, not membership, so the UI must mirror that.
+ *   - **Native a11y + IME support** — datalist gets keyboard focus
+ *     ring, screen-reader announcement and Asian-IME composition for
+ *     free; rolling our own would re-invent all three.
+ *
+ * The datalist id is namespaced with a hash of the presets so two
+ * comboboxes on the same page (doc_type + entity) don't share a list.
+ */
+function SlugCombobox(props: {
+  id: string;
+  value: string;
+  onChange: (next: string) => void;
+  presets: ReadonlyArray<string>;
+  placeholder?: string;
+  className?: string;
+  'data-testid'?: string;
+  disabled?: boolean;
+  title?: string;
+  ariaLabel?: string;
+}) {
+  const {
+    id,
+    value,
+    onChange,
+    presets,
+    placeholder,
+    className,
+    disabled,
+    title,
+    ariaLabel,
+  } = props;
+  const listId = `${id}-presets`;
+  // Dedup presets (regulator list may contain "NONE" twice when filtered).
+  const uniquePresets = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const p of presets) {
+      if (!seen.has(p)) {
+        seen.add(p);
+        out.push(p);
+      }
+    }
+    return out;
+  }, [presets]);
+  return (
+    <>
+      <input
+        id={id}
+        type="text"
+        list={listId}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={
+          className ??
+          'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue disabled:opacity-50'
+        }
+        autoComplete="off"
+        spellCheck={false}
+        disabled={disabled}
+        title={title}
+        aria-label={ariaLabel}
+        data-testid={props['data-testid']}
+      />
+      <datalist id={listId}>
+        {uniquePresets.map((p) => (
+          <option key={p} value={p} />
+        ))}
+      </datalist>
+    </>
   );
 }
 
@@ -465,11 +580,15 @@ function UploadCustomTemplateForm({
   allowedExtensions,
   maxSizeMb,
   activeDevId,
+  docTypePresets,
+  entityPresets,
 }: {
   onUploaded: () => void;
   allowedExtensions: string[];
   maxSizeMb: number;
   activeDevId: string | null;
+  docTypePresets: ReadonlyArray<string>;
+  entityPresets: ReadonlyArray<string>;
 }) {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
@@ -610,61 +729,50 @@ function UploadCustomTemplateForm({
           />
         </div>
         <div className="md:col-span-2">
-          <label className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1">
+          <label
+            htmlFor="custom-upload-doctype"
+            className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1"
+          >
             {t('property_dev.doc_templates.upload_field_doctype', {
               defaultValue: 'Doc type',
             })}
           </label>
-          <select
+          <SlugCombobox
+            id="custom-upload-doctype"
             value={docType}
-            onChange={(e) => setDocType(e.target.value)}
-            className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
+            onChange={setDocType}
+            presets={docTypePresets}
+            placeholder={t('property_dev.doc_templates.doctype_placeholder', {
+              defaultValue: 'pick or type any slug',
+            })}
             data-testid="custom-upload-doctype"
-          >
-            <option value="custom">custom</option>
-            <option value="reservation_receipt">reservation_receipt</option>
-            <option value="sales_contract">sales_contract</option>
-            <option value="payment_receipt">payment_receipt</option>
-            <option value="handover_certificate">handover_certificate</option>
-            <option value="warranty_certificate">warranty_certificate</option>
-            <option value="noc">noc</option>
-            <option value="snag_report">snag_report</option>
-            <option value="invoice">invoice</option>
-            <option value="payment_reminder">payment_reminder</option>
-            <option value="kyc_checklist">kyc_checklist</option>
-            <option value="brokerage_commission">brokerage_commission</option>
-            <option value="tenant_lease_agreement">tenant_lease_agreement</option>
-            <option value="move_in_checklist">move_in_checklist</option>
-            <option value="mortgage_clearance_letter">mortgage_clearance_letter</option>
-            <option value="title_deed_transfer_request">title_deed_transfer_request</option>
-            <option value="escrow_release_authorization">escrow_release_authorization</option>
-            <option value="refund_authorization">refund_authorization</option>
-          </select>
+            ariaLabel={t('property_dev.doc_templates.upload_field_doctype', {
+              defaultValue: 'Doc type',
+            })}
+          />
         </div>
         <div className="md:col-span-2">
-          <label className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1">
+          <label
+            htmlFor="custom-upload-entity"
+            className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1"
+          >
             {t('property_dev.doc_templates.upload_field_entity', {
               defaultValue: 'Entity',
             })}
           </label>
-          <select
+          <SlugCombobox
+            id="custom-upload-entity"
             value={entity}
-            onChange={(e) => setEntity(e.target.value)}
-            className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
+            onChange={setEntity}
+            presets={entityPresets}
+            placeholder={t('property_dev.doc_templates.entity_placeholder', {
+              defaultValue: 'pick or type any slug',
+            })}
             data-testid="custom-upload-entity"
-          >
-            <option value="custom">custom</option>
-            <option value="reservation">reservation</option>
-            <option value="sales_contract">sales_contract</option>
-            <option value="instalment">instalment</option>
-            <option value="handover">handover</option>
-            <option value="snag">snag</option>
-            <option value="broker">broker</option>
-            <option value="buyer">buyer</option>
-            <option value="plot">plot</option>
-            <option value="development">development</option>
-            <option value="tenant">tenant</option>
-          </select>
+            ariaLabel={t('property_dev.doc_templates.upload_field_entity', {
+              defaultValue: 'Entity',
+            })}
+          />
         </div>
         <div className="md:col-span-8">
           <label className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1">
@@ -745,8 +853,12 @@ function TemplateCard({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const isCustom = !!template.is_custom;
-  const canPreview =
-    !isCustom && BUILTIN_DOC_TYPES.has(template.doc_type as string);
+  // ``canPreview`` is driven by the backend's ``has_pdf_renderer`` flag
+  // (worldwide-parameterized) so jurisdictions outside the original 7
+  // built-ins (UAE / RU / DE / IN / etc.) inherit the same gating
+  // without any frontend changes. Falls back to the legacy slug list
+  // when the server omits the flag (older API contract).
+  const canPreview = !isCustom && templateHasPdfRenderer(template);
   const docTypeKey = String(template.doc_type);
 
   // SPA is the only template that injects jurisdiction clauses, so the
@@ -958,32 +1070,40 @@ function TemplateCard({
               </select>
             </div>
             <div>
-              <label className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1">
+              <label
+                htmlFor={`tpl-regulator-${docTypeKey}`}
+                className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1"
+              >
                 <ShieldAlert size={10} className="mr-1 inline" />
                 {t('property_dev.doc_templates.regulator', {
                   defaultValue: 'Regulator',
                 })}
               </label>
-              <select
+              {/* Combobox — backend supplies the known list (RERA /
+                  MAHARERA / 214_FZ / CMA / …) but jurisdictions without
+                  a RERA-equivalent (most of the world) can type their
+                  own authority code or just "NONE". */}
+              <SlugCombobox
+                id={`tpl-regulator-${docTypeKey}`}
                 value={regulator}
-                onChange={(e) => setRegulator(e.target.value)}
+                onChange={setRegulator}
+                presets={filteredRegulators}
                 disabled={!regulatorMatters}
                 title={
                   regulatorMatters
-                    ? undefined
+                    ? t('property_dev.doc_templates.regulator_hint', {
+                        defaultValue:
+                          'Pick a preset or type any compliance authority code.',
+                      })
                     : t('property_dev.doc_templates.regulator_na', {
                         defaultValue:
                           'Regulator clauses only affect the Sale-Purchase Agreement.',
                       })
                 }
-                className="h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue disabled:opacity-50"
-              >
-                {filteredRegulators.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
+                ariaLabel={t('property_dev.doc_templates.regulator', {
+                  defaultValue: 'Regulator',
+                })}
+              />
             </div>
           </div>
         )}
@@ -1157,7 +1277,18 @@ const ALLOWED_CONTENT_TYPES: { value: CustomTemplateTextContentType; label: stri
   { value: 'text/plain', label: 'Plain text' },
 ];
 
-const DOC_TYPE_OPTIONS: string[] = [
+/**
+ * Fallback preset lists used when the backend response doesn't yet
+ * include ``doc_type_presets`` / ``entity_presets`` (older API
+ * contract). These match the shipping defaults; the source-of-truth
+ * lives in ``backend/.../property_dev/router.py``.
+ *
+ * IMPORTANT: these are SUGGESTIONS only. The combobox accepts any
+ * tenant-supplied slug — Brazilian ``escritura_publica``, Japanese
+ * ``juyo_jiko_setsumeisho``, Mexican ``acta_de_entrega``, etc. — so
+ * the platform isn't locked to the original 7-country list.
+ */
+const DOC_TYPE_PRESETS_FALLBACK: ReadonlyArray<string> = [
   'custom',
   'reservation_receipt',
   'sales_contract',
@@ -1178,7 +1309,7 @@ const DOC_TYPE_OPTIONS: string[] = [
   'refund_authorization',
 ];
 
-const ENTITY_OPTIONS: string[] = [
+const ENTITY_PRESETS_FALLBACK: ReadonlyArray<string> = [
   'custom', 'reservation', 'sales_contract', 'instalment', 'handover',
   'snag', 'broker', 'buyer', 'plot', 'development', 'tenant',
 ];
@@ -1187,12 +1318,16 @@ function TemplateEditorModal({
   session,
   variableGroups,
   activeDevId,
+  docTypePresets,
+  entityPresets,
   onClose,
   onSaved,
 }: {
   session: EditorSession;
   variableGroups: DocumentTemplateVariableGroup[];
   activeDevId: string | null;
+  docTypePresets: ReadonlyArray<string>;
+  entityPresets: ReadonlyArray<string>;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -1441,40 +1576,50 @@ function TemplateEditorModal({
               />
             </div>
             <div className="md:col-span-3">
-              <label className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1">
+              <label
+                htmlFor="editor-doctype"
+                className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1"
+              >
                 {t('property_dev.doc_templates.upload_field_doctype', {
                   defaultValue: 'Doc type',
                 })}
               </label>
-              <select
+              <SlugCombobox
+                id="editor-doctype"
                 value={docType}
-                onChange={(e) => setDocType(e.target.value)}
-                className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
+                onChange={setDocType}
+                presets={docTypePresets}
+                placeholder={t('property_dev.doc_templates.doctype_placeholder', {
+                  defaultValue: 'pick or type any slug',
+                })}
                 data-testid="editor-doctype"
-              >
-                {DOC_TYPE_OPTIONS.map((dt) => (
-                  <option key={dt} value={dt}>
-                    {dt}
-                  </option>
-                ))}
-              </select>
+                ariaLabel={t('property_dev.doc_templates.upload_field_doctype', {
+                  defaultValue: 'Doc type',
+                })}
+              />
             </div>
             <div className="md:col-span-2">
-              <label className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1">
+              <label
+                htmlFor="editor-entity"
+                className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1"
+              >
                 {t('property_dev.doc_templates.upload_field_entity', {
                   defaultValue: 'Entity',
                 })}
               </label>
-              <select
+              <SlugCombobox
+                id="editor-entity"
                 value={entity}
-                onChange={(e) => setEntity(e.target.value)}
-                className="h-9 w-full rounded-lg border border-border bg-surface-primary px-2 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
+                onChange={setEntity}
+                presets={entityPresets}
+                placeholder={t('property_dev.doc_templates.entity_placeholder', {
+                  defaultValue: 'pick or type any slug',
+                })}
                 data-testid="editor-entity"
-              >
-                {ENTITY_OPTIONS.map((e) => (
-                  <option key={e} value={e}>{e}</option>
-                ))}
-              </select>
+                ariaLabel={t('property_dev.doc_templates.upload_field_entity', {
+                  defaultValue: 'Entity',
+                })}
+              />
             </div>
             <div className="md:col-span-3">
               <label className="block text-[10px] font-medium uppercase tracking-wide text-content-tertiary mb-1">
