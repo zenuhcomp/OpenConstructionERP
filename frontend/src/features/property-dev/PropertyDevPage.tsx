@@ -66,6 +66,7 @@ import {
   WideModalField,
 } from '@/shared/ui/WideModal';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
+import { MultiCurrencyTotal } from '@/shared/ui/MultiCurrencyTotal';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useTabKeyboardNav } from '@/shared/hooks/useTabKeyboardNav';
@@ -1258,10 +1259,13 @@ function OverviewKpiRow({
     let openSnags = 0;
     let openWarranty = 0;
     let scheduledHandovers = 0;
-    let contracted = 0;
-    for (const q of dashQs) {
+    // Wave-10 fix: track contracted value as {amount, currency} pairs
+    // per development so the KPI tile can split rather than collapsing
+    // mixed currencies to a misleading first-seen-code total.
+    const contractedItems: { amount: number; currency: string | null }[] = [];
+    dashQs.forEach((q, idx) => {
       const d = q.data;
-      if (!d) continue;
+      if (!d) return;
       availablePlots +=
         (d.plots_by_status['planned'] ?? 0) +
         (d.plots_by_status['ready'] ?? 0) +
@@ -1271,8 +1275,11 @@ function OverviewKpiRow({
       openSnags += d.open_snags ?? 0;
       openWarranty += d.open_warranty_claims ?? 0;
       scheduledHandovers += d.scheduled_handovers ?? 0;
-      contracted += toNumber(d.contracted_value);
-    }
+      contractedItems.push({
+        amount: toNumber(d.contracted_value),
+        currency: developments[idx]?.currency || null,
+      });
+    });
     return {
       availablePlots,
       openLeads,
@@ -1280,7 +1287,7 @@ function OverviewKpiRow({
       openSnags,
       openWarranty,
       scheduledHandovers,
-      contracted,
+      contractedItems,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataFingerprint]);
@@ -1348,9 +1355,11 @@ function OverviewKpiRow({
         })}
         value={
           allLoaded ? (
-            <MoneyDisplay
-              amount={totals.contracted}
-              currency={developments[0]?.currency || 'EUR'}
+            <MultiCurrencyTotal
+              variant="kpi"
+              primaryCurrency={developments[0]?.currency || undefined}
+              items={totals.contractedItems}
+              compact
             />
           ) : (
             '—'

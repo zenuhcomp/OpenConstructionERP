@@ -304,6 +304,15 @@ function FinanceSummaryCards({ projectId }: { projectId: string }) {
   // Currency comes from the data (task #217) — never hardcoded. When the
   // backend cannot resolve one (no priced records yet) MoneyDisplay still
   // renders, falling back to the user's preferred currency for the symbol.
+  //
+  // Wave-10 follow-up: backend ``/v1/finance/dashboard/`` collapses mixed
+  // currencies to a single "dominant" code server-side, so we cannot do
+  // a per-currency split here yet (the per-currency totals are not in
+  // the payload). When the backend grows a ``totals_by_currency`` array
+  // — see /v1/property-dev/dashboards/cashflow_waterfall/ for the shape
+  // — switch these cards to <MultiCurrencyTotal variant="kpi">. The
+  // single-currency MoneyDisplay below is preserved as a transitional
+  // fallback. Tracked separately from this PR.
   const currency = dashboard?.currency || undefined;
   const consumedPct = Number(dashboard?.budget_consumed_pct ?? 0);
   const warningLevel = dashboard?.budget_warning_level ?? 'normal';
