@@ -2489,12 +2489,30 @@ async def list_models(
     await _verify_project_access(service.session, project_id, user_id or "")
     items, total = await service.list_models(project_id, offset=offset, limit=limit)
 
-    # Probe storage once per model in parallel to fill in artifact size +
-    # has_original.  Failures degrade gracefully: a failed probe leaves the
-    # field as ``None`` and the row still loads in the UI.
-    import asyncio as _asyncio
+    # Batched storage probe: ONE list_prefix sweep against the backend
+    # collects artifact/original/geometry info for every model in the
+    # page. Replaces the previous asyncio.gather fan-out which issued
+    # 3+ probes per model (50 models → 150+ HEAD/stat round-trips per
+    # list call — classic N+1 against storage).  When the backend
+    # doesn't support list_prefix (community backends predating v4.6.1),
+    # fall back to the per-model probe loop so behaviour is unchanged.
+    storage_summary: dict[str, dict[str, object]] = {}
+    use_bulk = bim_file_storage.list_prefix_supported()
+    if use_bulk:
+        try:
+            storage_summary = await bim_file_storage.bulk_model_storage_summary(
+                project_id,
+            )
+        except Exception:  # noqa: BLE001  # never break listing on storage hiccups
+            logger.exception(
+                "bulk_model_storage_summary failed for project=%s; "
+                "falling back to per-model probes.",
+                project_id,
+            )
+            use_bulk = False
 
-    async def _enrich(model_obj):  # type: ignore[no-untyped-def]
+    async def _enrich_per_model(model_obj):  # type: ignore[no-untyped-def]
+        """Per-model probe fallback (community backends without list_prefix)."""
         size_bytes = 0
         has_orig = False
         has_geom = bool(model_obj.canonical_file_path)
@@ -2512,11 +2530,6 @@ async def list_models(
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("has_original probe failed for model=%s", model_obj.id)
-        # Tie-break for historical rows where canonical_file_path was
-        # missed but the GLB/DAE is still on disk. Without this probe
-        # the frontend's 3D-viewer mount condition is wrong for 30+ of
-        # 36 successful models (issue surfaced by 57-file bench
-        # 2026-05-14).
         if not has_geom:
             try:
                 has_geom = (
@@ -2529,7 +2542,29 @@ async def list_models(
                 logger.exception("has_geometry probe failed for model=%s", model_obj.id)
         return size_bytes, has_orig, has_geom
 
-    enriched = await _asyncio.gather(*[_enrich(m) for m in items], return_exceptions=False)
+    def _enrich_from_summary(model_obj):  # type: ignore[no-untyped-def]
+        """Fast bulk-summary-driven enrich (no I/O)."""
+        info = storage_summary.get(str(model_obj.id), {})
+        size_bytes = int(info.get("artifact_size_bytes", 0) or 0)
+        # ``has_original`` historically reflected the existence of a blob
+        # at original.{ext} where ext == model_format.  The bulk sweep
+        # uses the same "filename starts with original." rule, so the
+        # two definitions match for every realistic model row.
+        has_orig = bool(info.get("has_original", False))
+        has_geom = bool(model_obj.canonical_file_path) or bool(
+            info.get("geometry_exts") or (),
+        )
+        return size_bytes, has_orig, has_geom
+
+    if use_bulk:
+        enriched = [_enrich_from_summary(m) for m in items]
+    else:
+        import asyncio as _asyncio
+
+        enriched = await _asyncio.gather(
+            *[_enrich_per_model(m) for m in items],
+            return_exceptions=False,
+        )
 
     item_responses: list[BIMModelResponse] = []
     total_artifact_bytes = 0
@@ -2546,11 +2581,14 @@ async def list_models(
                 resp.error_code = err_code
         total_artifact_bytes += size_bytes
         if has_orig:
-            # Best-effort original-blob size — only inspected when the
-            # blob is still around (avoids a useless storage probe on the
-            # production ``keep_original_cad=False`` path).
+            # Original-blob size: pulled from the bulk summary when
+            # available (zero extra round-trips), or from a single
+            # per-model size() probe on the fallback path.
             ext_raw = (model_obj.model_format or "").lstrip(".")
-            if ext_raw:
+            if use_bulk:
+                info = storage_summary.get(str(model_obj.id), {})
+                total_original_bytes += int(info.get("original_size_bytes", 0) or 0)
+            elif ext_raw:
                 try:
                     backend = bim_file_storage._backend()
                     key = bim_file_storage.original_cad_key(
