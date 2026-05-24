@@ -119,7 +119,7 @@ async def delete_anchor(
     anchor_id: uuid.UUID,
     service: GeoHubService = Depends(_svc),
     payload: CurrentUserPayload = None,  # type: ignore[assignment]
-    _perm: None = Depends(RequirePermission("geo_hub.write")),
+    _perm: None = Depends(RequirePermission("geo_hub.delete")),
 ) -> Response:
     await service.delete_anchor(anchor_id, payload=payload)
     return Response(status_code=204)
@@ -190,7 +190,7 @@ async def delete_tileset(
     tileset_id: uuid.UUID,
     service: GeoHubService = Depends(_svc),
     payload: CurrentUserPayload = None,  # type: ignore[assignment]
-    _perm: None = Depends(RequirePermission("geo_hub.write")),
+    _perm: None = Depends(RequirePermission("geo_hub.delete")),
 ) -> Response:
     await service.delete_tileset(tileset_id, payload=payload)
     return Response(status_code=204)
@@ -330,7 +330,7 @@ async def delete_imagery_layer(
     layer_id: uuid.UUID,
     service: GeoHubService = Depends(_svc),
     payload: CurrentUserPayload = None,  # type: ignore[assignment]
-    _perm: None = Depends(RequirePermission("geo_hub.write")),
+    _perm: None = Depends(RequirePermission("geo_hub.delete")),
 ) -> Response:
     await service.delete_imagery_layer(layer_id, payload=payload)
     return Response(status_code=204)
@@ -427,7 +427,7 @@ async def delete_viewpoint(
     vp_id: uuid.UUID,
     service: GeoHubService = Depends(_svc),
     payload: CurrentUserPayload = None,  # type: ignore[assignment]
-    _perm: None = Depends(RequirePermission("geo_hub.write")),
+    _perm: None = Depends(RequirePermission("geo_hub.delete")),
 ) -> Response:
     await service.delete_viewpoint(vp_id, payload=payload)
     return Response(status_code=204)
@@ -480,7 +480,7 @@ async def delete_overlay(
     overlay_id: uuid.UUID,
     service: GeoHubService = Depends(_svc),
     payload: CurrentUserPayload = None,  # type: ignore[assignment]
-    _perm: None = Depends(RequirePermission("geo_hub.write")),
+    _perm: None = Depends(RequirePermission("geo_hub.delete")),
 ) -> Response:
     await service.delete_overlay(overlay_id, payload=payload)
     return Response(status_code=204)

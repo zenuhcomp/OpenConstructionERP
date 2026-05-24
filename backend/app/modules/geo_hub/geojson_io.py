@@ -6,6 +6,18 @@ GeoJSON is trivial (it is just JSON). The interesting work is a small,
 into GeoJSON FeatureCollections so the rest of the pipeline only needs
 to think about one format.
 
+Security hardening (Round 7):
+
+* :func:`kml_looks_like_kml` checks the leading bytes of a KML upload —
+  ``<?xml`` or ``<kml`` (whitespace / UTF-8 BOM tolerant). Used by the
+  import endpoint to short-circuit obviously-non-KML payloads with a
+  precise 415 rather than letting them fall into the XML parser and
+  surface as a generic ValueError.
+* :func:`validate_geojson` caps the inbound FeatureCollection at
+  ``MAX_GEOJSON_FEATURES`` so a multi-MB payload cannot DoS the JSON
+  column. Anything over the cap raises ``ValueError`` and the router
+  translates that to 422.
+
 We deliberately do NOT pull ``fastkml`` or ``pykml`` as a dependency —
 both are LGPL/MIT but neither is needed for the small subset we
 support:
@@ -215,13 +227,20 @@ _VALID_GEOM_TYPES = {
     "GeometryCollection",
 }
 
+# DoS cap: a 50 k-feature FeatureCollection is already > 5 MB serialised
+# and slows down the JSONB column writes. Real surveying / boundary
+# imports rarely exceed a few hundred features; the cap is generous.
+MAX_GEOJSON_FEATURES = 50_000
+
 
 def validate_geojson(payload: Any) -> dict[str, Any]:
     """Lightly validate a payload as a GeoJSON FeatureCollection.
 
     We don't ship a full RFC 7946 validator (too heavy for too little
     upside) but we DO enforce the FeatureCollection shape so importers
-    cannot stash arbitrary blobs in the overlay column.
+    cannot stash arbitrary blobs in the overlay column. Caps the feature
+    count at :data:`MAX_GEOJSON_FEATURES` so a multi-MB payload cannot
+    DoS the JSON column or fill the project's row budget.
     """
     if not isinstance(payload, dict):
         raise ValueError("geojson must be an object")
@@ -237,6 +256,10 @@ def validate_geojson(payload: Any) -> dict[str, Any]:
     features = payload.get("features")
     if not isinstance(features, list):
         raise ValueError("geojson features must be a list")
+    if len(features) > MAX_GEOJSON_FEATURES:
+        raise ValueError(
+            f"geojson features over cap ({len(features)} > {MAX_GEOJSON_FEATURES})",
+        )
     for idx, feat in enumerate(features):
         if not isinstance(feat, dict):
             raise ValueError(f"feature[{idx}] not an object")
@@ -255,4 +278,51 @@ def validate_geojson(payload: Any) -> dict[str, Any]:
     return payload
 
 
-__all__ = ["kml_to_geojson", "validate_geojson"]
+# ── Magic-byte / structural sniff for KML upload payloads ───────────────
+
+
+def kml_looks_like_kml(payload: str | bytes) -> bool:
+    """Return True iff *payload* looks like a KML / XML document.
+
+    A real KML document starts with either ``<?xml`` (the XML prolog —
+    KML 2.x always emits one) or ``<kml`` (some hand-edited or
+    application-emitted files skip the prolog). We strip the UTF-8 BOM
+    and leading whitespace before checking so well-formed inputs from
+    Google Earth, QGIS, Trimble, etc., all pass.
+
+    The check is intentionally permissive: anything XML-looking falls
+    through to :func:`kml_to_geojson` which then runs ``defusedxml``'s
+    full parser and returns a precise error. The point here is to reject
+    obvious non-KML bytes (PDF, PNG, raw JSON, binary garbage) at the
+    edge with HTTP 415 rather than 422 — the former tells the client
+    "you sent the wrong content type", the latter would mean "I tried to
+    parse it and it broke".
+    """
+    if isinstance(payload, bytes):
+        head = payload[:64]
+    else:
+        # Encode lazily so we don't materialise the whole string just to
+        # peek at the first few bytes.
+        head = payload[:64].encode("utf-8", errors="ignore")
+    # Strip the BOM + ASCII whitespace.
+    head = head.lstrip(b"\xef\xbb\xbf \t\r\n\x00")
+    if not head:
+        return False
+    if head.startswith(b"<?xml"):
+        return True
+    # ``<kml`` or ``<Kml`` (case-insensitive) — handle the bare-root case.
+    if head[:1] == b"<":
+        # Use casefold of the next few bytes; cheaper than a full
+        # ``lower()`` call on the whole payload.
+        tag = head[1:5].lower()
+        if tag.startswith(b"kml"):
+            return True
+    return False
+
+
+__all__ = [
+    "MAX_GEOJSON_FEATURES",
+    "kml_looks_like_kml",
+    "kml_to_geojson",
+    "validate_geojson",
+]

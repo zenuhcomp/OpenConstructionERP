@@ -13,7 +13,11 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import event_bus
-from app.modules.geo_hub.geojson_io import kml_to_geojson, validate_geojson
+from app.modules.geo_hub.geojson_io import (
+    kml_looks_like_kml,
+    kml_to_geojson,
+    validate_geojson,
+)
 from app.modules.geo_hub.models import (
     GeoAnchor,
     GeoOverlay,
@@ -694,6 +698,15 @@ class GeoHubService:
         await self._verify_project_owner(
             req.project_id, payload, not_found_detail="Project not found",
         )
+        # Magic-byte gate: reject obviously non-KML payloads with 415
+        # before the XML parser sees them. The wrapping JSON request
+        # body shields us from anything but a string here, so we just
+        # need to verify it looks like XML/KML.
+        if not kml_looks_like_kml(req.kml):
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="kml payload does not look like KML (expected <?xml or <kml)",
+            )
         try:
             geojson = kml_to_geojson(req.kml.encode("utf-8"))
         except ValueError as exc:

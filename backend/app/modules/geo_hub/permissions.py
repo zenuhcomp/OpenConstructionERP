@@ -1,11 +1,20 @@
 # DDC-CWICR-OE: DataDrivenConstruction · OpenConstructionERP
 """Geo Hub permission definitions.
 
-Four families:
+Five families:
 
 * ``geo_hub.read``      — list / get any geo entity.
-* ``geo_hub.write``     — create / update / delete anchors, imagery,
-                          terrain, viewpoints, overlays.
+* ``geo_hub.write``     — create / update anchors, imagery, terrain,
+                          viewpoints, overlays.
+* ``geo_hub.delete``    — destructive removal of any project-scoped geo
+                          entity (anchor, tileset, imagery layer,
+                          viewpoint, vector overlay). Gated to MANAGER+
+                          because losing a hand-drawn boundary overlay
+                          or a manually-anchored project is harder to
+                          recover from than re-uploading a raster.
+                          (Raster-overlay deletes intentionally stay on
+                          ``geo_hub.write`` — they are soft-deletes and
+                          R6-audited.)
 * ``geo_hub.admin``     — reserved for irreversible operations
                           (delete-all, cross-project cleanup) — gated
                           to MANAGER+.
@@ -27,6 +36,7 @@ from app.core.permissions import Role, permission_registry
 GEO_HUB_PERMISSIONS: dict[str, Role] = {
     "geo_hub.read": Role.VIEWER,
     "geo_hub.write": Role.EDITOR,
+    "geo_hub.delete": Role.MANAGER,
     "geo_hub.admin": Role.MANAGER,
     "geo_hub.job_run": Role.EDITOR,
 }
