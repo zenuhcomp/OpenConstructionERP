@@ -208,15 +208,47 @@ export function HouseTypeSettingsPage() {
 
       {listQ.isLoading ? (
         <SkeletonTable rows={6} />
+      ) : listQ.isError ? (
+        <Card padding="md">
+          <EmptyState
+            title={t('property_dev.house_type.load_error_title', {
+              defaultValue: 'Could not load house types',
+            })}
+            description={
+              listQ.error instanceof Error
+                ? listQ.error.message
+                : t('common.unknown_error', {
+                    defaultValue: 'An unknown error occurred.',
+                  })
+            }
+            action={{
+              label: t('common.retry', { defaultValue: 'Retry' }),
+              onClick: () => listQ.refetch(),
+            }}
+          />
+        </Card>
       ) : rows.length === 0 ? (
         <EmptyState
           title={t('property_dev.house_type.empty_title', {
-            defaultValue: 'No house types found',
+            defaultValue: 'No house types yet',
           })}
           description={t('property_dev.house_type.empty_desc', {
             defaultValue:
-              'Pick a country, or create your first custom house type.',
+              'House types are reusable unit templates (3-bed terrace, 1-bed apartment, etc.). Pick a country to load presets, or create a custom one.',
           })}
+          action={
+            projects.length > 0
+              ? {
+                  label: t('property_dev.house_type.new', {
+                    defaultValue: 'New house type',
+                  }),
+                  onClick: () => {
+                    setEditing(null);
+                    setModalOpen(true);
+                  },
+                }
+              : undefined
+          }
         />
       ) : (
         <>

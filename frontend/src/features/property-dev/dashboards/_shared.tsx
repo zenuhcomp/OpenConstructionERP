@@ -5,8 +5,11 @@
  * formatting helpers used across all six dashboards.
  */
 
-import { Loader2, Inbox } from 'lucide-react';
+import { Loader2, Inbox, AlertOctagon, RefreshCw } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@/shared/ui/Button';
+import { Skeleton, SkeletonText } from '@/shared/ui/Skeleton';
 import type { PlotStatus } from '../api';
 
 export const PLOT_STATUS_FILL: Record<string, string> = {
@@ -54,19 +57,89 @@ export function DashboardLoading({ label }: { label?: string }) {
   );
 }
 
+/**
+ * Shape-matched skeleton for dashboard widgets — header line + body of
+ * bars/blocks that mimic the eventual chart shape. Beats a centered
+ * spinner because the layout doesn't shift when data lands.
+ *
+ * `variant` picks between bars (heatmap / funnel / velocity / ageing),
+ * timeline (journey), and cards (KPI rows).
+ */
+export type DashboardSkeletonVariant = 'bars' | 'timeline' | 'cards';
+
+export function DashboardSkeleton({
+  variant = 'bars',
+  rows = 5,
+}: {
+  variant?: DashboardSkeletonVariant;
+  rows?: number;
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading dashboard"
+      data-testid="dashboard-skeleton"
+      className="space-y-3 py-2"
+    >
+      {/* Header line */}
+      <div className="space-y-2">
+        <Skeleton height={14} className="w-1/3" />
+        <Skeleton height={10} className="w-1/2" />
+      </div>
+      {/* Body */}
+      {variant === 'bars' && (
+        <div className="space-y-2 pt-2">
+          {Array.from({ length: rows }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Skeleton height={12} className="w-24" />
+              <Skeleton
+                height={24}
+                className={i % 2 === 0 ? 'flex-1' : 'flex-1 opacity-60'}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      {variant === 'timeline' && (
+        <div className="space-y-2.5 border-l-2 border-border-light pl-4 pt-2">
+          {Array.from({ length: rows }).map((_, i) => (
+            <div key={i} className="space-y-1">
+              <Skeleton height={12} className="w-2/3" />
+              <Skeleton height={10} className="w-1/3" />
+            </div>
+          ))}
+        </div>
+      )}
+      {variant === 'cards' && (
+        <div className="grid grid-cols-2 gap-2 pt-2">
+          {Array.from({ length: rows }).map((_, i) => (
+            <Skeleton key={i} height={56} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DashboardEmpty({
   title,
   description,
   action,
+  icon,
 }: {
   title: string;
   description?: string;
-  action?: React.ReactNode;
+  action?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+    <div
+      className="flex flex-col items-center justify-center gap-2 py-12 text-center"
+      data-testid="dashboard-empty"
+    >
       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-secondary">
-        <Inbox size={18} className="text-content-tertiary" />
+        {icon ?? <Inbox size={18} className="text-content-tertiary" />}
       </div>
       <h4 className="text-sm font-semibold text-content-primary">{title}</h4>
       {description && (
@@ -76,6 +149,80 @@ export function DashboardEmpty({
     </div>
   );
 }
+
+/**
+ * Dashboard-scoped error fallback — replaces the previous "DashboardEmpty
+ * with red icon" pattern. Surfaces the original error message plus a
+ * Retry button wired straight to a `refetch` callback so a transient 5xx
+ * never wedges the widget.
+ *
+ * Use whenever a dashboard fetches over the network. For 401/403 the
+ * caller should set `kind="forbidden"` so the description swaps to a
+ * "contact your project admin" sentence instead of leaking the raw API
+ * error text.
+ */
+export function DashboardError({
+  message,
+  onRetry,
+  title,
+  kind = 'generic',
+}: {
+  message?: string;
+  onRetry?: () => void;
+  title?: string;
+  kind?: 'generic' | 'forbidden' | 'not_found';
+}) {
+  const { t } = useTranslation();
+
+  const resolvedTitle =
+    title ??
+    (kind === 'forbidden'
+      ? t('common.access_denied', { defaultValue: "You don't have access" })
+      : kind === 'not_found'
+        ? t('common.not_found', { defaultValue: 'Not found' })
+        : t('propdev.dashboards.error_title', {
+            defaultValue: 'Could not load this view',
+          }));
+
+  const resolvedMessage =
+    kind === 'forbidden'
+      ? t('common.access_denied_desc', {
+          defaultValue:
+            "You don't have access to this data — contact your project admin.",
+        })
+      : (message ??
+        t('common.unknown_error', { defaultValue: 'An unknown error occurred.' }));
+
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-2 py-10 text-center"
+      role="alert"
+      data-testid="dashboard-error"
+    >
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-semantic-error/10 text-semantic-error">
+        <AlertOctagon size={18} />
+      </div>
+      <h4 className="text-sm font-semibold text-content-primary">{resolvedTitle}</h4>
+      <p className="text-xs text-content-tertiary max-w-md">{resolvedMessage}</p>
+      {onRetry && kind !== 'forbidden' && (
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<RefreshCw size={12} />}
+          onClick={onRetry}
+          data-testid="dashboard-error-retry"
+        >
+          {t('common.retry', { defaultValue: 'Retry' })}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** Re-export SkeletonText so widgets can compose a single-line placeholder
+ *  without reaching into shared/ui directly (keeps the dashboard layer
+ *  self-contained for downstream skeletons). */
+export { SkeletonText };
 
 export function StatusLegend() {
   const { t } = useTranslation();

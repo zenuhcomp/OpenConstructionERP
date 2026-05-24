@@ -4,11 +4,11 @@
  * but no SalesContract yet.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { InventoryAgeingResponse } from '../api';
 import { getInventoryAgeing } from '../api';
-import { DashboardEmpty, DashboardLoading } from './_shared';
+import { DashboardEmpty, DashboardError, DashboardSkeleton } from './_shared';
 
 interface InventoryAgeingProps {
   developmentId: string;
@@ -20,6 +20,9 @@ export function InventoryAgeing({ developmentId }: InventoryAgeingProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  const [reloadKey, setReloadKey] = useState(0);
+  const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,21 +41,22 @@ export function InventoryAgeing({ developmentId }: InventoryAgeingProps) {
     return () => {
       cancelled = true;
     };
-  }, [developmentId]);
+  }, [developmentId, reloadKey]);
 
   const max = useMemo(() => {
     if (!data) return 1;
     return Math.max(1, ...data.buckets.map((b) => b.count));
   }, [data]);
 
-  if (loading) return <DashboardLoading />;
+  if (loading) return <DashboardSkeleton variant="bars" rows={5} />;
   if (error)
     return (
-      <DashboardEmpty
+      <DashboardError
         title={t('propdev.dashboards.ageing.error', {
           defaultValue: 'Could not load inventory ageing',
         })}
-        description={error}
+        message={error}
+        onRetry={refetch}
       />
     );
   if (!data || data.total_unsold === 0)

@@ -8,16 +8,20 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
-import { Breadcrumb } from '@/shared/ui';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Building2 } from 'lucide-react';
+import { Breadcrumb, EmptyState } from '@/shared/ui';
 import { listDevelopments, type Development } from '../api';
 import { InventoryHeatmap } from './InventoryHeatmap';
 import { SalesVelocity } from './SalesVelocity';
 import { CashFlowWaterfall } from './CashFlowWaterfall';
 import { InventoryAgeing } from './InventoryAgeing';
 import { FunnelConversion } from './FunnelConversion';
-import { DashboardEmpty, DashboardLoading } from './_shared';
+import {
+  DashboardEmpty,
+  DashboardError,
+  DashboardSkeleton,
+} from './_shared';
 
 const VALID_KEYS = new Set([
   'inventory-heatmap',
@@ -29,11 +33,18 @@ const VALID_KEYS = new Set([
 
 export function FullViewPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const params = useParams<{ key?: string }>();
   const key = params.key ?? '';
   const [developmentId, setDevelopmentId] = useState<string>('');
 
-  const { data: developments, isLoading } = useQuery({
+  const {
+    data: developments,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ['propdev-developments'],
     queryFn: () => listDevelopments({ limit: 100 }),
   });
@@ -60,13 +71,33 @@ export function FullViewPage() {
       />
     );
   }
-  if (isLoading) return <DashboardLoading />;
+  if (isLoading) return <DashboardSkeleton variant="bars" rows={8} />;
+  if (isError) {
+    return (
+      <DashboardError
+        title={t('propdev.dashboards.load_developments_error', {
+          defaultValue: 'Could not load developments',
+        })}
+        message={error instanceof Error ? error.message : undefined}
+        onRetry={() => refetch()}
+      />
+    );
+  }
   if (!developments || developments.length === 0) {
     return (
-      <DashboardEmpty
+      <EmptyState
+        icon={<Building2 size={22} />}
         title={t('propdev.dashboards.hub.no_developments_title', {
           defaultValue: 'No developments yet',
         })}
+        description={t('propdev.dashboards.hub.no_developments_desc', {
+          defaultValue:
+            'Create your first development to populate this dashboard.',
+        })}
+        action={{
+          label: t('propdev.new_development', { defaultValue: 'New Development' }),
+          onClick: () => navigate('/property-dev'),
+        }}
       />
     );
   }

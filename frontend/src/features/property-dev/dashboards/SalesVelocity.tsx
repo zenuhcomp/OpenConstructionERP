@@ -6,7 +6,7 @@
  * buyer rows. Revenue is per-currency (multi-currency aware).
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   CurrencyAmount,
@@ -15,7 +15,8 @@ import type {
 import { getSalesVelocity } from '../api';
 import {
   DashboardEmpty,
-  DashboardLoading,
+  DashboardError,
+  DashboardSkeleton,
   fmtCompactNumber,
   num,
 } from './_shared';
@@ -32,6 +33,9 @@ export function SalesVelocity({ developmentId }: SalesVelocityProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [granularity, setGranularity] = useState<Granularity>('month');
+
+  const [reloadKey, setReloadKey] = useState(0);
+  const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +54,7 @@ export function SalesVelocity({ developmentId }: SalesVelocityProps) {
     return () => {
       cancelled = true;
     };
-  }, [developmentId, granularity]);
+  }, [developmentId, granularity, reloadKey]);
 
   const chartData = useMemo(() => {
     if (!data) return [];
@@ -70,14 +74,15 @@ export function SalesVelocity({ developmentId }: SalesVelocityProps) {
     ? Math.max(...chartData.map((b) => b.units), 1)
     : 1;
 
-  if (loading) return <DashboardLoading />;
+  if (loading) return <DashboardSkeleton variant="bars" rows={6} />;
   if (error)
     return (
-      <DashboardEmpty
+      <DashboardError
         title={t('propdev.dashboards.velocity.error', {
           defaultValue: 'Could not load sales velocity',
         })}
-        description={error}
+        message={error}
+        onRetry={refetch}
       />
     );
   if (!data || data.series.length === 0)
