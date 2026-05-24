@@ -663,6 +663,24 @@ export function PropertyDevPage() {
               {t('geo_hub.view_on_map', { defaultValue: 'View on map' })}
             </button>
           )}
+          {selectedDevId && (
+            <Link
+              to={`/property-dev/developments/${selectedDevId}/inventory-map`}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border-light bg-surface-primary px-2.5 py-1.5 text-xs font-medium text-content-secondary hover:bg-surface-secondary hover:text-oe-blue focus:outline-none focus:ring-2 focus:ring-oe-blue/40"
+              title={t('propdev.inventory_map.cta', {
+                defaultValue: 'Inventory Map',
+              })}
+              aria-label={t('propdev.inventory_map.cta', {
+                defaultValue: 'Inventory Map',
+              })}
+              data-testid="propdev-inventory-map-link"
+            >
+              <LayoutGrid size={13} />
+              {t('propdev.inventory_map.cta', {
+                defaultValue: 'Inventory Map',
+              })}
+            </Link>
+          )}
         </div>
       )}
 

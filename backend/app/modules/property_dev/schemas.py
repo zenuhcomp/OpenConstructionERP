@@ -339,7 +339,7 @@ class PlotCreate(BaseModel):
     currency: str = Field(default="", max_length=8)
     status: str = Field(
         default="planned",
-        pattern=r"^(planned|reserved|under_construction|ready|sold|handed_over)$",
+        pattern=r"^(planned|reserved|under_construction|ready|sold|handed_over|held|blocked)$",
     )
     reservation_deadline: str | None = Field(
         default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"
@@ -376,7 +376,7 @@ class PlotUpdate(BaseModel):
     currency: str | None = Field(default=None, max_length=8)
     status: str | None = Field(
         default=None,
-        pattern=r"^(planned|reserved|under_construction|ready|sold|handed_over)$",
+        pattern=r"^(planned|reserved|under_construction|ready|sold|handed_over|held|blocked)$",
     )
     reservation_deadline: str | None = Field(
         default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"
@@ -3488,6 +3488,253 @@ class PricingRuleUpdate(BaseModel):
         return self
 
 
+# ════════════════════════════════════════════════════════════════════════
+# Inventory Map — sales-floor block / floor / unit grid.
+# ════════════════════════════════════════════════════════════════════════
+#
+# Differs from the analytics ``InventoryHeatmapResponse`` (task #140) on
+# three axes: (a) flat blocks[] (skips the Phase grouping for sales-desk
+# clarity), (b) explicit floor grouping inside each block (the analytics
+# heatmap is one flat strip per block), (c) tighter shape with a
+# top-level ``summary`` counter ribbon. Used by
+# /developments/{dev_id}/inventory-map/ and the React InventoryMapPage.
+
+
+class InventoryMapPlot(BaseModel):
+    """One Plot cell inside a floor strip of the inventory map."""
+
+    id: UUID
+    unit_code: str
+    status: str
+    plot_type: str | None = None
+    block_code: str | None = None
+    floor: int | None = None
+    base_price: Decimal = Decimal("0")
+    area_m2: Decimal = Decimal("0")
+    currency: str = ""
+    bedrooms: int = 0
+    bathrooms: int = 0
+
+    # R7 money-as-string convention (BUG-B-011).
+    @field_serializer("base_price", "area_m2", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
+
+class InventoryMapFloor(BaseModel):
+    """One floor row within a Block (descending floor numbers in UI)."""
+
+    floor: int
+    plots: list[InventoryMapPlot] = Field(default_factory=list)
+
+
+class InventoryMapBlock(BaseModel):
+    """One Block card on the map (collapsible in UI)."""
+
+    block_code: str
+    block_id: UUID | None = None
+    name: str = ""
+    floors: list[InventoryMapFloor] = Field(default_factory=list)
+
+
+class InventoryMapSummary(BaseModel):
+    """KPI ribbon counters — one entry per Plot.status (incl. ``total``)."""
+
+    total: int = 0
+    available: int = 0
+    reserved: int = 0
+    sold: int = 0
+    handed_over: int = 0
+    held: int = 0
+    blocked: int = 0
+    under_construction: int = 0
+    ready: int = 0
+
+
+class InventoryMapResponse(BaseModel):
+    """``GET /developments/{dev_id}/inventory-map/`` envelope."""
+
+    development_id: UUID
+    currency: str = ""
+    blocks: list[InventoryMapBlock] = Field(default_factory=list)
+    summary: InventoryMapSummary = Field(default_factory=InventoryMapSummary)
+
+
+class InventoryMapBulkHoldRequest(BaseModel):
+    """``POST /inventory-map/bulk-hold/`` payload.
+
+    ``plot_ids`` is non-empty (server rejects empty list with 422 so the
+    caller doesn't accidentally fire a no-op + audit-log noise).
+    ``hold_reason`` is free-text but capped at 500 chars (audit-row column
+    width); ``hold_until`` is an optional ISO-8601 date (YYYY-MM-DD).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    plot_ids: list[UUID] = Field(..., min_length=1, max_length=500)
+    hold_reason: str = Field(default="", max_length=500)
+    hold_until: str | None = Field(
+        default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"
+    )
+
+
+class InventoryMapBulkReleaseRequest(BaseModel):
+    """``POST /inventory-map/bulk-release/`` payload."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    plot_ids: list[UUID] = Field(..., min_length=1, max_length=500)
+
+
+class InventoryMapBulkResult(BaseModel):
+    """Outcome of a bulk hold / release call."""
+
+    updated_count: int = 0
+    skipped_count: int = 0
+    updated_plot_ids: list[UUID] = Field(default_factory=list)
+    skipped: list[dict[str, str]] = Field(default_factory=list)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Bulk-operations admin console (sales-ops batch endpoints)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Distinct from ``InventoryMapBulkResult`` above (which scopes hold /
+# release on the inventory map) — this envelope is shared by the five
+# sales-ops bulk endpoints under /bulk/*:
+#   * plot status flips OTHER than hold/release
+#   * reservation expiry extensions
+#   * document regenerations
+#   * lead-from-CSV imports
+#   * buyer merges
+#
+# A single ``BulkResult`` keeps the frontend renderer trivial. ``skipped``
+# captures soft no-ops (IDOR collapses to silent skip, terminal-state
+# reservations); ``failed`` captures per-item errors that didn't poison
+# the rest of the batch (illegal FSM transitions, render failures).
+
+BULK_MAX_ITEMS: int = 500
+
+
+class BulkSkipped(BaseModel):
+    """A single skip entry inside a bulk-result envelope."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    entity_id: str = Field(..., description="Stringified UUID or other identifier.")
+    reason: str = Field(..., max_length=500)
+    code: str = Field(..., max_length=80)
+
+
+class BulkFailed(BaseModel):
+    """A single failure entry inside a bulk-result envelope."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    entity_id: str = Field(..., description="Stringified UUID or other identifier.")
+    error_message: str = Field(..., max_length=1000)
+    error_code: str = Field(..., max_length=80)
+
+
+class BulkResult(BaseModel):
+    """Envelope returned by every bulk-operation endpoint."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    requested: int = Field(..., ge=0)
+    succeeded: int = Field(..., ge=0)
+    skipped: list[BulkSkipped] = Field(default_factory=list)
+    failed: list[BulkFailed] = Field(default_factory=list)
+    dry_run: bool = False
+
+
+# ── Plot bulk status change ─────────────────────────────────────────────
+
+_PLOT_STATUS_PATTERN = (
+    r"^(planned|reserved|under_construction|ready|sold|handed_over)$"
+)
+
+
+class PlotBulkStatusChange(BaseModel):
+    """Bulk-flip a set of plots to a target status.
+
+    NOTE: this endpoint is for transitions OTHER than hold / release —
+    those live on the inventory-map module (``bulk-hold`` / ``bulk-release``).
+    Use this for milestone-driven flips (reserved → sold after deposit
+    cleared) or remediation (sold → ready when an SPA fell through).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    plot_ids: list[UUID] = Field(..., min_length=1, max_length=BULK_MAX_ITEMS)
+    target_status: str = Field(..., pattern=_PLOT_STATUS_PATTERN)
+    reason: str = Field(default="", max_length=500)
+
+
+# ── Reservation bulk-extend-expiry ──────────────────────────────────────
+
+
+class ReservationBulkExtendExpiry(BaseModel):
+    """Bulk-extend the ``expires_at`` of a set of active reservations."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    reservation_ids: list[UUID] = Field(
+        ..., min_length=1, max_length=BULK_MAX_ITEMS
+    )
+    new_expiry: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    reason: str = Field(default="", max_length=500)
+
+
+# ── Documents bulk-regenerate ───────────────────────────────────────────
+#
+# Subset of _VALID_DOC_TYPES (see service.py). Payment receipts are
+# per-instalment and don't belong in the sales-ops bulk console.
+
+_BULK_DOC_TYPE_PATTERN = (
+    r"^(reservation_receipt|sales_contract|handover_certificate|"
+    r"warranty_certificate|noc)$"
+)
+
+
+class DocumentsBulkRegenerate(BaseModel):
+    """Re-render PDFs for a set of reservations OR sales contracts.
+
+    Exactly one of ``reservation_ids`` / ``sales_contract_ids`` is required
+    depending on ``document_type``: reservation_receipt accepts
+    reservation_ids; sales_contract / noc / handover_certificate /
+    warranty_certificate accept sales_contract_ids.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    document_type: str = Field(..., pattern=_BULK_DOC_TYPE_PATTERN)
+    reservation_ids: list[UUID] | None = Field(default=None, max_length=BULK_MAX_ITEMS)
+    sales_contract_ids: list[UUID] | None = Field(default=None, max_length=BULK_MAX_ITEMS)
+    locale: str = Field(default="en", max_length=10)
+
+    @model_validator(mode="after")
+    def _check_payload_target(self) -> "DocumentsBulkRegenerate":
+        if not self.reservation_ids and not self.sales_contract_ids:
+            raise ValueError(
+                "Provide at least one of reservation_ids or sales_contract_ids."
+            )
+        if self.reservation_ids and self.sales_contract_ids:
+            raise ValueError(
+                "Provide only ONE of reservation_ids / sales_contract_ids per request."
+            )
+        if self.document_type == "reservation_receipt" and not self.reservation_ids:
+            raise ValueError(
+                "reservation_receipt requires reservation_ids."
+            )
+        if self.document_type != "reservation_receipt" and not self.sales_contract_ids:
+            raise ValueError(
+                f"{self.document_type} requires sales_contract_ids."
+            )
+        return self
+
+
 class PricingRuleResponse(BaseModel):
     """PricingRule returned by the API."""
 
@@ -3672,3 +3919,33 @@ class EffectiveRulesResponse(BaseModel):
     on_date: str
     rules: list[PricingRuleResponse] = Field(default_factory=list)
 
+
+# ── Buyer bulk-merge ────────────────────────────────────────────────────
+
+
+class BuyerBulkMerge(BaseModel):
+    """Merge a set of duplicate buyers into a single primary buyer.
+
+    Re-points all FK references (reservations, sales_contracts, contract
+    parties, warranty claims, buyer selections) from duplicates → primary,
+    then soft-deletes the duplicate rows. Atomic — all reps roll back if
+    any single repoint fails.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    primary_buyer_id: UUID
+    duplicate_buyer_ids: list[UUID] = Field(
+        ..., min_length=1, max_length=BULK_MAX_ITEMS
+    )
+    reason: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def _check_distinct(self) -> "BuyerBulkMerge":
+        if self.primary_buyer_id in self.duplicate_buyer_ids:
+            raise ValueError(
+                "primary_buyer_id must not appear in duplicate_buyer_ids."
+            )
+        if len(set(self.duplicate_buyer_ids)) != len(self.duplicate_buyer_ids):
+            raise ValueError("duplicate_buyer_ids must not contain duplicates.")
+        return self

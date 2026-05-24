@@ -255,6 +255,9 @@ const CarbonPage = lazy(() =>
 const PropertyDevPage = lazy(() =>
   import('@/features/property-dev').then((m) => ({ default: m.PropertyDevPage }))
 );
+const PropertyDevInventoryMapPage = lazy(() =>
+  import('@/features/property-dev').then((m) => ({ default: m.InventoryMapPage }))
+);
 const AccommodationListPage = lazy(() =>
   import('@/features/accommodation').then((m) => ({
     default: m.AccommodationListPage,
@@ -288,6 +291,11 @@ const PropertyDevDocumentTemplatesSettingsPage = lazy(() =>
 const PropertyDevPricingEnginePage = lazy(() =>
   import('@/features/property-dev').then((m) => ({
     default: m.PricingEnginePage,
+  })),
+);
+const PropertyDevBulkOperationsPage = lazy(() =>
+  import('@/features/property-dev').then((m) => ({
+    default: m.BulkOperationsPage,
   })),
 );
 // ── Geo Hub — Cesium 3D Tiles + cross-module geo. Lazy-loaded because
@@ -795,6 +803,8 @@ export default function App() {
         <Route path="/property-dev" element={<P title="Property Development"><PropertyDevPage /></P>} />
         <Route path="/property-dev/developments/:devId/geo" element={<P title="Development map"><DevelopmentGeoPage /></P>} />
         <Route path="/property-dev/developments/:devId/pricing" element={<P title="Pricing Engine"><PropertyDevPricingEnginePage /></P>} />
+        <Route path="/property-dev/developments/:devId/inventory-map" element={<P title="Inventory Map"><PropertyDevInventoryMapPage /></P>} />
+        <Route path="/property-dev/admin/bulk-operations" element={<P title="Bulk Operations"><PropertyDevBulkOperationsPage /></P>} />
         <Route path="/property-dev/dashboards" element={<P title="Property Development Dashboards"><PropertyDevDashboardsHub /></P>} />
         <Route
           path="/property-dev/settings/house-types"
@@ -806,6 +816,12 @@ export default function App() {
           path="/property-dev/settings/document-templates"
           element={
             <P title="Document Templates"><PropertyDevDocumentTemplatesSettingsPage /></P>
+          }
+        />
+        <Route
+          path="/property-dev/admin/bulk-operations"
+          element={
+            <P title="Bulk Operations"><PropertyDevBulkOperationsPage /></P>
           }
         />
         <Route path="/property-dev/dashboards/:key" element={<P title="Property Development Dashboard"><PropertyDevDashboardFullView /></P>} />

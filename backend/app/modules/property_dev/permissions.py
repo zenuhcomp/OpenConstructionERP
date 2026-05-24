@@ -68,6 +68,20 @@ PROPERTY_DEV_PERMISSIONS: dict[str, Role] = {
     # generation gate stays MANAGER+ to avoid accidental quarterly
     # disclosure from EDITOR-level sales staff.
     "property_dev.regulator_report.generate": Role.MANAGER,
+    # ── Bulk admin operations (sales-ops console) ──────────────────────────
+    # All bulk endpoints are MANAGER+ because each touches potentially
+    # hundreds of rows in a single transaction (status flips that release
+    # plots from reservation, expiry extensions that block other buyers,
+    # CSV imports that fan out into Lead rows, doc regen that overwrites
+    # signed-PDF blobs, and buyer-merge that re-points FK references on
+    # reservations / sales_contracts / payments). Atomicity is enforced
+    # via SAVEPOINT (see procurement R7 PO → invoice pattern); RBAC
+    # gating is the FIRST line of defense before the IDOR per-entity gate.
+    "property_dev.bulk.plot_status_change": Role.MANAGER,
+    "property_dev.bulk.reservation_extend": Role.MANAGER,
+    "property_dev.bulk.document_regenerate": Role.MANAGER,
+    "property_dev.bulk.lead_import": Role.MANAGER,
+    "property_dev.bulk.buyer_merge": Role.MANAGER,
 }
 
 
