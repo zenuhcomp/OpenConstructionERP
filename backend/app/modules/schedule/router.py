@@ -781,15 +781,41 @@ async def list_relationships(
     _user_id: CurrentUserId,
     payload: CurrentUserPayload,
     service: ScheduleService = Depends(_get_service),
+    limit: int = Query(
+        default=200,
+        ge=1,
+        le=500,
+        description=(
+            "Maximum number of relationships to return. Default 200 covers "
+            "the vast majority of project schedules; the hard cap of 500 "
+            "protects the request from blowing memory + serialisation cost "
+            "on pathological imports (some MPP files carry 5k+ dependency "
+            "rows). For full CPM analysis use ``/cpm`` which intentionally "
+            "fetches every relationship server-side without sending them "
+            "over the wire."
+        ),
+    ),
 ) -> list[RelationshipResponse]:
-    """List all CPM relationships for a schedule."""
+    """List CPM relationships for a schedule (capped, paginated by limit).
+
+    Previously fetched every relationship without bound — a schedule with
+    a few thousand dependency rows (typical from large MS Project / P6
+    imports) would dump 10+ MB JSON on a UI grid that only renders the
+    first hundred. Capped at ``limit`` (default 200, max 500) and
+    deterministically ordered by ``created_at`` so pagination is stable.
+    Callers that need the full set should iterate via the dedicated
+    ``/cpm`` endpoint which keeps the data server-side.
+    """
     await _verify_schedule_owner(service, session, schedule_id, _user_id, payload)
     from sqlalchemy import select
 
     from app.modules.schedule.models import ScheduleRelationship
 
-    stmt = select(ScheduleRelationship).where(
-        ScheduleRelationship.schedule_id == schedule_id
+    stmt = (
+        select(ScheduleRelationship)
+        .where(ScheduleRelationship.schedule_id == schedule_id)
+        .order_by(ScheduleRelationship.created_at.asc(), ScheduleRelationship.id.asc())
+        .limit(limit)
     )
     result = await session.execute(stmt)
     rels = list(result.scalars().all())
