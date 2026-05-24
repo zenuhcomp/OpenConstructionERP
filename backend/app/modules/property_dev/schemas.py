@@ -1225,6 +1225,16 @@ class DevelopmentPnLResponse(BaseModel):
     open_warranty_count: int = 0
     open_snag_count: int = 0
 
+    # R8: money fields as plain-decimal strings.
+    @field_serializer(
+        "revenue_contracted", "revenue_completed", "deposits_held",
+        "deposits_forfeited", "avg_sale_price",
+        when_used="json",
+    )
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 
 
@@ -1334,6 +1344,14 @@ class LeadResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # R8: money / score fields as plain-decimal strings.
+    @field_serializer(
+        "lead_score", "budget_min", "budget_max", when_used="json",
+    )
+    @classmethod
+    def _ser_money(cls, v: Decimal | None) -> str | None:
+        return _serialize_money_string(v)
+
 
 class LeadConvertToReservationRequest(BaseModel):
     """Convert a Lead into a Reservation on a plot."""
@@ -1423,6 +1441,12 @@ class ReservationResponse(BaseModel):
     )
     created_at: datetime
     updated_at: datetime
+
+    # R8: money fields as plain-decimal strings.
+    @field_serializer("deposit_amount", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
 
 
 class ReservationConvertToSpaRequest(BaseModel):
@@ -1532,6 +1556,12 @@ class SalesContractResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # R8: money fields as plain-decimal strings.
+    @field_serializer("total_value", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 class SalesContractSendForSignatureRequest(BaseModel):
     """Trigger envelope creation + email-out to all parties."""
@@ -1603,6 +1633,12 @@ class PaymentScheduleResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # R8: money fields as plain-decimal strings.
+    @field_serializer("total_amount", "late_fee_pct", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 # ── Instalment ──────────────────────────────────────────────────────────
 
@@ -1661,6 +1697,14 @@ class InstalmentResponse(BaseModel):
     )
     created_at: datetime
     updated_at: datetime
+
+    # R8: money fields as plain-decimal strings.
+    @field_serializer(
+        "amount", "amount_paid", "late_fee_accrued", when_used="json",
+    )
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
 
 
 class InstalmentMarkPaidRequest(BaseModel):
@@ -2169,6 +2213,12 @@ class CommissionAgreementResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # R8: percent / money fields as plain-decimal strings.
+    @field_serializer("withholding_tax_pct", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 # ── CommissionAccrual ───────────────────────────────────────────────────
 
@@ -2573,6 +2623,12 @@ class TaxQuoteLineItem(BaseModel):
     line: str
     amount: Decimal
 
+    # R8: money fields as plain-decimal strings.
+    @field_serializer("amount", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 class ContractTaxQuote(BaseModel):
     """Response model for ``POST /sales-contracts/{id}/tax-quote``."""
@@ -2592,6 +2648,16 @@ class ContractTaxQuote(BaseModel):
     subtotal_taxes: Decimal = Decimal("0")
     grand_total: Decimal = Decimal("0")
     breakdown: list[TaxQuoteLineItem] = Field(default_factory=list)
+
+    # R8: every money field as a plain-decimal string.
+    @field_serializer(
+        "net", "vat", "stamp_duty", "transfer_fee", "registration_fee",
+        "absd", "late_interest", "subtotal_taxes", "grand_total",
+        when_used="json",
+    )
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
 
 
 # ── Compliance dashboard (task #139) ────────────────────────────────────
@@ -2708,6 +2774,12 @@ class HeatmapUnit(BaseModel):
     position_on_floor: str | None = None
     house_type_id: str | None = None
 
+    # R8: money fields as plain-decimal strings.
+    @field_serializer("area_m2", "price_base", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 class HeatmapBlock(BaseModel):
     """One Block under a Phase."""
@@ -2748,6 +2820,12 @@ class CurrencyAmount(BaseModel):
     currency: str = ""
     amount: Decimal = Decimal("0")
 
+    # R8: money fields as plain-decimal strings.
+    @field_serializer("amount", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 class SalesVelocityBucket(BaseModel):
     """One time-bucket on the velocity chart."""
@@ -2757,11 +2835,23 @@ class SalesVelocityBucket(BaseModel):
     area_m2: Decimal = Decimal("0")
     revenue: list[CurrencyAmount] = Field(default_factory=list)
 
+    # R8: money fields as plain-decimal strings.
+    @field_serializer("area_m2", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 class SalesVelocityTotals(BaseModel):
     units: int = 0
     area_m2: Decimal = Decimal("0")
     revenue: list[CurrencyAmount] = Field(default_factory=list)
+
+    # R8: money fields as plain-decimal strings.
+    @field_serializer("area_m2", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
 
 
 class SalesVelocityResponse(BaseModel):
@@ -2812,6 +2902,12 @@ class InventoryAgeingPlot(BaseModel):
     price_base: Decimal = Decimal("0")
     currency: str = ""
 
+    # R8: money fields as plain-decimal strings.
+    @field_serializer("price_base", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 class InventoryAgeingBucket(BaseModel):
     """One days-on-market bucket."""
@@ -2838,10 +2934,22 @@ class FunnelStage(BaseModel):
     count: int = 0
     drop_pct: Decimal = Decimal("0")
 
+    # R8: percent fields as plain-decimal strings.
+    @field_serializer("drop_pct", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
+
 
 class FunnelTotals(BaseModel):
     leads: int = 0
     conversion_pct: Decimal = Decimal("0")
+
+    # R8: percent fields as plain-decimal strings.
+    @field_serializer("conversion_pct", when_used="json")
+    @classmethod
+    def _ser_money(cls, v: Decimal) -> str:
+        return _serialize_money_string(v) or "0"
 
 
 class FunnelConversionResponse(BaseModel):

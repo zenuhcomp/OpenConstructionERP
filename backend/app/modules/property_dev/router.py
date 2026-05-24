@@ -416,9 +416,17 @@ async def reserve_plot(
 )
 async def plot_configurator(
     plot_id: uuid.UUID,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
     service: PropertyDevService = Depends(_svc),
     _perm: None = Depends(RequirePermission("property_dev.read")),
 ) -> BuyerConfiguratorResponse:
+    """Plot configurator bundle (plot + house type + variant + options +
+    selection + pricing).
+
+    R8: cross-tenant IDOR closed via ``_verify_owner_via_plot``.
+    """
+    await _verify_owner_via_plot(session, plot_id, user_payload)
     plot = await service.get_plot(plot_id)
     house_type = (
         await service.house_types.get_by_id(plot.house_type_id)
@@ -1801,10 +1809,16 @@ async def delete_handover_doc(
 )
 async def sales_kanban(
     dev_id: uuid.UUID,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
     service: PropertyDevService = Depends(_svc),
     _perm: None = Depends(RequirePermission("property_dev.read")),
 ) -> SalesKanbanResponse:
-    """Kanban — one column per buyer-status."""
+    """Kanban — one column per buyer-status.
+
+    R8: cross-tenant IDOR closed via ``_verify_owner_via_development``.
+    """
+    await _verify_owner_via_development(session, dev_id, user_payload)
     payload = await service.sales_kanban(dev_id)
     return SalesKanbanResponse(**payload)
 
@@ -1815,12 +1829,18 @@ async def sales_kanban(
 )
 async def reservation_calendar(
     dev_id: uuid.UUID,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
     period_start: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
     period_end: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
     service: PropertyDevService = Depends(_svc),
     _perm: None = Depends(RequirePermission("property_dev.read")),
 ) -> ReservationCalendarResponse:
-    """Reservation + freeze + contract deadlines in the supplied window."""
+    """Reservation + freeze + contract deadlines in the supplied window.
+
+    R8: cross-tenant IDOR closed via ``_verify_owner_via_development``.
+    """
+    await _verify_owner_via_development(session, dev_id, user_payload)
     payload = await service.reservation_calendar(
         dev_id, period_start, period_end,
     )
@@ -1833,10 +1853,16 @@ async def reservation_calendar(
 )
 async def development_pnl(
     dev_id: uuid.UUID,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
     service: PropertyDevService = Depends(_svc),
     _perm: None = Depends(RequirePermission("property_dev.read")),
 ) -> DevelopmentPnLResponse:
-    """Revenue + deposits + open-issues rollup for a development."""
+    """Revenue + deposits + open-issues rollup for a development.
+
+    R8: cross-tenant IDOR closed via ``_verify_owner_via_development``.
+    """
+    await _verify_owner_via_development(session, dev_id, user_payload)
     payload = await service.development_pnl(dev_id)
     return DevelopmentPnLResponse(**payload)
 
@@ -2286,6 +2312,8 @@ async def _verify_owner_via_price_matrix(
 
 @router.get("/leads/", response_model=list[LeadResponse])
 async def list_leads(
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
     development_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
     source: str | None = Query(default=None),
@@ -2295,6 +2323,21 @@ async def list_leads(
     service: PropertyDevService = Depends(_svc),
     _perm: None = Depends(RequirePermission("property_dev.lead.read")),
 ) -> list[LeadResponse]:
+    """List leads filtered by development.
+
+    R8: when ``development_id`` is provided we verify cross-tenant access
+    via ``_verify_owner_via_development`` so the endpoint can't be turned
+    into a cross-tenant enumeration channel; when omitted, non-admin
+    callers receive an empty list (admin bypasses).
+    """
+    if development_id is not None:
+        await _verify_owner_via_development(
+            session, development_id, user_payload
+        )
+    elif user_payload.get("role") != "admin":
+        # Non-admins MUST scope to a development they own; collapsing to
+        # an empty list avoids leaking cross-tenant top-of-funnel leads.
+        return []
     rows, _ = await service.leads.list_filtered(
         development_id=development_id,
         status=status,
@@ -2475,6 +2518,8 @@ async def get_buyer_contact(
 
 @router.get("/reservations/", response_model=list[ReservationResponse])
 async def list_reservations(
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
     plot_id: uuid.UUID | None = Query(default=None),
     development_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -2483,6 +2528,21 @@ async def list_reservations(
     service: PropertyDevService = Depends(_svc),
     _perm: None = Depends(RequirePermission("property_dev.reservation.read")),
 ) -> list[ReservationResponse]:
+    """List reservations.
+
+    R8: at least one of ``plot_id`` / ``development_id`` MUST be supplied
+    for non-admin callers, and we verify owner-of via the appropriate
+    chain. Non-admin callers without any scope receive an empty list
+    rather than a 422 (matches existing pattern in /warranty-claims).
+    """
+    if plot_id is not None:
+        await _verify_owner_via_plot(session, plot_id, user_payload)
+    elif development_id is not None:
+        await _verify_owner_via_development(
+            session, development_id, user_payload
+        )
+    elif user_payload.get("role") != "admin":
+        return []
     rows, _ = await service.reservations.list_filtered(
         plot_id=plot_id,
         development_id=development_id,
@@ -4104,6 +4164,8 @@ async def bulk_recompute_prices(
     "/regulator-reports/RERA", response_model=RegulatorReportResponse,
 )
 async def regulator_report_rera(
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
     dev_id: uuid.UUID = Query(...),
     quarter: str = Query(..., pattern=r"^\d{4}-Q[1-4]$"),
     service: PropertyDevService = Depends(_svc),
@@ -4111,6 +4173,8 @@ async def regulator_report_rera(
         RequirePermission("property_dev.regulator_report.generate")
     ),
 ) -> RegulatorReportResponse:
+    """R8: cross-tenant IDOR closed via ``_verify_owner_via_development``."""
+    await _verify_owner_via_development(session, dev_id, user_payload)
     payload = await service.generate_regulator_report_RERA(dev_id, quarter)
     return RegulatorReportResponse(**payload)
 
@@ -4119,6 +4183,8 @@ async def regulator_report_rera(
     "/regulator-reports/MAHARERA", response_model=RegulatorReportResponse,
 )
 async def regulator_report_maharera(
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
     dev_id: uuid.UUID = Query(...),
     quarter: str = Query(..., pattern=r"^\d{4}-Q[1-4]$"),
     service: PropertyDevService = Depends(_svc),
@@ -4126,6 +4192,8 @@ async def regulator_report_maharera(
         RequirePermission("property_dev.regulator_report.generate")
     ),
 ) -> RegulatorReportResponse:
+    """R8: cross-tenant IDOR closed via ``_verify_owner_via_development``."""
+    await _verify_owner_via_development(session, dev_id, user_payload)
     payload = await service.generate_regulator_report_MAHARERA(dev_id, quarter)
     return RegulatorReportResponse(**payload)
 
@@ -4134,6 +4202,8 @@ async def regulator_report_maharera(
     "/regulator-reports/214-FZ", response_model=RegulatorReportResponse,
 )
 async def regulator_report_214fz(
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
     dev_id: uuid.UUID = Query(...),
     quarter: str = Query(..., pattern=r"^\d{4}-Q[1-4]$"),
     service: PropertyDevService = Depends(_svc),
@@ -4141,6 +4211,8 @@ async def regulator_report_214fz(
         RequirePermission("property_dev.regulator_report.generate")
     ),
 ) -> RegulatorReportResponse:
+    """R8: cross-tenant IDOR closed via ``_verify_owner_via_development``."""
+    await _verify_owner_via_development(session, dev_id, user_payload)
     payload = await service.generate_regulator_report_214FZ(dev_id, quarter)
     return RegulatorReportResponse(**payload)
 
@@ -5262,16 +5334,18 @@ def _report_to_response(
 )
 async def compliance_dashboard(
     session: SessionDep,
+    user_payload: CurrentUserPayload,
     dev_id: uuid.UUID = Query(...),
     locale: str = Query(default="en", min_length=2, max_length=10),
     _perm: None = Depends(RequirePermission("property_dev.read")),
 ) -> ComplianceDashboardResponse:
-    """Aggregated traffic-light validation report for one development."""
-    # Confirm the development exists (404 instead of empty report).
-    svc = PropertyDevService(session)
-    dev = await svc.developments.get_by_id(dev_id)
-    if dev is None:
-        raise HTTPException(status_code=404, detail="development_not_found")
+    """Aggregated traffic-light validation report for one development.
+
+    R8: cross-tenant IDOR closed via ``_verify_owner_via_development`` —
+    avoids letting any reader probe other tenants' dev UUIDs for an
+    existence oracle via the compliance dashboard.
+    """
+    await _verify_owner_via_development(session, dev_id, user_payload)
     report = await _run_property_dev_validation(session, dev_id, locale)
     return _report_to_response(dev_id, report)
 
@@ -5282,6 +5356,7 @@ async def compliance_dashboard(
 )
 async def compliance_run_checks(
     session: SessionDep,
+    user_payload: CurrentUserPayload,
     dev_id: uuid.UUID = Query(...),
     locale: str = Query(default="en", min_length=2, max_length=10),
     _perm: None = Depends(RequirePermission("property_dev.update")),
@@ -5291,11 +5366,10 @@ async def compliance_run_checks(
     Mounted as POST because side-effecting downstream subscribers (audit
     log, notifications) treat each invocation as a fresh validation pass.
     Requires ``property_dev.update`` to gate it behind editor RBAC.
+
+    R8: cross-tenant IDOR closed via ``_verify_owner_via_development``.
     """
-    svc = PropertyDevService(session)
-    dev = await svc.developments.get_by_id(dev_id)
-    if dev is None:
-        raise HTTPException(status_code=404, detail="development_not_found")
+    await _verify_owner_via_development(session, dev_id, user_payload)
     report = await _run_property_dev_validation(session, dev_id, locale)
     return _report_to_response(dev_id, report)
 
@@ -5308,6 +5382,7 @@ async def compliance_run_checks(
 )
 async def compliance_regulator_report(
     session: SessionDep,
+    user_payload: CurrentUserPayload,
     dev_id: uuid.UUID = Query(...),
     regulator: str = Query(...),
     quarter: str = Query(..., pattern=r"^\d{4}-Q[1-4]$"),
@@ -5333,10 +5408,9 @@ async def compliance_regulator_report(
         generate_regulator_report,
     )
 
-    svc = PropertyDevService(session)
-    dev = await svc.developments.get_by_id(dev_id)
-    if dev is None:
-        raise HTTPException(status_code=404, detail="development_not_found")
+    # R8: IDOR closure FIRST so attackers can't probe other tenants' dev UUIDs
+    # via this endpoint. Collapses "not yours" / "doesn't exist" to 404.
+    await _verify_owner_via_development(session, dev_id, user_payload)
     reg_code = (regulator or "").strip().upper()
     if reg_code not in {"RERA", "MAHARERA", "214FZ", "214-FZ", "214", "CMA"}:
         raise HTTPException(
