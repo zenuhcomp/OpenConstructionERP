@@ -346,7 +346,7 @@ export function AssembliesPage() {
               icon={<Download size={14} />}
               onClick={() => setShowExportMenu((p) => !p)}
             >
-              {t('common.export', { defaultValue: 'Export' })}
+              {t('common.export')}
             </Button>
             {showExportMenu && (
               <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-border-light bg-surface-elevated shadow-md animate-fade-in">
@@ -1044,7 +1044,7 @@ function AssemblyTable({
                 <BulkCheckbox checked={allSelected} indeterminate={someSelected} onChange={onToggleAll} />
               </th>
               <th className={headerCellBase}>{sortBtn('name', t('assemblies.col_name', { defaultValue: 'Name' }))}</th>
-              <th className={headerCellBase}>{sortBtn('code', t('assemblies.col_code', { defaultValue: 'Code' }))}</th>
+              <th className={headerCellBase}>{sortBtn('code', t('common.code'))}</th>
               <th className={headerCellBase}>{t('assemblies.col_category', { defaultValue: 'Category' })}</th>
               <th className={headerCellBase}>{t('assemblies.col_unit', { defaultValue: 'Unit' })}</th>
               <th className={`${headerCellBase} text-right`}>{sortBtn('total_rate', t('assemblies.col_rate', { defaultValue: 'Rate' }), 'right')}</th>
@@ -1241,7 +1241,7 @@ function BulkDeleteConfirm({
             {t('common.cancel', { defaultValue: 'Cancel' })}
           </Button>
           <Button variant="danger" size="sm" onClick={onConfirm}>
-            {t('common.delete', { defaultValue: 'Delete' })}
+            {t('common.delete')}
           </Button>
         </div>
       </div>
@@ -1607,7 +1607,7 @@ function AssemblyCard({
             <p className="text-xs text-content-tertiary mb-4 max-w-[180px] mx-auto line-clamp-1">{assembly.name}</p>
             <div className="flex items-center justify-center gap-2">
               <Button variant="danger" size="sm" onClick={() => { onDelete(); setConfirmDelete(false); }}>
-                {t('common.delete', { defaultValue: 'Delete' })}
+                {t('common.delete')}
               </Button>
               <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(false)}>
                 {t('common.cancel', { defaultValue: 'Cancel' })}
@@ -1885,7 +1885,7 @@ function HoverComponentsPopover({
       {isLoading ? (
         <div className="flex items-center gap-2 py-1 text-xs text-content-tertiary">
           <Loader2 size={11} className="animate-spin" />
-          {t('common.loading', { defaultValue: 'Loading...' })}
+          {t('common.loading')}
         </div>
       ) : top.length === 0 ? (
         <p className="text-xs text-content-tertiary">

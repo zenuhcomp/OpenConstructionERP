@@ -2737,7 +2737,7 @@ function CreateBOQFromPivotModal({ open, onClose, groups, groupByColumns, aggCol
           <div>
             <label className="text-xs font-medium text-content-secondary mb-1.5 flex items-center gap-1.5">
               <FolderOpen size={12} />
-              {t('common.project', { defaultValue: 'Project' })}
+              {t('common.project')}
             </label>
             <select
               value={projectId}

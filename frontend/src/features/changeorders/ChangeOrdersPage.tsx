@@ -261,7 +261,7 @@ function CreateDialog({
     >
       <WideModalSection columns={2}>
         <WideModalField
-          label={t('common.title', { defaultValue: 'Title' })}
+          label={t('common.title')}
           required
           span={2}
           htmlFor="co-title"
@@ -275,7 +275,7 @@ function CreateDialog({
           />
         </WideModalField>
         <WideModalField
-          label={t('common.description', { defaultValue: 'Description' })}
+          label={t('common.description')}
           span={2}
           htmlFor="co-description"
         >
@@ -431,7 +431,7 @@ function AddItemDialog({
           </select>
         </WideModalField>
         <WideModalField
-          label={t('common.unit', { defaultValue: 'Unit' })}
+          label={t('common.unit')}
           htmlFor="item-unit"
         >
           <input
@@ -1444,10 +1444,10 @@ export function ChangeOrdersPage() {
                       {t('changeorders.code', { defaultValue: 'Code' })}
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-content-secondary">
-                      {t('common.title', { defaultValue: 'Title' })}
+                      {t('common.title')}
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-content-secondary">
-                      {t('common.status', { defaultValue: 'Status' })}
+                      {t('common.status')}
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-content-secondary">
                       {t('changeorders.reason', { defaultValue: 'Reason' })}

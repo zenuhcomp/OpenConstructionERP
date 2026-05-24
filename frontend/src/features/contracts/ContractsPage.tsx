@@ -363,7 +363,7 @@ export function ContractsPage() {
           className={clsx(inputCls, 'max-w-[260px]')}
         >
           <option value="">
-            — {t('contracts.select_project', { defaultValue: 'Select project' })} —
+            — {t('common.select_project')} —
           </option>
           {(projectsQ.data ?? []).map((p: Project) => (
             <option key={p.id} value={p.id}>

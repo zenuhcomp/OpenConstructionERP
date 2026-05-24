@@ -1302,7 +1302,7 @@ function ArchiveTab({
           <thead className="bg-surface-secondary text-content-tertiary text-xs uppercase tracking-wide">
             <tr>
               <th className="px-4 py-2.5 text-left">{t('daily_diary.date', { defaultValue: 'Date' })}</th>
-              <th className="px-4 py-2.5 text-left">{t('common.status', { defaultValue: 'Status' })}</th>
+              <th className="px-4 py-2.5 text-left">{t('common.status')}</th>
               <th className="px-4 py-2.5 text-left">{t('daily_diary.signed_at', { defaultValue: 'Signed' })}</th>
               <th className="px-4 py-2.5 text-left">{t('daily_diary.signature_ref', { defaultValue: 'Fingerprint' })}</th>
             </tr>
@@ -1447,7 +1447,7 @@ function CreateDiaryModal({
             className={inputCls}
           />
         </WideModalField>
-        <WideModalField label={t('common.notes', { defaultValue: 'Notes' })} span={2}>
+        <WideModalField label={t('common.notes')} span={2}>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}

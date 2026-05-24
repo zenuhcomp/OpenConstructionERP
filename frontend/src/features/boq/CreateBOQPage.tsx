@@ -104,7 +104,7 @@ export function CreateBOQModal({ open, onClose, defaultProjectId }: CreateBOQMod
           {/* Project selector */}
           <div>
             <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('common.project', { defaultValue: 'Project' })}
+              {t('common.project')}
             </label>
             <div className="relative">
               <select
@@ -137,7 +137,7 @@ export function CreateBOQModal({ open, onClose, defaultProjectId }: CreateBOQMod
           {/* Description */}
           <div>
             <label className="text-sm font-medium text-content-primary block mb-1.5">
-              {t('common.description', { defaultValue: 'Description' })}
+              {t('common.description')}
             </label>
             <textarea
               value={description}

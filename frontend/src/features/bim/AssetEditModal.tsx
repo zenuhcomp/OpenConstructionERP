@@ -364,7 +364,7 @@ export function AssetEditModal({ asset, onClose, onSaved }: AssetEditModalProps)
           <Button onClick={submit} disabled={mutation.isPending} data-testid="asset-save">
             {mutation.isPending
               ? t('common.saving', { defaultValue: 'Saving…' })
-              : t('common.save', { defaultValue: 'Save' })}
+              : t('common.save')}
           </Button>
         </div>
       </div>

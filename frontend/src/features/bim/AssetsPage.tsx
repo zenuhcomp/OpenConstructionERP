@@ -350,7 +350,7 @@ export function AssetsPage() {
                       data-testid={`asset-edit-${asset.id}`}
                     >
                       <Edit3 size={14} />
-                      {t('common.edit', { defaultValue: 'Edit' })}
+                      {t('common.edit')}
                     </Button>
                   </td>
                 </tr>

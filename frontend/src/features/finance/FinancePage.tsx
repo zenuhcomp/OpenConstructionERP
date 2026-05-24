@@ -1267,7 +1267,7 @@ function BudgetsTab({ projectId }: { projectId: string }) {
             <tfoot>
               <tr className="bg-surface-secondary/60 font-semibold">
                 <td className="px-4 py-3 text-content-primary" colSpan={2}>
-                  {t('common.total', { defaultValue: 'Total' })}
+                  {t('common.total')}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <MoneyDisplay amount={totals.original} currency={totals.currency} />
@@ -2047,7 +2047,7 @@ function InvoicesTab({ projectId }: { projectId: string }) {
                   <tfoot>
                     <tr className="bg-surface-secondary/60 font-semibold">
                       <td className="px-4 py-3 text-content-primary" colSpan={4}>
-                        {t('common.total', { defaultValue: 'Total' })}
+                        {t('common.total')}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <MoneyDisplay amount={invoiceTotals.totalAmount} currency={invoiceTotals.currency} />

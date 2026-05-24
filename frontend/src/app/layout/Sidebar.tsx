@@ -917,7 +917,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           <button
             onClick={onClose}
             className="lg:hidden flex h-7 w-7 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-            aria-label={t('common.close', { defaultValue: 'Close' })}
+            aria-label={t('common.close')}
           >
             <X size={16} />
           </button>

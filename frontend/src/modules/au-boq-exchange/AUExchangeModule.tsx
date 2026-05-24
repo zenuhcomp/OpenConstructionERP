@@ -92,7 +92,7 @@ function ImportPreview({
           <thead>
             <tr className="bg-surface-secondary/50 sticky top-0">
               <th className="px-3 py-1.5 text-left font-medium text-content-secondary w-24">
-                {t('boq.ordinal', { defaultValue: 'Ordinal' })}
+                {t('common.ordinal')}
               </th>
               <th className="px-3 py-1.5 text-left font-medium text-content-secondary">
                 {t('boq.description', { defaultValue: 'Description' })}
@@ -597,7 +597,7 @@ export default function AUExchangeModule() {
                     className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm disabled:opacity-50"
                   >
                     <option value="">
-                      — {t('au.select_boq', { defaultValue: 'Select BOQ' })} —
+                      — {t('common.select_boq')} —
                     </option>
                     {importBoqs.map((b) => (
                       <option key={b.id} value={b.id}>
@@ -714,7 +714,7 @@ export default function AUExchangeModule() {
                   className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm disabled:opacity-50"
                 >
                   <option value="">
-                    — {t('au.select_boq', { defaultValue: 'Select BOQ' })} —
+                    — {t('common.select_boq')} —
                   </option>
                   {exportBoqs.map((b) => (
                     <option key={b.id} value={b.id}>

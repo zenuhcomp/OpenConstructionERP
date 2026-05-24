@@ -246,9 +246,9 @@ export function BOQToolbar({
       {/* ── Row-group: File (Import / Export) ──────────────────────────── */}
       <div className="flex items-center gap-1.5">
         <Button variant="ghost" size="sm" icon={<Upload size={15} />} onClick={onImportClick} loading={isImporting} disabled={isImporting}>
-          {t('common.import', { defaultValue: 'Import' })}
+          {t('common.import')}
         </Button>
-        <input ref={importInputRef as React.RefObject<HTMLInputElement>} type="file" accept=".xlsx,.csv,.pdf,.jpg,.jpeg,.png,.tiff,.rvt,.ifc,.dwg,.dgn,.x81,.x83,.x84,.xml" className="hidden" onChange={onImportInputChange} aria-label={t('common.import', { defaultValue: 'Import' })} />
+        <input ref={importInputRef as React.RefObject<HTMLInputElement>} type="file" accept=".xlsx,.csv,.pdf,.jpg,.jpeg,.png,.tiff,.rvt,.ifc,.dwg,.dgn,.x81,.x83,.x84,.xml" className="hidden" onChange={onImportInputChange} aria-label={t('common.import')} />
         {onPasteFromExcel && (
           <Button
             variant="ghost"

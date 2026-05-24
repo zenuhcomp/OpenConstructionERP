@@ -636,7 +636,7 @@ function MasterTab({
           <table className="w-full text-sm">
             <thead className="bg-surface-secondary text-content-tertiary text-xs uppercase tracking-wide">
               <tr>
-                <th className="px-4 py-2.5 text-left">{t('common.name', { defaultValue: 'Name' })}</th>
+                <th className="px-4 py-2.5 text-left">{t('common.name')}</th>
                 <th className="px-4 py-2.5 text-left">{t('schedule_advanced.planned_start', { defaultValue: 'Planned start' })}</th>
                 <th className="px-4 py-2.5 text-left">{t('schedule_advanced.planned_finish', { defaultValue: 'Planned finish' })}</th>
                 <th className="px-4 py-2.5 text-left">{t('common.status', { defaultValue: 'Status' })}</th>
@@ -1248,7 +1248,7 @@ function PhasesTableView({
           <thead className="bg-surface-secondary text-content-tertiary text-xs uppercase tracking-wide">
             <tr>
               <th className="px-4 py-2.5 text-left">#</th>
-              <th className="px-4 py-2.5 text-left">{t('common.name', { defaultValue: 'Name' })}</th>
+              <th className="px-4 py-2.5 text-left">{t('common.name')}</th>
               <th className="px-4 py-2.5 text-left">{t('schedule_advanced.planned_start', { defaultValue: 'Start' })}</th>
               <th className="px-4 py-2.5 text-left">{t('schedule_advanced.planned_finish', { defaultValue: 'Finish' })}</th>
               <th className="px-4 py-2.5 text-right">{t('schedule_advanced.duration_days', { defaultValue: 'Days' })}</th>

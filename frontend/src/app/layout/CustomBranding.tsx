@@ -342,7 +342,7 @@ function BrandingEditor({
             type="button"
             onClick={onClose}
             className="h-7 w-7 flex items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
-            aria-label={t('common.close', { defaultValue: 'Close' })}
+            aria-label={t('common.close')}
           >
             <X size={16} />
           </button>

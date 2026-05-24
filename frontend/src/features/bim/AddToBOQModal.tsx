@@ -312,7 +312,7 @@ export default function AddToBOQModal({
     onError: (err: Error) => {
       addToast({
         type: 'error',
-        title: t('common.error', { defaultValue: 'Error' }),
+        title: t('common.error'),
         message: err.message || String(err),
       });
     },
@@ -373,7 +373,7 @@ export default function AddToBOQModal({
     onError: (err: Error) => {
       addToast({
         type: 'error',
-        title: t('common.error', { defaultValue: 'Error' }),
+        title: t('common.error'),
         message: err.message || String(err),
       });
     },
@@ -547,7 +547,7 @@ export default function AddToBOQModal({
 
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <Label>{t('bim.form_ordinal', { defaultValue: 'Ordinal' })}</Label>
+                  <Label>{t('common.ordinal')}</Label>
                   <input
                     type="text"
                     value={ordinal}

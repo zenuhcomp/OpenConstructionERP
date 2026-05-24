@@ -1433,7 +1433,7 @@ function ApplyToBOQModal({
             {/* BOQ selector */}
             <div>
               <label className="block text-sm font-medium text-content-primary mb-1.5">
-                {t('boq.boq', { defaultValue: 'BOQ' })}
+                {t('common.boq')}
               </label>
               <select
                 value={boqId}

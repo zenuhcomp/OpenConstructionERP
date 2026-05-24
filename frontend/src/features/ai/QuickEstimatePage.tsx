@@ -270,10 +270,10 @@ function LoadingState({ isCad, fileName, fileSizeMB }: { isCad?: boolean; fileNa
                   {t('boq.unit', { defaultValue: 'Unit' })}
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold text-content-tertiary uppercase tracking-wide text-right">
-                  {t('boq.quantity', { defaultValue: 'Qty' })}
+                  {t('common.quantity')}
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold text-content-tertiary uppercase tracking-wide text-right">
-                  {t('boq.unit_rate', { defaultValue: 'Rate' })}
+                  {t('common.rate')}
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold text-content-tertiary uppercase tracking-wide text-right">
                   {t('boq.total', { defaultValue: 'Total' })}
@@ -413,7 +413,7 @@ function ResultsTable({ result, selectedCurrency, enrichResult }: { result: Esti
               {t('ai.col_unit', { defaultValue: 'Unit' })}
             </th>
             <th className="px-4 py-3 text-xs font-semibold text-content-tertiary uppercase tracking-wide text-right w-24">
-              {t('ai.col_qty', { defaultValue: 'Qty' })}
+              {t('common.quantity')}
             </th>
             <th className="px-4 py-3 text-xs font-semibold text-content-tertiary uppercase tracking-wide text-right w-28">
               {t('ai.col_rate', { defaultValue: 'Unit Rate' })}
@@ -607,7 +607,7 @@ function QuantityTablesResult({ data }: { data: CadExtractResponse }) {
                   <thead>
                     <tr className="border-b border-border-light/50 text-left">
                       <th className="px-4 py-2 text-xs font-semibold text-content-tertiary uppercase tracking-wide">
-                        {t('ai.cad_col_type', { defaultValue: 'Type' })}
+                        {t('common.type')}
                       </th>
                       <th className="px-4 py-2 text-xs font-semibold text-content-tertiary uppercase tracking-wide">
                         {t('ai.cad_col_material', { defaultValue: 'Material' })}
@@ -866,7 +866,7 @@ function CompactOptions({
       </div>
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-content-tertiary uppercase tracking-wide">
-          {t('ai.currency_label', { defaultValue: 'Currency' })}
+          {t('common.currency')}
         </label>
         <select
           value={currency}
@@ -2409,7 +2409,7 @@ export function QuickEstimatePage() {
 
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium text-content-tertiary uppercase tracking-wide">
-                      {t('ai.currency_label', { defaultValue: 'Currency' })}
+                      {t('common.currency')}
                     </label>
                     <select
                       value={currency}

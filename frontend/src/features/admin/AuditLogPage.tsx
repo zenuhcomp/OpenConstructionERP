@@ -1128,7 +1128,7 @@ export function AuditLogPage() {
                     : t('audit.error_generic', { defaultValue: 'Please try again or refine the filters.' })
                 }
                 action={{
-                  label: t('common.retry', { defaultValue: 'Retry' }),
+                  label: t('common.retry'),
                   onClick: () => void entriesQuery.refetch(),
                 }}
               />

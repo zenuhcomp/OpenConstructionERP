@@ -2128,7 +2128,7 @@ function PPEDetailDrawer({ item, onClose }: { item: PPEIssue; onClose: () => voi
       {item.notes && (
         <div>
           <div className="text-xs text-content-tertiary uppercase mb-1">
-            {t('common.notes', { defaultValue: 'Notes' })}
+            {t('common.notes')}
           </div>
           <p className="text-sm text-content-secondary whitespace-pre-wrap">{item.notes}</p>
         </div>

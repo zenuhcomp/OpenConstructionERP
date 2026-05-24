@@ -883,7 +883,7 @@ function RuleEditorModal({
               className="flex items-center gap-1.5 rounded-lg bg-oe-blue px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-oe-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting && <Loader2 size={12} className="animate-spin" />}
-              {t('common.save', { defaultValue: 'Save' })}
+              {t('common.save')}
             </button>
           </div>
         </form>
@@ -2131,7 +2131,7 @@ function RequirementsTabContent({
               title={t('bim_rules.req_export_xlsx', { defaultValue: 'Export as Excel' })}
             >
               <Download size={12} />
-              {t('common.export', { defaultValue: 'Export' })}
+              {t('common.export')}
             </a>
           )}
 
@@ -2275,7 +2275,7 @@ function RequirementsTabContent({
       {isLoading ? (
         <div className="flex items-center justify-center py-12 text-sm text-content-secondary">
           <Loader2 size={18} className="mr-2 animate-spin" />
-          {t('common.loading', { defaultValue: 'Loading...' })}
+          {t('common.loading')}
         </div>
       ) : !currentSetId || filteredReqs.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border-light bg-surface-secondary/30 px-6 py-8">
@@ -2418,7 +2418,7 @@ function RequirementsTabContent({
                         type="button"
                         onClick={() => openEdit(req)}
                         className="rounded p-1 text-content-secondary hover:bg-surface-tertiary hover:text-oe-blue"
-                        title={t('common.edit', { defaultValue: 'Edit' })}
+                        title={t('common.edit')}
                       >
                         <Pencil size={13} />
                       </button>

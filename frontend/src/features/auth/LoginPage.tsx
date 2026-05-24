@@ -408,7 +408,7 @@ export function LoginPage() {
             { x:  220, y: -75, icon: TrendingUp,      label: t('login.mod.cost5d',   { defaultValue: '5D' }) },
             // Mid row (y = 0) — 5 cells aligned on the same axis.
             { x: -176, y:  0,  icon: Database,        label: t('login.mod.costs',    { defaultValue: 'Costs' }) },
-            { x:  -88, y:  0,  icon: FileSpreadsheet, label: t('login.mod.boq',      { defaultValue: 'BOQ' }) },
+            { x:  -88, y:  0,  icon: FileSpreadsheet, label: t('common.boq') },
             { x:    0, y:  0,  icon: Layers,          label: t('login.mod.core',     { defaultValue: 'Workspace' }), accent: true },
             { x:   88, y:  0,  icon: CalendarClock,   label: t('login.mod.schedule', { defaultValue: 'Schedule' }) },
             { x:  176, y:  0,  icon: BarChart3,       label: t('login.mod.tender',   { defaultValue: 'Tendering' }) },

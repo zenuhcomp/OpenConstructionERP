@@ -1186,7 +1186,7 @@ function ProjectSwitcher() {
                   onClick={() => refetch()}
                   className="text-xs text-oe-blue hover:underline"
                 >
-                  {t('common.retry', { defaultValue: 'Retry' })}
+                  {t('common.retry')}
                 </button>
               </div>
             )}

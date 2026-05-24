@@ -474,7 +474,7 @@ function CreateAccommodationModal({
             loading={mutation.isPending}
             data-testid="accommodation-create-submit"
           >
-            {t('common.create', { defaultValue: 'Create' })}
+            {t('common.create')}
           </Button>
         </>
       }
