@@ -26,8 +26,11 @@ from app.modules.contracts.models import (
     ContractLine,
     FeeStructure,
     FinalAccount,
+    GainshareConfiguration,
+    LDClause,
     ProgressClaim,
     ProgressClaimLine,
+    RetentionSchedule,
 )
 from app.modules.contracts.repository import (
     ContractLineRepository,
@@ -686,6 +689,195 @@ class ContractsService:
     async def delete_contract(self, contract_id: uuid.UUID) -> None:
         await self.get_contract(contract_id)
         await self.contract_repo.delete(contract_id)
+
+    async def clone_contract(
+        self,
+        source_contract_id: uuid.UUID,
+        new_code: str,
+        *,
+        target_project_id: uuid.UUID | None = None,
+        new_title: str | None = None,
+        include_lines: bool = True,
+        copy_subconfigs: bool = True,
+        user_id: str | None = None,
+    ) -> Contract:
+        """Deep-clone a contract into the same or a different project.
+
+        Security model (R7 IDOR-closure):
+            * Read access on the **source** contract is verified by the
+              router via :func:`_verify_contract_access` before this
+              method is called.
+            * Write access on the **destination** project is verified by
+              the router via :func:`verify_project_access` before this
+              method is called — so a manager on project A cannot
+              ``clone --target_project_id=<project_B_id>`` and copy
+              project A's commercial terms into project B.
+            * Manager-or-higher RBAC is enforced at the route level
+              via ``RequirePermission("contracts.clone")``.
+
+        Lifecycle invariants:
+            * Clone is always materialised in ``draft`` status with
+              ``signed_at=None`` regardless of the source's lifecycle
+              stage — a cloned contract is a brand-new instrument that
+              must be re-signed.
+            * Payment history (progress claims, claim lines, final
+              accounts, lien-waiver attachments, retention-release
+              audit entries) is **never** copied — that ledger belongs
+              to the original contract.
+        """
+        source = await self.get_contract(source_contract_id)
+        dest_project_id = target_project_id or source.project_id
+
+        # Bare-minimum guard against accidental code collision (the DB
+        # has a UNIQUE constraint, but a friendly 400 beats a 500).
+        existing = await self.contract_repo.get_by_code(new_code)
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "contract_code_in_use",
+                    "message": f"Contract code {new_code!r} is already in use",
+                },
+            )
+
+        # Copy the terms dict by value so a later mutation on the clone
+        # cannot bleed back into the source contract's terms.
+        cloned_terms = dict(source.terms or {})
+        cloned_meta = dict(getattr(source, "metadata_", {}) or {})
+        # Strip volatile audit-trail fields so the clone starts with a
+        # clean retention-release / lifecycle metadata block.
+        for k in ("retention_releases", "lien_waivers"):
+            cloned_meta.pop(k, None)
+        cloned_meta["cloned_from_contract_id"] = str(source.id)
+
+        clone = Contract(
+            code=new_code,
+            title=new_title or f"{source.title} (clone)",
+            contract_type=source.contract_type,
+            counterparty_type=source.counterparty_type,
+            counterparty_id=source.counterparty_id,
+            project_id=dest_project_id,
+            parent_contract_id=None,  # do NOT inherit the source's parent
+            start_date=source.start_date,
+            end_date=source.end_date,
+            total_value=Decimal(str(source.total_value or 0)),
+            currency=source.currency,
+            retention_percent=Decimal(str(source.retention_percent or 0)),
+            retention_release_event=source.retention_release_event,
+            status="draft",          # cloned instrument starts as draft
+            signed_at=None,          # must be re-signed
+            terms=cloned_terms,
+            created_by=user_id,
+            metadata_=cloned_meta,
+        )
+        clone = await self.contract_repo.create(clone)
+
+        # ── Schedule-of-Values lines (preserve hierarchy) ────────────
+        if include_lines:
+            src_lines = await self.line_repo.list_for_contract(source.id)
+            # Map old line id → new line id so child parent_line_id
+            # references resolve correctly in the clone.
+            id_map: dict[uuid.UUID, uuid.UUID] = {}
+            # Two-pass to handle parent_line_id ordering.
+            for ln in src_lines:
+                new_line = ContractLine(
+                    contract_id=clone.id,
+                    parent_line_id=None,  # rewritten in pass 2
+                    code=ln.code,
+                    description=ln.description,
+                    scope_section=ln.scope_section,
+                    line_type=ln.line_type,
+                    unit=ln.unit,
+                    quantity=Decimal(str(ln.quantity or 0)),
+                    unit_rate=Decimal(str(ln.unit_rate or 0)),
+                    total_value=Decimal(str(ln.total_value or 0)),
+                    order_index=ln.order_index,
+                    metadata_=dict(getattr(ln, "metadata_", {}) or {}),
+                )
+                new_line = await self.line_repo.create(new_line)
+                id_map[ln.id] = new_line.id
+            # Pass 2 — wire up parent_line_id translations.
+            for ln in src_lines:
+                if ln.parent_line_id is None:
+                    continue
+                new_parent = id_map.get(ln.parent_line_id)
+                if new_parent is None:
+                    continue
+                await self.line_repo.update_fields(
+                    id_map[ln.id], parent_line_id=new_parent,
+                )
+
+        # ── Sub-configurations ──────────────────────────────────────
+        if copy_subconfigs:
+            src_retention = await self.retention_repo.list_for_contract(source.id)
+            for r in src_retention:
+                self.session.add(RetentionSchedule(
+                    contract_id=clone.id,
+                    accrual_rule=dict(r.accrual_rule or {}),
+                    release_rule=dict(r.release_rule or {}),
+                    notes=r.notes,
+                ))
+            src_fee = await self.fee_repo.get_for_contract(source.id)
+            if src_fee is not None:
+                self.session.add(FeeStructure(
+                    contract_id=clone.id,
+                    fee_type=src_fee.fee_type,
+                    fee_percent=Decimal(str(src_fee.fee_percent or 0)),
+                    fee_fixed_amount=(
+                        None if src_fee.fee_fixed_amount is None
+                        else Decimal(str(src_fee.fee_fixed_amount))
+                    ),
+                    sliding_scale=list(src_fee.sliding_scale or []),
+                    max_fee=(
+                        None if src_fee.max_fee is None
+                        else Decimal(str(src_fee.max_fee))
+                    ),
+                ))
+            src_gain = await self.gainshare_repo.get_for_contract(source.id)
+            if src_gain is not None:
+                self.session.add(GainshareConfiguration(
+                    contract_id=clone.id,
+                    target_cost=Decimal(str(src_gain.target_cost or 0)),
+                    gmp_cap=Decimal(str(src_gain.gmp_cap or 0)),
+                    savings_split_owner_pct=Decimal(
+                        str(src_gain.savings_split_owner_pct or 0),
+                    ),
+                    savings_split_contractor_pct=Decimal(
+                        str(src_gain.savings_split_contractor_pct or 0),
+                    ),
+                    overrun_responsibility=src_gain.overrun_responsibility,
+                ))
+            src_lds = await self.ld_repo.list_for_contract(source.id)
+            for ld in src_lds:
+                self.session.add(LDClause(
+                    contract_id=clone.id,
+                    per_day_amount=Decimal(str(ld.per_day_amount or 0)),
+                    currency=ld.currency,
+                    max_amount=(
+                        None if ld.max_amount is None
+                        else Decimal(str(ld.max_amount))
+                    ),
+                    milestone_id=ld.milestone_id,
+                    enforcement_status=ld.enforcement_status,
+                ))
+            await self.session.flush()
+
+        event_bus.publish_detached(
+            "contracts.contract.cloned",
+            data={
+                "source_contract_id": str(source.id),
+                "clone_contract_id": str(clone.id),
+                "source_project_id": str(source.project_id),
+                "dest_project_id": str(dest_project_id),
+                "actor": user_id,
+            },
+            source_module="contracts",
+        )
+        logger.info(
+            "Contract cloned: %s → %s (project %s → %s)",
+            source.code, clone.code, source.project_id, dest_project_id,
+        )
+        return clone
 
     async def transition_contract(
         self,
