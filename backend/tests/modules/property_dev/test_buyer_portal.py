@@ -465,8 +465,20 @@ async def test_issue_response_carries_correct_buyer_id(
     assert body["row"]["buyer_id"] == chain["buyer_id"]
     # Portal URL embeds the token.
     assert body["portal_url"].endswith(f"/buyer-portal/{body['token']}")
-    # expires_at is in the future.
+    # expires_at is in the future. Tolerate either ISO-Z or +00:00 form
+    # (Pydantic emits the former; ``fromisoformat`` only parses the
+    # latter on Python 3.11+ when the suffix is exactly ``Z``).
     from datetime import UTC, datetime
 
-    expires = datetime.fromisoformat(body["expires_at"].replace("Z", "+00:00"))
+    raw = str(body["expires_at"])
+    raw_norm = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
+    try:
+        expires = datetime.fromisoformat(raw_norm)
+    except ValueError:
+        # Last-ditch: trim microseconds + tz and parse plain.
+        expires = datetime.fromisoformat(raw_norm.split(".")[0]).replace(
+            tzinfo=UTC,
+        )
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
     assert expires > datetime.now(UTC)
