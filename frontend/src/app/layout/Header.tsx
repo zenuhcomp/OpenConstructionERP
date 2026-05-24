@@ -750,6 +750,8 @@ function LanguageSwitcher({
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-haspopup="true"
+        aria-label={`Language: ${currentLang.name}`}
+        title={currentLang.name}
         className={clsx(
           'flex h-8 items-center gap-1.5 rounded-lg px-2',
           'text-xs font-medium text-content-secondary',
@@ -759,7 +761,7 @@ function LanguageSwitcher({
         )}
       >
         <CountryFlag code={currentLang.country} size={16} />
-        <ChevronDown size={11} className={clsx('transition-transform duration-fast', open && 'rotate-180')} />
+        <ChevronDown size={11} className={clsx('transition-transform duration-fast', open && 'rotate-180')} aria-hidden="true" />
       </button>
 
       {open && (
