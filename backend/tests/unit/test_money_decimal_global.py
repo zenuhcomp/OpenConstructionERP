@@ -218,12 +218,22 @@ def _is_money_named(field_name: str) -> bool:
 
 
 # Initial audit count (via the regex/heuristic below): 149 money-named
-# fields rendering as ``"type": "number"`` in JSON-schema output. After
-# this PR: 40 fixed → 109 remaining. The cap below is the WORST
-# acceptable count; sibling agents that fix further money fields should
-# *lower* it to lock in their progress. New money-as-float fields ADDED
+# fields rendering as ``"type": "number"`` in JSON-schema output.
+#   * First wave fixed the top 40 → 109 remaining.
+#   * v3128 (ai.cost_usd_estimate) regressed +1 → 110.
+#   * v3129 money sweep (see ``v3129_money_decimal_sweep`` alembic rev)
+#     converted the remaining deferred fields catalogued in
+#     ``docs/MONEY_FLOAT_REMAINING.md`` (111 fields incl. the v3128
+#     regression). 1 field remains: ``BidComparisonRow.budget_quantity``
+#     — flagged in the audit as "measurement, but priced — verify per
+#     project"; we kept it ``float`` because it is genuinely a measured
+#     quantity in the bid context, not a unit price. The cap is set to
+#     1 so any further regression — a new ``: float`` money field on a
+#     schema, or a callable wrongly downcast — is caught by CI.
+# Sibling agents that fix further money fields should *lower* this
+# constant to lock in their progress. New money-as-float fields ADDED
 # to a schema will push the count over the cap and fail CI.
-MAX_REMAINING_MONEY_FLOATS = 109
+MAX_REMAINING_MONEY_FLOATS = 1
 
 
 def _collect_module_schemas() -> dict[str, dict]:

@@ -370,6 +370,17 @@ async def _position_to_response_with_links(
 
 def _markup_to_response(markup: object) -> MarkupResponse:
     """Build a MarkupResponse from a BOQMarkup ORM object."""
+    from decimal import Decimal as _Decimal
+    from decimal import InvalidOperation as _InvOp
+
+    raw_amount = getattr(markup, "fixed_amount", "0")
+    try:
+        fixed_amount = _Decimal(str(raw_amount or "0"))
+        if not fixed_amount.is_finite():
+            fixed_amount = _Decimal("0")
+    except (_InvOp, ValueError):
+        fixed_amount = _Decimal("0")
+
     return MarkupResponse(
         id=markup.id,  # type: ignore[attr-defined]
         boq_id=markup.boq_id,  # type: ignore[attr-defined]
@@ -377,7 +388,7 @@ def _markup_to_response(markup: object) -> MarkupResponse:
         markup_type=markup.markup_type,  # type: ignore[attr-defined]
         category=markup.category,  # type: ignore[attr-defined]
         percentage=float(markup.percentage),  # type: ignore[attr-defined]
-        fixed_amount=float(markup.fixed_amount),  # type: ignore[attr-defined]
+        fixed_amount=fixed_amount,  # v3 §10 — Decimal
         apply_to=markup.apply_to,  # type: ignore[attr-defined]
         sort_order=markup.sort_order,  # type: ignore[attr-defined]
         is_active=markup.is_active,  # type: ignore[attr-defined]

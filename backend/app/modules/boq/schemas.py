@@ -34,7 +34,7 @@ POSITION_TOTAL_CAP: Decimal = Decimal("1e15")
 
 def _check_position_total_cap(
     quantity: float | None,
-    unit_rate: float | None,
+    unit_rate: float | Decimal | None,
 ) -> None:
     """Reject ``quantity * unit_rate`` totals beyond ``POSITION_TOTAL_CAP``.
 
@@ -252,8 +252,10 @@ class PositionCreate(BaseModel):
     # 0.0, so an Excel import with a blank quantity cell silently zero-filled
     # the line and rolled up as €0 instead of being flagged as missing data.
     quantity: float = Field(..., ge=0.0, description="Measured quantity", examples=[125.5])
-    unit_rate: float = Field(
-        default=0.0, ge=0.0, description="Price per unit", examples=[285.00]
+    # v3 §10 — money is Decimal-in / Decimal-as-string out. Pydantic v2
+    # coerces int/float/str inputs to Decimal so legacy clients still work.
+    unit_rate: Decimal = Field(
+        default=Decimal("0"), ge=0, description="Price per unit", examples=["285.00"],
     )
     classification: dict[str, Any] = Field(
         default_factory=dict,
@@ -363,6 +365,10 @@ class PositionCreate(BaseModel):
         _check_position_total_cap(self.quantity, self.unit_rate)
         return self
 
+    @field_serializer("unit_rate", when_used="json")
+    def _ser_unit_rate(self, v: Decimal) -> str | None:
+        return _serialise_money(v)
+
 
 class SectionCreate(BaseModel):
     """Create a BOQ section (header row without pricing).
@@ -400,7 +406,8 @@ class PositionUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=5000)
     unit: str | None = Field(default=None, min_length=1, max_length=20)
     quantity: float | None = Field(default=None, ge=0.0)
-    unit_rate: float | None = Field(default=None, ge=0.0)
+    # v3 §10 — money is Decimal-in / Decimal-as-string out.
+    unit_rate: Decimal | None = Field(default=None, ge=0)
     classification: dict[str, Any] | None = None
     source: str | None = Field(
         default=None,
@@ -483,6 +490,10 @@ class PositionUpdate(BaseModel):
     def _check_total_cap(self) -> "PositionUpdate":
         _check_position_total_cap(self.quantity, self.unit_rate)
         return self
+
+    @field_serializer("unit_rate", when_used="json")
+    def _ser_unit_rate(self, v: Decimal | None) -> str | None:
+        return _serialise_money(v)
 
 
 # ── v3.12.0 Stream A — bulk-update + per-field restore ───────────────────────
@@ -696,7 +707,15 @@ class PositionResponse(BaseModel):
 # ── Markup schemas ────────────────────────────────────────────────────────────
 
 
-class MarkupCreate(BaseModel):
+class _MarkupBase(BaseModel):
+    """Shared serializer for ``fixed_amount`` (v3 §10 — Decimal-as-string)."""
+
+    @field_serializer("fixed_amount", when_used="json", check_fields=False)
+    def _ser_fixed_amount(self, v: Decimal | None) -> str | None:
+        return _serialise_money(v)
+
+
+class MarkupCreate(_MarkupBase):
     """Create a markup/overhead line on a BOQ.
 
     ``apply_to`` controls the markup base:
@@ -726,14 +745,14 @@ class MarkupCreate(BaseModel):
         pattern=r"^(overhead|profit|tax|contingency|insurance|bond|other)$",
     )
     percentage: float = Field(default=0.0, ge=0.0, le=100.0)
-    fixed_amount: float = Field(default=0.0, ge=0.0)
+    fixed_amount: Decimal = Field(default=Decimal("0"), ge=0)
     apply_to: str = Field(default="direct_cost", pattern=r"^(direct_cost|subtotal|cumulative)$")
     sort_order: int = Field(default=0, ge=0)
     is_active: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class MarkupUpdate(BaseModel):
+class MarkupUpdate(_MarkupBase):
     """Partial update for a BOQ markup."""
 
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -745,14 +764,14 @@ class MarkupUpdate(BaseModel):
         pattern=r"^(overhead|profit|tax|contingency|insurance|bond|other)$",
     )
     percentage: float | None = Field(default=None, ge=0.0, le=100.0)
-    fixed_amount: float | None = Field(default=None, ge=0.0)
+    fixed_amount: Decimal | None = Field(default=None, ge=0)
     apply_to: str | None = Field(default=None, pattern=r"^(direct_cost|subtotal|cumulative)$")
     sort_order: int | None = Field(default=None, ge=0)
     is_active: bool | None = None
     metadata: dict[str, Any] | None = None
 
 
-class MarkupResponse(BaseModel):
+class MarkupResponse(_MarkupBase):
     """Markup line returned from the API."""
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
@@ -763,7 +782,7 @@ class MarkupResponse(BaseModel):
     markup_type: str
     category: str
     percentage: float
-    fixed_amount: float
+    fixed_amount: Decimal = Decimal("0")
     apply_to: str
     sort_order: int
     is_active: bool
@@ -1408,11 +1427,17 @@ class SensitivityResponse(BaseModel):
 
     Shows which positions have the biggest impact on the total cost when
     their cost varies by ``variation_pct`` percent.
+
+    v3 §10 — ``base_total`` is money; Decimal-as-string in JSON.
     """
 
-    base_total: float
+    base_total: Decimal = Decimal("0")
     variation_pct: float = 10.0
     items: list[SensitivityItem] = Field(default_factory=list)
+
+    @field_serializer("base_total", when_used="json")
+    def _ser_base_total(self, v: Decimal) -> str | None:
+        return _serialise_money(v)
 
 
 # ── Monte Carlo Cost Risk Analysis schemas ────────────────────────────────
@@ -1451,16 +1476,23 @@ class CostRiskResponse(BaseModel):
     Runs N iterations of PERT-distributed cost sampling per position,
     collects total costs, and returns percentiles, histogram, contingency,
     and risk drivers (positions contributing most to variance).
+
+    v3 §10 — ``base_total`` and ``recommended_budget`` are money;
+    Decimal-as-string in JSON.
     """
 
     iterations: int
-    base_total: float
+    base_total: Decimal = Decimal("0")
     percentiles: CostRiskPercentiles
     contingency_p80: float
     contingency_pct: float
-    recommended_budget: float
+    recommended_budget: Decimal = Decimal("0")
     histogram: list[CostRiskHistogramBin] = Field(default_factory=list)
     risk_drivers: list[CostRiskDriver] = Field(default_factory=list)
+
+    @field_serializer("base_total", "recommended_budget", when_used="json")
+    def _ser_money(self, v: Decimal) -> str | None:
+        return _serialise_money(v)
 
 
 # ── AI Classification schemas ─────────────────────────────────────────────
@@ -1682,13 +1714,20 @@ class SuggestPrerequisitesRequest(BaseModel):
 
 
 class PrerequisiteItem(BaseModel):
-    """A single suggested prerequisite/companion position."""
+    """A single suggested prerequisite/companion position.
+
+    v3 §10 — ``typical_rate_eur`` is money; Decimal-as-string in JSON.
+    """
 
     description: str
     unit: str
-    typical_rate_eur: float = 0.0
+    typical_rate_eur: Decimal = Decimal("0")
     relationship: str = "companion"  # prerequisite | companion | successor
     reason: str = ""
+
+    @field_serializer("typical_rate_eur", when_used="json")
+    def _ser_typical_rate(self, v: Decimal) -> str | None:
+        return _serialise_money(v)
 
 
 class SuggestPrerequisitesResponse(BaseModel):
@@ -1805,18 +1844,31 @@ class EscalateRateRequest(BaseModel):
 
 
 class EscalationFactors(BaseModel):
-    """Breakdown of escalation factors."""
+    """Breakdown of escalation factors.
+
+    v3 §10 — ``labor_cost_change`` is money (annual labour cost delta);
+    Decimal-as-string in JSON. ``material_inflation`` and
+    ``regional_adjustment`` stay float (they are pure ratios/percentages).
+    """
 
     material_inflation: float = 0.0
-    labor_cost_change: float = 0.0
+    labor_cost_change: Decimal = Decimal("0")
     regional_adjustment: float = 0.0
+
+    @field_serializer("labor_cost_change", when_used="json")
+    def _ser_labor_cost_change(self, v: Decimal) -> str | None:
+        return _serialise_money(v)
 
 
 class EscalateRateResponse(BaseModel):
-    """Rate escalation result."""
+    """Rate escalation result.
 
-    original_rate: float
-    escalated_rate: float
+    v3 §10 — ``original_rate`` and ``escalated_rate`` are money;
+    Decimal-as-string in JSON.
+    """
+
+    original_rate: Decimal = Decimal("0")
+    escalated_rate: Decimal = Decimal("0")
     escalation_percent: float
     factors: EscalationFactors = Field(default_factory=EscalationFactors)
     confidence: str = "medium"  # high | medium | low
@@ -1824,19 +1876,31 @@ class EscalateRateResponse(BaseModel):
     model_used: str = ""
     tokens_used: int = 0
 
+    @field_serializer("original_rate", "escalated_rate", when_used="json")
+    def _ser_money(self, v: Decimal) -> str | None:
+        return _serialise_money(v)
+
 
 # ── Project Intelligence (RFC 25) ───────────────────────────────────────────
 
 
 class LineItemResponse(BaseModel):
-    """A single line item in the cost-drivers Pareto widget."""
+    """A single line item in the cost-drivers Pareto widget.
+
+    v3 §10 — ``unit_rate`` and ``total_cost`` are money; Decimal-as-string
+    in JSON.
+    """
 
     position_id: str
     description: str = ""
     unit: str = ""
     quantity: float = 0.0
-    unit_rate: float = 0.0
-    total_cost: float = 0.0
+    unit_rate: Decimal = Decimal("0")
+    total_cost: Decimal = Decimal("0")
+
+    @field_serializer("unit_rate", "total_cost", when_used="json")
+    def _ser_money(self, v: Decimal) -> str | None:
+        return _serialise_money(v)
     share_of_total: float = Field(
         0.0, description="Share of the aggregate project total — 0.0 to 1.0"
     )

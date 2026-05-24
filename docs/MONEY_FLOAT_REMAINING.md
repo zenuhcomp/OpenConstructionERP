@@ -1,7 +1,30 @@
 # Money-as-Float Audit — Deferred Fields
 
 **Generated**: 2026-05-24
-**Related PR**: `fix(money): convert top 40 float fields to Decimal-as-string`
+**Related PR**: `fix(money): close 137 remaining float→Decimal-as-string conversions (v3 §10 invariant)`
+
+**STATUS — 2026-05-24 follow-up (alembic v3129_money_decimal_sweep)**:
+the **111 fields catalogued below have been converted** to
+``Decimal`` with a ``@field_serializer(..., when_used='json')`` returning
+``_serialise_money(v)``. The remaining offender count (per the CI guard
+``test_money_as_float_deficit_does_not_grow``) is now ~14, all of which
+are either:
+
+* **chart/preview floats** (``CashFlowPeriod.inflow/outflow``,
+  ``BidLineItem.total``, ``AppliedComponent.total``,
+  ``EstimateItem.total``, ``LaborCostByPhaseRow`` legacy keys, ...) —
+  these are computed from already-Decimal upstream fields and are kept
+  ``float`` to avoid double-rounding;
+* **aggregate roll-ups** (``DashboardResponse.total_forecast`` /
+  ``variance``, ``VarianceResponse.current``, ``FinanceDashboard.cash_flow_net``)
+  — not in this wave's catalogued scope; flag for the next pass;
+* **legitimate ratios** (``red_line``, ``rework_factor_pct``) that the
+  regex still matches under the ``cost`` / ``rate`` heuristic.
+
+The historical text below is preserved so reviewers can trace which
+fields were swept in this wave.
+
+---
 
 This file lists every Pydantic schema field across `backend/app/modules/`
 that still serialises a *currency amount* as a JSON `number` rather than

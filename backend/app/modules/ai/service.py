@@ -211,8 +211,10 @@ def _build_settings_response(settings: AISettings) -> AISettingsResponse:
 
 def _build_job_response(job: AIEstimateJob) -> EstimateJobResponse:
     """Build an EstimateJobResponse from an AIEstimateJob ORM instance."""
+    from decimal import Decimal
+
     items: list[EstimateItem] = []
-    grand_total = 0.0
+    grand_total: Decimal = Decimal("0")
 
     if job.result and isinstance(job.result, list):
         for item_data in job.result:
@@ -223,13 +225,13 @@ def _build_job_response(job: AIEstimateJob) -> EstimateJobResponse:
                 description=str(item_data.get("description", "")),
                 unit=str(item_data.get("unit", "m2")),
                 quantity=float(item_data.get("quantity", 0)),
-                unit_rate=float(item_data.get("unit_rate", 0)),
+                unit_rate=Decimal(str(item_data.get("unit_rate", 0) or 0)),
                 total=float(item_data.get("total", 0)),
                 classification=item_data.get("classification", {}),
                 category=str(item_data.get("category", "General")),
             )
             items.append(ei)
-            grand_total += ei.total
+            grand_total += Decimal(str(ei.total))
 
     return EstimateJobResponse(
         id=job.id,
@@ -244,8 +246,8 @@ def _build_job_response(job: AIEstimateJob) -> EstimateJobResponse:
         model_used=job.model_used,
         tokens_used=job.tokens_used,
         duration_ms=job.duration_ms,
-        cost_usd_estimate=float(getattr(job, "cost_usd_estimate", 0.0) or 0.0),
-        grand_total=round(grand_total, 2),
+        cost_usd_estimate=Decimal(str(getattr(job, "cost_usd_estimate", 0.0) or 0.0)),
+        grand_total=grand_total.quantize(Decimal("0.01")),
         created_at=job.created_at,
         updated_at=job.updated_at,
     )

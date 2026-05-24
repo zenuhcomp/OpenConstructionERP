@@ -144,11 +144,19 @@ class CostModelService:
         spi = data.spi
         cpi = data.cpi
 
-        # Auto-compute indices if not provided (left at default 0)
-        if spi == 0.0 and data.planned_cost > 0.0:
-            spi = round(_safe_divide(data.earned_value, data.planned_cost), 4)
-        if cpi == 0.0 and data.actual_cost > 0.0:
-            cpi = round(_safe_divide(data.earned_value, data.actual_cost), 4)
+        # Auto-compute indices if not provided (left at default 0).
+        # v3 §10 — money fields are Decimal; cast to float at this
+        # boundary because SPI/CPI are unitless ratios stored as float.
+        if spi == 0.0 and float(data.planned_cost) > 0.0:
+            spi = round(
+                _safe_divide(float(data.earned_value), float(data.planned_cost)),
+                4,
+            )
+        if cpi == 0.0 and float(data.actual_cost) > 0.0:
+            cpi = round(
+                _safe_divide(float(data.earned_value), float(data.actual_cost)),
+                4,
+            )
 
         snapshot = CostSnapshot(
             project_id=data.project_id,

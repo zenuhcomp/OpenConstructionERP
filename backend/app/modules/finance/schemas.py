@@ -5,7 +5,23 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+
+
+# ── v3 §10 money serialisation helper ─────────────────────────────────────
+# Mirrors backend/app/modules/boq/schemas.py — money fields are stored /
+# accepted as Decimal but emitted as plain decimal strings in JSON.
+def _serialise_money(v: Decimal | None) -> str | None:
+    if v is None:
+        return None
+    if not isinstance(v, Decimal):
+        try:
+            v = Decimal(str(v))
+        except (InvalidOperation, ValueError):
+            return "0"
+    if not v.is_finite():
+        return "0"
+    return format(v, "f")
 
 
 def _validate_non_negative_decimal(v: str, field_name: str = "value") -> str:
@@ -472,27 +488,42 @@ class EVMListResponse(BaseModel):
 
 
 class FinanceDashboardResponse(BaseModel):
-    """Aggregated finance KPIs for a project or across all projects."""
+    """Aggregated finance KPIs for a project or across all projects.
 
-    total_payable: float = 0.0
-    total_receivable: float = 0.0
-    total_overdue: float = 0.0
+    v3 §10 — money fields are Decimal-as-string in JSON.
+    ``cash_flow_net`` and ``budget_consumed_pct`` are not in the deferred
+    list and stay float (one is a derived signed delta, the other a
+    percentage ratio).
+    """
+
+    total_payable: Decimal = Decimal("0")
+    total_receivable: Decimal = Decimal("0")
+    total_overdue: Decimal = Decimal("0")
     overdue_count: int = 0
     invoices_draft: int = 0
     invoices_pending: int = 0
     invoices_approved: int = 0
     invoices_paid: int = 0
-    total_budget_original: float = 0.0
-    total_budget_revised: float = 0.0
-    total_committed: float = 0.0
-    total_actual: float = 0.0
-    total_variance: float = 0.0
+    total_budget_original: Decimal = Decimal("0")
+    total_budget_revised: Decimal = Decimal("0")
+    total_committed: Decimal = Decimal("0")
+    total_actual: Decimal = Decimal("0")
+    total_variance: Decimal = Decimal("0")
     budget_consumed_pct: float = 0.0
     budget_warning_level: str = "normal"  # "normal" | "caution" | "critical"
-    total_payments: float = 0.0
+    total_payments: Decimal = Decimal("0")
     cash_flow_net: float = 0.0
     # Dominant project currency (budget lines preferred, invoices as
     # fallback). Empty string when no financial record carries a currency
     # yet — the UI then renders amounts without a currency symbol rather
     # than mislabelling them (task #217).
     currency: str = ""
+
+    @field_serializer(
+        "total_payable", "total_receivable", "total_overdue",
+        "total_budget_original", "total_budget_revised", "total_committed",
+        "total_actual", "total_variance", "total_payments",
+        when_used="json",
+    )
+    def _ser_money(self, v: Decimal) -> str | None:
+        return _serialise_money(v)
