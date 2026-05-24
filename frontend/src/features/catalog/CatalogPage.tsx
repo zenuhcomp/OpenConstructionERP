@@ -579,7 +579,11 @@ function ResourceRow({
 
         {/* Name */}
         <td className="px-4 py-3 text-sm text-content-primary font-medium">
-          <div className="flex items-center gap-2 group/name relative">
+          {/* hover:z-50 elevates this cell's whole stacking context above
+              sibling rows on hover so the tooltip below (z-[70]) reliably
+              paints over the next <tr>'s cells. Without this, tooltip
+              clipped behind subsequent rows in default table flow. */}
+          <div className="flex items-center gap-2 group/name relative hover:z-50">
             {regionInfo && <MiniFlag code={regionInfo.flag} size={11} />}
             <span
               className="truncate max-w-[420px]"
@@ -595,7 +599,7 @@ function ResourceRow({
             {resource.name.length > 40 && (
               <span
                 role="tooltip"
-                className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden max-w-[640px] whitespace-normal rounded-md border border-border-light bg-surface-elevated px-3 py-2 text-xs font-normal text-content-primary shadow-lg group-hover/name:block"
+                className="pointer-events-none absolute left-0 top-full z-[70] mt-1 hidden max-w-[640px] whitespace-normal rounded-md border border-border-light bg-surface-elevated px-3 py-2 text-xs font-normal text-content-primary shadow-xl group-hover/name:block"
               >
                 {resource.name}
               </span>
