@@ -67,6 +67,7 @@ import {
 } from '@/shared/ui/WideModal';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { DateDisplay } from '@/shared/ui/DateDisplay';
+import { useConfirm } from '@/shared/hooks/useConfirm';
 import { PipelineBanner } from './PipelineBanner';
 import { useToastStore } from '@/stores/useToastStore';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
@@ -3176,6 +3177,7 @@ function ReservationsTab({
   const [createOpen, setCreateOpen] = useState(false);
   const [convertId, setConvertId] = useState<string | null>(null);
   const [docId, setDocId] = useState<string | null>(null);
+  const { confirm, ...confirmProps } = useConfirm();
 
   // The global header CTA broadcasts ``propdev:new-sub-entity`` when the
   // user clicks "New Reservation" — pick it up and open the modal.
@@ -3356,10 +3358,16 @@ function ReservationsTab({
                               <button
                                 type="button"
                                 disabled={cancelMut.isPending}
-                                onClick={() => {
-                                  if (window.confirm(t('propdev.confirm_cancel_reservation', { defaultValue: 'Cancel this reservation? The plot will return to planned.' }))) {
-                                    cancelMut.mutate(r.id);
-                                  }
+                                onClick={async () => {
+                                  const ok = await confirm({
+                                    title: t('propdev.cancel_reservation_title', { defaultValue: 'Cancel reservation?' }),
+                                    message: t('propdev.confirm_cancel_reservation', { defaultValue: 'Cancel this reservation? The plot will return to planned.' }),
+                                    confirmLabel: t('propdev.cancel', { defaultValue: 'Cancel' }),
+                                    cancelLabel: t('common.back', { defaultValue: 'Back' }),
+                                    variant: 'danger',
+                                  });
+                                  if (!ok) return;
+                                  cancelMut.mutate(r.id);
                                 }}
                                 className="rounded p-1 text-content-secondary hover:bg-rose-100 hover:text-rose-700"
                                 title={t('propdev.cancel', { defaultValue: 'Cancel' })}
@@ -3416,6 +3424,7 @@ function ReservationsTab({
           reservationId={docId}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }
@@ -3709,6 +3718,7 @@ function SpaTab({
   const [statusFilter, setStatusFilter] = useState<SpaStatus | ''>('');
   const [activeSpaId, setActiveSpaId] = useState<string | null>(null);
   const [docId, setDocId] = useState<string | null>(null);
+  const { confirm, ...confirmProps } = useConfirm();
 
   // Surface convertible reservations directly in the SPA tab so the user
   // is never stuck on a blank list with no actionable path. Previously the
@@ -3962,10 +3972,15 @@ function SpaTab({
                             <button
                               type="button"
                               disabled={voidMut.isPending}
-                              onClick={() => {
-                                if (window.confirm(t('propdev.confirm_void_spa', { defaultValue: 'Void this contract? This is irreversible.' }))) {
-                                  voidMut.mutate(s.id);
-                                }
+                              onClick={async () => {
+                                const ok = await confirm({
+                                  title: t('propdev.void_spa_title', { defaultValue: 'Void contract?' }),
+                                  message: t('propdev.confirm_void_spa', { defaultValue: 'Void this contract? This is irreversible.' }),
+                                  confirmLabel: t('propdev.void', { defaultValue: 'Void' }),
+                                  variant: 'danger',
+                                });
+                                if (!ok) return;
+                                voidMut.mutate(s.id);
                               }}
                               className="rounded p-1 text-content-secondary hover:bg-rose-100 hover:text-rose-700"
                               title={t('propdev.void', { defaultValue: 'Void' })}
@@ -4024,6 +4039,7 @@ function SpaTab({
           contractId={docId}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }
@@ -4222,6 +4238,7 @@ function InstalmentsTable({
   const addToast = useToastStore((s) => s.addToast);
   const [payingId, setPayingId] = useState<string | null>(null);
   const [docId, setDocId] = useState<string | null>(null);
+  const { confirm, ...confirmProps } = useConfirm();
 
   const demandMut = useMutation({
     mutationFn: (id: string) => issueInstalmentDemand(id),
@@ -4307,10 +4324,15 @@ function InstalmentsTable({
                           <button
                             type="button"
                             disabled={waiveMut.isPending}
-                            onClick={() => {
-                              if (window.confirm(t('propdev.confirm_waive', { defaultValue: 'Waive this instalment?' }))) {
-                                waiveMut.mutate(ins.id);
-                              }
+                            onClick={async () => {
+                              const ok = await confirm({
+                                title: t('propdev.waive_title', { defaultValue: 'Waive instalment?' }),
+                                message: t('propdev.confirm_waive', { defaultValue: 'Waive this instalment?' }),
+                                confirmLabel: t('propdev.waive', { defaultValue: 'Waive' }),
+                                variant: 'warning',
+                              });
+                              if (!ok) return;
+                              waiveMut.mutate(ins.id);
                             }}
                             className="rounded p-1 text-content-secondary hover:bg-amber-100 hover:text-amber-700"
                             title={t('propdev.waive', { defaultValue: 'Waive' })}
@@ -4348,6 +4370,7 @@ function InstalmentsTable({
           instalmentId={docId}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </>
   );
 }
@@ -5000,6 +5023,7 @@ function HandoverPlotRow({ plot, buyer }: { plot: Plot; buyer: Buyer | undefined
   const [completeOpen, setCompleteOpen] = useState<string | null>(null);
   const [scheduledAt, setScheduledAt] = useState('');
   const [notes, setNotes] = useState('');
+  const { confirm, ...confirmProps } = useConfirm();
 
   const handoverId = handovers[0]?.id;
 
@@ -5109,17 +5133,20 @@ function HandoverPlotRow({ plot, buyer }: { plot: Plot; buyer: Buyer | undefined
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        t('propdev.confirm_delete_handover', {
-                          defaultValue:
-                            'Delete this scheduled handover? Linked snags will cascade.',
-                        }),
-                      )
-                    ) {
-                      deleteMu.mutate(h.id);
-                    }
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: t('propdev.delete_handover_title', {
+                        defaultValue: 'Delete handover?',
+                      }),
+                      message: t('propdev.confirm_delete_handover', {
+                        defaultValue:
+                          'Delete this scheduled handover? Linked snags will cascade.',
+                      }),
+                      confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+                      variant: 'danger',
+                    });
+                    if (!ok) return;
+                    deleteMu.mutate(h.id);
                   }}
                   disabled={deleteMu.isPending}
                 >
@@ -5243,6 +5270,7 @@ function HandoverPlotRow({ plot, buyer }: { plot: Plot; buyer: Buyer | undefined
           contractId={docModal.contractId}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </Card>
   );
 }
@@ -5962,6 +5990,7 @@ function PlotDetailDrawer({
 
   const [editOpen, setEditOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const { confirm, ...confirmProps } = useConfirm();
 
   const statusMu = useMutation({
     mutationFn: (next: PlotStatus) => updatePlot(plotId, { status: next }),
@@ -6007,17 +6036,20 @@ function PlotDetailDrawer({
       {canDelete && plot.status !== 'sold' && plot.status !== 'handed_over' && (
         <button
           type="button"
-          onClick={() => {
-            if (
-              window.confirm(
-                t('propdev.confirm_delete_plot', {
-                  defaultValue: 'Delete plot {{n}}? This cannot be undone.',
-                  n: plot.plot_number,
-                }),
-              )
-            ) {
-              deleteMu.mutate();
-            }
+          onClick={async () => {
+            const ok = await confirm({
+              title: t('propdev.delete_plot_title', {
+                defaultValue: 'Delete plot?',
+              }),
+              message: t('propdev.confirm_delete_plot', {
+                defaultValue: 'Delete plot {{n}}? This cannot be undone.',
+                n: plot.plot_number,
+              }),
+              confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+              variant: 'danger',
+            });
+            if (!ok) return;
+            deleteMu.mutate();
           }}
           className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
           disabled={deleteMu.isPending}
@@ -6031,6 +6063,7 @@ function PlotDetailDrawer({
   ) : null;
 
   return (
+    <>
     <SideDrawer
       open={!!plot}
       onClose={onClose}
@@ -6154,6 +6187,8 @@ function PlotDetailDrawer({
         </>
       )}
     </SideDrawer>
+    <ConfirmDialog {...confirmProps} />
+    </>
   );
 }
 

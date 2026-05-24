@@ -384,14 +384,10 @@ export function SectionFullWidthRenderer(params: ICellRendererParams) {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (window.confirm(
-              t('boq.confirm_delete_section', {
-                defaultValue: 'Delete this section and all {{count}} positions inside it?',
-                count: childCount,
-              })
-            )) {
-              (ctx as FullGridContext).onDeleteSection!(data.id);
-            }
+            // Confirmation is handled by the parent BOQEditorPage via
+            // useConfirm/ConfirmDialog — keeps modal lifecycle out of
+            // ag-grid cell renderers (which mount/unmount unpredictably).
+            (ctx as FullGridContext).onDeleteSection!(data.id);
           }}
           className="shrink-0 h-5 flex items-center gap-0.5 px-1.5 rounded
                      text-[10px] font-medium

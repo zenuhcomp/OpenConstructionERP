@@ -28,8 +28,9 @@ import {
   Image as ImageIcon,
   CheckSquare,
 } from 'lucide-react';
-import { Card, Button, Badge, EmptyState, Breadcrumb, AuthImage } from '@/shared/ui';
+import { Card, Button, Badge, ConfirmDialog, EmptyState, Breadcrumb, AuthImage } from '@/shared/ui';
 import { apiGet } from '@/shared/lib/api';
+import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import {
@@ -902,6 +903,7 @@ export function PhotoGalleryPage() {
   const queryClient = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
   const activeProjectId = useProjectContextStore((s) => s.activeProjectId);
+  const { confirm, ...confirmProps } = useConfirm();
 
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -1065,12 +1067,17 @@ export function PhotoGalleryPage() {
 
   const handleBatchDelete = useCallback(async () => {
     if (selectedIds.size === 0) return;
-    const confirmed = window.confirm(
-      t('photos.batch_delete_confirm', {
+    const confirmed = await confirm({
+      title: t('photos.batch_delete_title', {
+        defaultValue: 'Delete photos?',
+      }),
+      message: t('photos.batch_delete_confirm', {
         defaultValue: 'Delete {{count}} photo(s)? This cannot be undone.',
         count: selectedIds.size,
       }),
-    );
+      confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+      variant: 'danger',
+    });
     if (!confirmed) return;
     setBatchDeleting(true);
     let ok = 0;
@@ -1099,7 +1106,7 @@ export function PhotoGalleryPage() {
     queryClient.invalidateQueries({ queryKey: ['photos'] });
     queryClient.invalidateQueries({ queryKey: ['photos-timeline'] });
     exitSelectMode();
-  }, [selectedIds, addToast, t, queryClient, exitSelectMode]);
+  }, [selectedIds, confirm, addToast, t, queryClient, exitSelectMode]);
 
   // Stats
   const categoryStats = useMemo(() => {
@@ -1441,6 +1448,7 @@ export function PhotoGalleryPage() {
       >
         <Upload size={22} />
       </button>
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

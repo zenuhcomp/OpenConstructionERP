@@ -24,6 +24,8 @@ import {
 import clsx from 'clsx';
 import { useToastStore } from '@/stores/useToastStore';
 import { apiGet } from '@/shared/lib/api';
+import { useConfirm } from '@/shared/hooks/useConfirm';
+import { ConfirmDialog } from '@/shared/ui/ConfirmDialog';
 import {
   grantFolderPermission,
   listFolderPermissions,
@@ -88,6 +90,7 @@ export function FolderPermissionsModal({
   const [granting, setGranting] = useState(false);
   const [grantError, setGrantError] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const { confirm, ...confirmProps } = useConfirm();
 
   // Permissions for this exact (kind, path).
   const { data: grants = [], isLoading: grantsLoading } = useQuery<
@@ -197,13 +200,18 @@ export function FolderPermissionsModal({
   async function handleRevoke(row: FolderPermissionRow) {
     if (!projectId) return;
     const name = row.user_full_name || row.user_email || row.user_id;
-    const confirm = window.confirm(
-      t('files.permissions.revoke_confirm', {
+    const ok = await confirm({
+      title: t('files.permissions.revoke_title', {
+        defaultValue: 'Revoke access?',
+      }),
+      message: t('files.permissions.revoke_confirm', {
         defaultValue: 'Revoke access for {{name}}?',
         name,
       }),
-    );
-    if (!confirm) return;
+      confirmLabel: t('files.permissions.revoke', { defaultValue: 'Revoke' }),
+      variant: 'danger',
+    });
+    if (!ok) return;
     setRevokingId(row.id);
     try {
       await revokeFolderPermission(projectId, row.id);
@@ -406,6 +414,7 @@ export function FolderPermissionsModal({
           </section>
         </div>
       </div>
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }

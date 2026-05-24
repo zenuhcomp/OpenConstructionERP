@@ -29,7 +29,8 @@ import {
   AlertTriangle,
   type LucideIcon,
 } from 'lucide-react';
-import { Button, Card, Badge, EmptyState, Skeleton, InfoHint, CountryFlag } from '@/shared/ui';
+import { Button, Card, Badge, ConfirmDialog, EmptyState, Skeleton, InfoHint, CountryFlag } from '@/shared/ui';
+import { useConfirm } from '@/shared/hooks/useConfirm';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/shared/lib/api';
 import { getIntlLocale } from '@/shared/lib/formatters';
 import { useToastStore } from '@/stores/useToastStore';
@@ -1222,6 +1223,7 @@ export function CatalogPage() {
   const [showCreateResource, setShowCreateResource] = useState(false);
   const [showBuildAssembly, setShowBuildAssembly] = useState(false);
   const [showPriceAdjust, setShowPriceAdjust] = useState(false);
+  const { confirm, ...confirmProps } = useConfirm();
 
   // Debounce search query by 300ms
   useEffect(() => {
@@ -1350,12 +1352,17 @@ export function CatalogPage() {
     async (regionId: string) => {
       // Destructive: wipes every resource in the region. Confirm before firing
       // so a stray click can't nuke a populated region.
-      const confirmed = window.confirm(
-        t('catalog.delete_region_confirm', {
+      const confirmed = await confirm({
+        title: t('catalog.delete_region_title', {
+          defaultValue: 'Delete region?',
+        }),
+        message: t('catalog.delete_region_confirm', {
           defaultValue: 'Delete region "{{region}}" and all its resources? This cannot be undone.',
           region: regionId,
         }),
-      );
+        confirmLabel: t('common.delete', { defaultValue: 'Delete' }),
+        variant: 'danger',
+      });
       if (!confirmed) return;
       try {
         const result = await apiDelete<{ deleted: number; region: string }>(
@@ -1376,7 +1383,7 @@ export function CatalogPage() {
         });
       }
     },
-    [addToast, t, queryClient, region],
+    [addToast, confirm, t, queryClient, region],
   );
 
   const invalidateAll = useCallback(() => {
@@ -2026,6 +2033,7 @@ export function CatalogPage() {
           }}
         />
       )}
+      <ConfirmDialog {...confirmProps} />
     </div>
   );
 }
