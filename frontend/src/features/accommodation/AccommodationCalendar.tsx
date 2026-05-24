@@ -31,6 +31,7 @@ import {
   useRef,
   useCallback,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -70,6 +71,7 @@ import {
 import { ContactSearchInput } from '@/shared/ui/ContactSearchInput';
 import { useToastStore } from '@/stores/useToastStore';
 import { getErrorMessage } from '@/shared/lib/api';
+import { useFocusTrap } from '@/shared/hooks/useFocusTrap';
 
 import {
   listAccommodations,
@@ -210,6 +212,36 @@ function sumChargesString(charges: Charge[]): string | null {
   const intStr = absStr.slice(0, absStr.length - SCALE) || '0';
   const fracStr = absStr.slice(absStr.length - SCALE).replace(/0+$/, '');
   return `${negative ? '-' : ''}${intStr}${fracStr ? '.' + fracStr : ''}`;
+}
+
+/**
+ * Build the stable cell key matching the data-testid we render on each
+ * empty day-cell button. Keep this in lock-step with the testid format.
+ */
+function cellKey(roomId: string, date: Date): string {
+  return `${roomId}:${format(date, 'yyyy-MM-dd')}`;
+}
+
+/* ── Skeleton (loading state) ────────────────────────────────────────── */
+
+function CalendarSkeleton({ rowCount = 4 }: { rowCount?: number }) {
+  return (
+    <div
+      data-testid="accommodation-calendar-skeleton"
+      role="status"
+      aria-busy="true"
+      aria-label="Loading calendar"
+      className="space-y-2 rounded-2xl border border-border-light bg-surface-elevated p-3"
+    >
+      <div className="h-8 w-full animate-pulse rounded-md bg-surface-secondary/60" />
+      {Array.from({ length: rowCount }).map((_, i) => (
+        <div key={i} className="flex gap-2">
+          <div className="h-9 w-48 animate-pulse rounded-md bg-surface-secondary/60" />
+          <div className="h-9 flex-1 animate-pulse rounded-md bg-surface-secondary/40" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /* ── Top-level page ──────────────────────────────────────────────────── */
@@ -526,11 +558,9 @@ export function AccommodationCalendar({
         </div>
       </div>
 
-      {/* Body */}
+      {/* Body — row-shape skeleton during load */}
       {(accommodationsQuery.isLoading || scopedDetailQuery.isLoading || dataQuery.isLoading) && (
-        <div className="flex items-center justify-center py-16 text-content-tertiary">
-          <Loader2 className="h-5 w-5 animate-spin" />
-        </div>
+        <CalendarSkeleton rowCount={4} />
       )}
 
       {(accommodationsQuery.isError ||
@@ -556,10 +586,12 @@ export function AccommodationCalendar({
             data-testid="accommodation-calendar-empty"
             className="rounded-xl border border-dashed border-border bg-surface-secondary/40 p-8 text-center text-sm text-content-tertiary"
           >
-            {t('accommodation.calendar.noAccommodations', {
-              defaultValue:
-                'No accommodations yet. Create one to start booking rooms.',
-            })}
+            <p className="mb-3 text-content-secondary">
+              {t('accommodation.calendar.noAccommodations', {
+                defaultValue:
+                  'No accommodations yet. Create your first accommodation to start booking rooms.',
+              })}
+            </p>
           </div>
         )}
 
@@ -567,9 +599,13 @@ export function AccommodationCalendar({
         !dataQuery.isError &&
         chosenAccommodations.length > 0 &&
         rows.length === 0 && (
-          <div className="rounded-xl border border-dashed border-border bg-surface-secondary/40 p-8 text-center text-sm text-content-tertiary">
+          <div
+            data-testid="accommodation-calendar-empty-rows"
+            className="rounded-xl border border-dashed border-border bg-surface-secondary/40 p-8 text-center text-sm text-content-tertiary"
+          >
             {t('accommodation.calendar.noRooms', {
-              defaultValue: 'No rooms in the selected accommodation(s) yet.',
+              defaultValue:
+                'No bookings this week — pick a cell to create one. Add rooms from the accommodation detail page if your camp is empty.',
             })}
           </div>
         )}
@@ -661,9 +697,130 @@ function CalendarGrid({
   // makes us provide a fallback for safety.
   const anchorMonth = days[Math.floor(days.length / 2)] ?? days[0] ?? new Date();
 
+  // ── Keyboard navigation ────────────────────────────────────────────
+  // The grid is a roving-tabindex pattern: only the focused cell has
+  // tabIndex=0, all others have tabIndex=-1. Arrow keys traverse rooms
+  // (Up/Down) and days (Left/Right); Enter opens the booking modal;
+  // Escape returns focus to today.
+  const cellRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
+  const today = useMemo(() => new Date(), []);
+  const todayInView = useMemo(
+    () =>
+      days.some(
+        (d) => differenceInCalendarDays(d, today) === 0,
+      ),
+    [days, today],
+  );
+  // Default focus = today on the first room row (or first day if today is
+  // outside the visible window).
+  const firstRoomId = rows[0]?.room.id ?? '';
+  const initialDate =
+    todayInView && firstRoomId
+      ? days.find((d) => differenceInCalendarDays(d, today) === 0)!
+      : days[0];
+  const [focusedKey, setFocusedKey] = useState<string>(() =>
+    firstRoomId && initialDate ? cellKey(firstRoomId, initialDate) : '',
+  );
+
+  // Re-focus today when rows or days change (e.g. switched accommodation
+  // or paged the view). We only set initial focus; we don't yank focus
+  // away from a user who is mid-navigation.
+  const initialFocusAppliedRef = useRef(false);
+  useEffect(() => {
+    if (initialFocusAppliedRef.current) return;
+    if (!firstRoomId || !initialDate) return;
+    const key = cellKey(firstRoomId, initialDate);
+    setFocusedKey(key);
+    // Best-effort initial focus — only if a parent container received
+    // focus already (so we don't steal focus on page mount).
+    const el = cellRefs.current.get(key);
+    if (el && document.activeElement && (document.activeElement === document.body)) {
+      // Don't steal focus from the URL bar on first page load.
+    } else if (el && document.activeElement?.closest('[data-testid="accommodation-calendar-grid"]')) {
+      el.focus();
+    }
+    initialFocusAppliedRef.current = true;
+  }, [firstRoomId, initialDate]);
+
+  const moveFocus = useCallback(
+    (currentRoomId: string, currentDate: Date, dx: number, dy: number) => {
+      const rowIdx = rows.findIndex((r) => r.room.id === currentRoomId);
+      const dayIdx = days.findIndex(
+        (d) => differenceInCalendarDays(d, currentDate) === 0,
+      );
+      if (rowIdx === -1 || dayIdx === -1) return;
+      const nextRow = Math.min(Math.max(0, rowIdx + dy), rows.length - 1);
+      const nextDay = Math.min(Math.max(0, dayIdx + dx), days.length - 1);
+      const nextRoom = rows[nextRow]?.room.id;
+      const nextDate = days[nextDay];
+      if (!nextRoom || !nextDate) return;
+      const key = cellKey(nextRoom, nextDate);
+      setFocusedKey(key);
+      const el = cellRefs.current.get(key);
+      el?.focus();
+    },
+    [rows, days],
+  );
+
+  const handleCellKeyDown = useCallback(
+    (
+      e: ReactKeyboardEvent<HTMLButtonElement>,
+      roomId: string,
+      date: Date,
+    ) => {
+      switch (e.key) {
+        case 'ArrowLeft':
+          e.preventDefault();
+          moveFocus(roomId, date, -1, 0);
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          moveFocus(roomId, date, 1, 0);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          moveFocus(roomId, date, 0, -1);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          moveFocus(roomId, date, 0, 1);
+          break;
+        case 'Home':
+          e.preventDefault();
+          moveFocus(roomId, date, -days.length, 0);
+          break;
+        case 'End':
+          e.preventDefault();
+          moveFocus(roomId, date, days.length, 0);
+          break;
+        case 'Escape': {
+          e.preventDefault();
+          const todayDate = days.find(
+            (d) => differenceInCalendarDays(d, today) === 0,
+          );
+          const targetRoom = rows[0]?.room.id;
+          if (todayDate && targetRoom) {
+            const k = cellKey(targetRoom, todayDate);
+            setFocusedKey(k);
+            cellRefs.current.get(k)?.focus();
+          }
+          break;
+        }
+        default:
+          // Enter / Space handled by the button's native onClick.
+          break;
+      }
+    },
+    [moveFocus, days, today, rows],
+  );
+
   return (
     <div
       data-testid="accommodation-calendar-grid"
+      role="grid"
+      aria-label={t('accommodation.calendar.grid_aria', {
+        defaultValue: 'Bookings grid — use arrow keys to navigate cells',
+      })}
       className="overflow-x-auto rounded-2xl border border-border-light bg-surface-elevated"
     >
       <div
@@ -738,6 +895,12 @@ function CalendarGrid({
                   rowIdx === 0 ||
                   rows[rowIdx - 1]?.accommodation.id !== row.accommodation.id
                 }
+                focusedKey={focusedKey}
+                onCellKeyDown={handleCellKeyDown}
+                registerCellRef={(key, el) => {
+                  if (el) cellRefs.current.set(key, el);
+                  else cellRefs.current.delete(key);
+                }}
               />
             );
           })}
@@ -761,6 +924,17 @@ interface RoomRowProps {
   ) => void;
   onBlockClick: (b: Booking) => void;
   showAccommodationLabel: boolean;
+  /** Stable id of the currently-focused cell — only one cell across the
+   *  grid has tabIndex=0; the rest have tabIndex=-1 (roving-tabindex). */
+  focusedKey: string;
+  onCellKeyDown: (
+    e: ReactKeyboardEvent<HTMLButtonElement>,
+    roomId: string,
+    date: Date,
+  ) => void;
+  /** Per-cell ref registration so the grid-level controller can call
+   *  `.focus()` on the target cell after arrow-key navigation. */
+  registerCellRef: (key: string, el: HTMLButtonElement | null) => void;
 }
 
 function RoomRow({
@@ -774,6 +948,9 @@ function RoomRow({
   onEmptyClick,
   onBlockClick,
   showAccommodationLabel,
+  focusedKey,
+  onCellKeyDown,
+  registerCellRef,
 }: RoomRowProps) {
   const { t } = useTranslation();
 
@@ -856,22 +1033,29 @@ function RoomRow({
 
       <div className="relative flex-1">
         {/* Empty day cells (click-to-create) */}
-        <div className="flex h-full">
+        <div className="flex h-full" role="row">
           {days.map((d) => {
             const today = dfIsToday(d);
             const dim = view === 'month' && !isSameMonth(d, anchorMonth);
+            const key = cellKey(row.room.id, d);
+            const isFocused = key === focusedKey;
             return (
               <button
                 key={d.toISOString()}
+                ref={(el) => registerCellRef(key, el)}
                 type="button"
+                role="gridcell"
+                tabIndex={isFocused ? 0 : -1}
                 onClick={() => onEmptyClick(row, d)}
+                onKeyDown={(e) => onCellKeyDown(e, row.room.id, d)}
                 aria-label={t('accommodation.calendar.emptySlot', {
                   defaultValue: 'Create booking on {{date}}',
                   date: format(d, 'yyyy-MM-dd'),
                 })}
                 data-testid={`accommodation-calendar-cell-${row.room.id}-${format(d, 'yyyy-MM-dd')}`}
+                data-focused={isFocused || undefined}
                 className={clsx(
-                  'group h-full shrink-0 border-r border-border-light transition focus:outline-none focus-visible:bg-oe-blue/20',
+                  'group h-full shrink-0 border-r border-border-light transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oe-blue focus-visible:bg-oe-blue/20',
                   today && 'bg-oe-blue/5',
                   dim && 'bg-surface-secondary/20',
                   'hover:bg-oe-blue/10',
@@ -1161,6 +1345,10 @@ function BookingDetailDrawer({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Trap focus inside the drawer so Tab cannot escape to the dimmed
+  // page underneath. Hook also restores focus to the opener on unmount.
+  useFocusTrap(drawerRef, true);
+
   const data = detailQuery.data;
   const nights = data ? bookingNights(data) : null;
   const totalCharges = data ? sumChargesString(data.charges) : null;
@@ -1170,9 +1358,12 @@ function BookingDetailDrawer({
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — Material 220ms ease-standard fade-in */}
       <div
         className="fixed inset-0 z-40 bg-black/40"
+        style={{
+          animation: 'accomCalFadeIn 150ms cubic-bezier(0.4, 0, 0.2, 1) both',
+        }}
         onClick={onClose}
         aria-hidden="true"
       />
@@ -1185,6 +1376,11 @@ function BookingDetailDrawer({
           defaultValue: 'Booking details',
         })}
         data-testid="accommodation-calendar-booking-drawer"
+        tabIndex={-1}
+        style={{
+          animation:
+            'accomCalSlideIn 220ms cubic-bezier(0.4, 0, 0.2, 1) both',
+        }}
         className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col bg-surface-elevated shadow-2xl"
       >
         <div className="flex items-start justify-between border-b border-border-light p-4">
@@ -1224,7 +1420,13 @@ function BookingDetailDrawer({
           )}
           {data && (
             <>
-              <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-2"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                data-testid="accommodation-calendar-drawer-status"
+              >
                 <Badge
                   variant={
                     data.status === 'checked_in'
@@ -1383,6 +1585,17 @@ function BookingDetailDrawer({
         variant={confirmTarget === 'cancelled' ? 'danger' : 'warning'}
         loading={mutation.isPending}
       />
+      {/* Material-standard easings — local to the calendar drawer */}
+      <style>{`
+        @keyframes accomCalFadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes accomCalSlideIn {
+          from { transform: translateX(16px); opacity: 0; }
+          to   { transform: translateX(0);    opacity: 1; }
+        }
+      `}</style>
     </>
   );
 }

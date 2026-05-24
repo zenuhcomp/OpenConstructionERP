@@ -7077,6 +7077,12 @@ const resource = {
     "accommodation.calendar.state.checked_in": "Checked in",
     "accommodation.calendar.state.checked_out": "Checked out",
     "accommodation.calendar.state.cancelled": "Cancelled",
+    // --- v4.6.1 a11y polish strings ---
+    "accommodation.calendar.grid_aria": "Bookings grid — use arrow keys to navigate cells",
+    "chat.panel.transcript_aria": "Conversation transcript",
+    "geo.overlays.empty_cta": "Add your first overlay",
+    "geo.overlays.hide_overlay_aria": "Hide overlay {{name}}",
+    "geo.overlays.show_overlay_aria": "Show overlay {{name}}",
     // --- /Accommodation module ---
   }
 } as { translation: Record<string, string> };

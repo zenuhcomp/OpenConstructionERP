@@ -6661,6 +6661,12 @@ const resource = {
     "accommodation.calendar.state.checked_in": "Заселён",
     "accommodation.calendar.state.checked_out": "Выселен",
     "accommodation.calendar.state.cancelled": "Отменено",
+    // --- v4.6.1 a11y polish strings ---
+    "accommodation.calendar.grid_aria": "Сетка бронирований — используйте стрелки для перемещения между ячейками",
+    "chat.panel.transcript_aria": "Расшифровка беседы",
+    "geo.overlays.empty_cta": "Добавить первый оверлей",
+    "geo.overlays.hide_overlay_aria": "Скрыть оверлей {{name}}",
+    "geo.overlays.show_overlay_aria": "Показать оверлей {{name}}",
     // --- /Accommodation module ---
 
     // --- растровые оверлеи (PDF / DWG / изображение на глобусе) ---

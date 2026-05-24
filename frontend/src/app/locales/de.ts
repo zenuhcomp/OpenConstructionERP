@@ -6666,6 +6666,12 @@ const resource = {
     "accommodation.calendar.state.checked_in": "Eingecheckt",
     "accommodation.calendar.state.checked_out": "Ausgecheckt",
     "accommodation.calendar.state.cancelled": "Storniert",
+    // --- v4.6.1 a11y polish strings ---
+    "accommodation.calendar.grid_aria": "Buchungsraster — mit Pfeiltasten zwischen Zellen navigieren",
+    "chat.panel.transcript_aria": "Gesprächsverlauf",
+    "geo.overlays.empty_cta": "Erste Überlagerung hinzufügen",
+    "geo.overlays.hide_overlay_aria": "Überlagerung {{name}} ausblenden",
+    "geo.overlays.show_overlay_aria": "Überlagerung {{name}} anzeigen",
     // --- /Accommodation module ---
 
     // --- raster overlays (PDF / DWG / Bild auf dem Globus) ---

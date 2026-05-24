@@ -460,7 +460,7 @@ function EmptyState({
       >
         {t('chat.panel.empty_state', {
           defaultValue:
-            'Ask about a project, BOQ, validation, clashes, costs, or run an action like "create RFI for clash 32".',
+            'Ask anything about your projects — BOQs, validation, clashes, costs — or run an action like "create RFI for clash 32".',
         })}
       </div>
 
@@ -1534,9 +1534,16 @@ export function FloatingChatPanel() {
           />
         </div>
 
-        {/* Body */}
+        {/* Body — aria-live=polite so screen readers announce streaming
+            assistant text + tool results as they arrive */}
         <div
           ref={scrollRef}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label={t('chat.panel.transcript_aria', {
+            defaultValue: 'Conversation transcript',
+          })}
           style={{
             flex: 1,
             overflowY: 'auto',
@@ -1644,7 +1651,9 @@ export function FloatingChatPanel() {
               justifyContent: 'space-between',
               marginTop: 6,
               fontSize: 11,
-              color: 'var(--chat-text-tertiary)',
+              // Promote to --chat-text-secondary for WCAG AA contrast on
+              // a near-white surface (the input bar is --chat-surface-1).
+              color: 'var(--chat-text-secondary)',
               fontFamily: 'var(--chat-font-mono)',
             }}
           >
@@ -1656,8 +1665,8 @@ export function FloatingChatPanel() {
                 color: overHard
                   ? 'var(--chat-tool-error, #ef4444)'
                   : overSoft
-                  ? '#f59e0b'
-                  : 'var(--chat-text-tertiary)',
+                  ? '#b45309' // darker amber for WCAG AA against light surface
+                  : 'var(--chat-text-secondary)',
               }}
             >
               {overHard
@@ -1718,7 +1727,15 @@ export function FloatingChatPanel() {
             to   { transform: translateX(0);   opacity: 1;   }
           }
           .animate-slide-in-right {
-            animation: slide-in-right 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+            /* Material standard easing — 220ms slide for the floating chat panel */
+            animation: slide-in-right 220ms cubic-bezier(0.4, 0, 0.2, 1);
+          }
+          @keyframes fade-in {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+          }
+          .animate-fade-in {
+            animation: fade-in 150ms cubic-bezier(0.4, 0, 0.2, 1);
           }
         `}</style>
       </div>

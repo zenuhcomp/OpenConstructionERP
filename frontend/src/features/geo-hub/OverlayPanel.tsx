@@ -14,7 +14,7 @@
  *   with whatever else is reading the same list (e.g. OverlayLayer).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -35,6 +35,7 @@ import {
 
 import { useToastStore } from '@/stores/useToastStore';
 import { getErrorMessage } from '@/shared/lib/api';
+import { useFocusTrap } from '@/shared/hooks/useFocusTrap';
 
 import {
   deleteRasterOverlay,
@@ -236,11 +237,26 @@ export function OverlayPanel({
           </div>
         )}
         {!overlaysQuery.isLoading && overlays.length === 0 && (
-          <div className="px-4 py-6 text-center text-2xs text-content-tertiary">
-            {t('geo.overlays.empty', {
-              defaultValue:
-                'No overlays yet. Click Add to pin a PDF or image to the globe.',
-            })}
+          <div
+            data-testid="geo-overlay-empty"
+            className="px-4 py-6 text-center text-2xs text-content-tertiary"
+          >
+            <p className="mb-2">
+              {t('geo.overlays.empty', {
+                defaultValue:
+                  'No overlays yet. Click Add to pin a PDF or image to the globe.',
+              })}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowUpload(true)}
+              className="inline-flex items-center gap-1 rounded-md border border-oe-blue/50 px-2 py-1 text-2xs font-medium text-oe-blue hover:bg-oe-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue"
+            >
+              <Plus size={11} aria-hidden />
+              {t('geo.overlays.empty_cta', {
+                defaultValue: 'Add your first overlay',
+              })}
+            </button>
           </div>
         )}
         {overlays.length > 0 && (
@@ -272,6 +288,17 @@ export function OverlayPanel({
                       }
                       data-testid="geo-overlay-toggle-visible"
                       aria-pressed={o.visible}
+                      aria-label={
+                        o.visible
+                          ? t('geo.overlays.hide_overlay_aria', {
+                              defaultValue: 'Hide overlay {{name}}',
+                              name: o.name || 'untitled',
+                            })
+                          : t('geo.overlays.show_overlay_aria', {
+                              defaultValue: 'Show overlay {{name}}',
+                              name: o.name || 'untitled',
+                            })
+                      }
                       title={
                         o.visible
                           ? t('geo.overlays.hide', { defaultValue: 'Hide' })
@@ -285,7 +312,7 @@ export function OverlayPanel({
                         'focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue',
                       ].join(' ')}
                     >
-                      {o.visible ? <Eye size={13} /> : <EyeOff size={13} />}
+                      {o.visible ? <Eye size={13} aria-hidden /> : <EyeOff size={13} aria-hidden />}
                     </button>
                     <button
                       type="button"
@@ -474,6 +501,20 @@ function OverlayUploadModal({
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const headingId = `geo-overlay-upload-title-${useId()}`;
+
+  // Trap Tab/Shift+Tab inside the modal; restore focus to opener on
+  // close. ESC handled below.
+  useFocusTrap(dialogRef, true);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [busy, onClose]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -510,15 +551,25 @@ function OverlayUploadModal({
     <div
       role="dialog"
       aria-modal="true"
+      aria-labelledby={headingId}
       data-testid="geo-overlay-upload-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm"
+      style={{ animation: 'geoOverlayFade 150ms cubic-bezier(0.4, 0, 0.2, 1) both' }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
-      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 dark:text-slate-100">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 dark:text-slate-100"
+        style={{
+          animation:
+            'geoOverlayScale 220ms cubic-bezier(0.4, 0, 0.2, 1) both',
+        }}
+      >
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-semibold">
+          <h3 id={headingId} className="text-base font-semibold">
             {t('geo.overlays.upload_title', {
               defaultValue: 'Add overlay to globe',
             })}
@@ -526,10 +577,11 @@ function OverlayUploadModal({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-content-tertiary hover:bg-surface-secondary"
+            disabled={busy}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-content-tertiary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue"
             aria-label={t('common.close', { defaultValue: 'Close' })}
           >
-            <X size={14} />
+            <X size={14} aria-hidden />
           </button>
         </div>
         <div className="mb-4 flex gap-1 rounded-md bg-surface-secondary p-1">
@@ -617,9 +669,9 @@ function OverlayUploadModal({
         </div>
         <div className="mt-2 flex items-center gap-2 text-2xs text-content-tertiary">
           {tab === 'pdf' ? (
-            <Upload size={11} />
+            <Upload size={11} aria-hidden />
           ) : (
-            <ImageIcon size={11} />
+            <ImageIcon size={11} aria-hidden />
           )}
           <span>
             {t('geo.overlays.max_hint', {
@@ -628,6 +680,16 @@ function OverlayUploadModal({
           </span>
         </div>
       </div>
+      <style>{`
+        @keyframes geoOverlayFade {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes geoOverlayScale {
+          from { opacity: 0; transform: scale(0.96); }
+          to   { opacity: 1; transform: scale(1);    }
+        }
+      `}</style>
     </div>
   );
 }

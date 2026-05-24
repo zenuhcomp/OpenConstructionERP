@@ -73,7 +73,7 @@ function WidgetCard({
     <div className="animate-card-in" style={{ animationDelay: delay }}>
       <Card>
         <div className="flex items-start gap-3 px-6 pt-5">
-          <span className="mt-1 shrink-0">{icon}</span>
+          <span className="mt-1 shrink-0" aria-hidden="true">{icon}</span>
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold text-content-primary">{title}</h3>
             {subtitle && (
@@ -108,7 +108,13 @@ function EmptyCTA({
 
 function LoadingRows({ count = 3 }: { count?: number }) {
   return (
-    <div className="space-y-2">
+    <div
+      className="space-y-2"
+      role="status"
+      aria-busy="true"
+      aria-label="Loading widget data"
+      data-testid="dashboard-widget-skeleton"
+    >
       {Array.from({ length: count }).map((_, i) => (
         <Skeleton key={i} height={32} className="w-full" rounded="md" />
       ))}
