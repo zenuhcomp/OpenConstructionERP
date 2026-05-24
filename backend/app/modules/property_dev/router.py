@@ -5467,6 +5467,116 @@ async def compliance_regulator_report(
     )
 
 
+# ── Inventory Map (task #142) ───────────────────────────────────────────
+#
+# The Inventory Map is the sales-desk daily index — every Plot in a
+# Development laid out as block → floor → unit tiles with a KPI ribbon
+# and bulk hold/release. Distinct from the analytics
+# /dashboards/inventory-heatmap (task #140) which groups by Phase.
+
+from app.modules.property_dev.schemas import (  # noqa: E402
+    InventoryMapBulkHoldRequest,
+    InventoryMapBulkReleaseRequest,
+    InventoryMapBulkResult,
+    InventoryMapResponse,
+)
+
+
+@router.get(
+    "/developments/{dev_id}/inventory-map/",
+    response_model=InventoryMapResponse,
+)
+async def get_inventory_map(
+    dev_id: uuid.UUID,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> InventoryMapResponse:
+    """Block / floor / unit grid for the Inventory Map page.
+
+    Returns every Plot in the Development bucketed by block_code → floor →
+    unit_code, with a KPI summary ribbon. Single read fan-out (one SELECT
+    for plots, one for blocks). Sales-desk usage — they hit this on
+    every page load, target latency <300ms even at 1000 plots.
+
+    R8: cross-tenant IDOR closed via ``_verify_owner_via_development``.
+    """
+    await _verify_owner_via_development(session, dev_id, user_payload)
+    data = await service.inventory_map(dev_id)
+    return InventoryMapResponse.model_validate(data)
+
+
+@router.post(
+    "/developments/{dev_id}/inventory-map/bulk-hold/",
+    response_model=InventoryMapBulkResult,
+)
+async def inventory_map_bulk_hold(
+    dev_id: uuid.UUID,
+    data: InventoryMapBulkHoldRequest,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> InventoryMapBulkResult:
+    """Bulk-hold up to 500 plots in one atomic SAVEPOINT.
+
+    Available (planned / ready) plots flip to ``held`` with the supplied
+    reason + optional ``hold_until`` date stashed under ``Plot.metadata.hold``.
+    Reserved / sold / handed-over plots reject the whole batch with 409
+    (matches the procurement.create_invoice_from_po atomicity pattern).
+    Already-held plots are soft-skipped (idempotent).
+
+    RBAC: MANAGER+ (uses ``property_dev.delete`` which maps to MANAGER —
+    matches sales-floor convention that only sales managers can pull
+    inventory off the market).
+
+    R8: cross-tenant IDOR closed via ``_verify_owner_via_development``.
+    """
+    await _verify_owner_via_development(session, dev_id, user_payload)
+    actor_id = user_payload.get("sub") or user_payload.get("user_id")
+    result = await service.inventory_bulk_hold(
+        dev_id,
+        list(data.plot_ids),
+        data.hold_reason,
+        data.hold_until,
+        actor_id=actor_id,
+    )
+    return InventoryMapBulkResult.model_validate(result)
+
+
+@router.post(
+    "/developments/{dev_id}/inventory-map/bulk-release/",
+    response_model=InventoryMapBulkResult,
+)
+async def inventory_map_bulk_release(
+    dev_id: uuid.UUID,
+    data: InventoryMapBulkReleaseRequest,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    service: PropertyDevService = Depends(_svc),
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> InventoryMapBulkResult:
+    """Bulk-release held plots back to ``planned``.
+
+    Idempotent: non-held plots are silently skipped (NOT 409) so that a
+    shift-select range that happens to include an already-released plot
+    doesn't force the user to retry one-by-one. ``blocked`` plots are
+    NEVER released through this endpoint — they require an explicit
+    MANAGER PATCH on the plot itself.
+
+    R8: cross-tenant IDOR closed via ``_verify_owner_via_development``.
+    """
+    await _verify_owner_via_development(session, dev_id, user_payload)
+    actor_id = user_payload.get("sub") or user_payload.get("user_id")
+    result = await service.inventory_bulk_release(
+        dev_id,
+        list(data.plot_ids),
+        actor_id=actor_id,
+    )
+    return InventoryMapBulkResult.model_validate(result)
+
+
 # ── Dashboards (task #140) ──────────────────────────────────────────────
 
 

@@ -1,4 +1,5 @@
 export { PropertyDevPage } from './PropertyDevPage';
+export { InventoryMapPage } from './InventoryMapPage';
 export { TaxQuotePanel } from './TaxQuotePanel';
 export { CompliancePage } from './CompliancePage';
 export { HouseTypeSettingsPage } from './HouseTypeSettingsPage';

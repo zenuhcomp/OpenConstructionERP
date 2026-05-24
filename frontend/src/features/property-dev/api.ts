@@ -29,7 +29,9 @@ export type PlotStatus =
   | 'under_construction'
   | 'ready'
   | 'sold'
-  | 'handed_over';
+  | 'handed_over'
+  | 'held'
+  | 'blocked';
 export type BuyerStatus =
   | 'lead'
   | 'reserved'
@@ -2741,3 +2743,97 @@ export async function downloadPropDevDocument(
   }
   return res.blob();
 }
+
+/* ── Inventory Map (task #142) ───────────────────────────────────────── */
+//
+// Sales-floor block / floor / unit grid. Distinct from the analytics
+// /dashboards/inventory-heatmap that groups by Phase. Used by
+// InventoryMapPage.tsx (block cards with floor strips of unit tiles)
+// + the bulk hold / release floating action bar.
+
+export interface InventoryMapPlot {
+  id: string;
+  unit_code: string;
+  status: PlotStatus;
+  plot_type: string | null;
+  block_code: string | null;
+  floor: number | null;
+  base_price: number | string;
+  area_m2: number | string;
+  currency: string;
+  bedrooms: number;
+  bathrooms: number;
+}
+
+export interface InventoryMapFloor {
+  floor: number;
+  plots: InventoryMapPlot[];
+}
+
+export interface InventoryMapBlock {
+  block_code: string;
+  block_id: string | null;
+  name: string;
+  floors: InventoryMapFloor[];
+}
+
+export interface InventoryMapSummary {
+  total: number;
+  available: number;
+  reserved: number;
+  sold: number;
+  handed_over: number;
+  held: number;
+  blocked: number;
+  under_construction: number;
+  ready: number;
+}
+
+export interface InventoryMapResponse {
+  development_id: string;
+  currency: string;
+  blocks: InventoryMapBlock[];
+  summary: InventoryMapSummary;
+}
+
+export interface InventoryMapBulkResult {
+  updated_count: number;
+  skipped_count: number;
+  updated_plot_ids: string[];
+  skipped: { plot_id: string; reason: string }[];
+}
+
+export function getInventoryMap(
+  developmentId: string,
+): Promise<InventoryMapResponse> {
+  return apiGet<InventoryMapResponse>(
+    `${BASE}/developments/${developmentId}/inventory-map/`,
+  );
+}
+
+export function bulkHoldInventory(
+  developmentId: string,
+  plotIds: string[],
+  holdReason: string,
+  holdUntil?: string | null,
+): Promise<InventoryMapBulkResult> {
+  return apiPost<InventoryMapBulkResult>(
+    `${BASE}/developments/${developmentId}/inventory-map/bulk-hold/`,
+    {
+      plot_ids: plotIds,
+      hold_reason: holdReason,
+      hold_until: holdUntil ?? null,
+    },
+  );
+}
+
+export function bulkReleaseInventory(
+  developmentId: string,
+  plotIds: string[],
+): Promise<InventoryMapBulkResult> {
+  return apiPost<InventoryMapBulkResult>(
+    `${BASE}/developments/${developmentId}/inventory-map/bulk-release/`,
+    { plot_ids: plotIds },
+  );
+}
+
