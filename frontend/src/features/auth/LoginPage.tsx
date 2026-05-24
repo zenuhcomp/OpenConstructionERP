@@ -770,22 +770,22 @@ export function LoginPage() {
               target="_blank"
               rel="noopener noreferrer"
               aria-label={`${t('login.community', { defaultValue: 'Community' })} — ${t('login.community_sub', { defaultValue: 'Get help & discuss' })}`}
-              className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-oe-blue/25 bg-white/70 dark:bg-transparent bg-gradient-to-br from-oe-blue/[0.10] to-sky-500/[0.05] px-3.5 py-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/85 dark:hover:bg-transparent hover:border-oe-blue/45 hover:from-oe-blue/[0.16] hover:to-sky-500/[0.09] hover:shadow-lg"
+              className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border-light/70 bg-white/75 dark:bg-surface-elevated/80 backdrop-blur-sm px-3.5 py-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/90 dark:hover:bg-surface-elevated/90 hover:border-content-primary/25 hover:shadow-lg"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-oe-blue/12 text-oe-blue transition-colors group-hover:bg-oe-blue/20">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-content-primary/[0.06] text-content-primary transition-colors group-hover:bg-content-primary/10">
                 <Users size={17} strokeWidth={1.9} />
               </span>
               <span className="min-w-0 flex-1 leading-tight">
-                <span className="block text-[13px] font-semibold text-oe-blue">
+                <span className="block text-[13px] font-semibold text-content-primary">
                   {t('login.community', { defaultValue: 'Community' })}
                 </span>
-                <span className="block truncate text-[11px] text-oe-blue/65">
+                <span className="block truncate text-[11px] text-content-tertiary">
                   {t('login.community_sub', { defaultValue: 'Get help & discuss' })}
                 </span>
               </span>
               <ArrowUpRight
                 size={15}
-                className="shrink-0 text-oe-blue/55 transition-all duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-oe-blue"
+                className="shrink-0 text-content-quaternary transition-all duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-content-secondary"
               />
             </a>
           </div>
