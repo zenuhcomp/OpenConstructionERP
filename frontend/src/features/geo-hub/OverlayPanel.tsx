@@ -14,7 +14,7 @@
  *   with whatever else is reading the same list (e.g. OverlayLayer).
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -30,14 +30,14 @@ import {
   Plus,
   Trash2,
   Upload,
-  X,
 } from 'lucide-react';
 
 import { useToastStore } from '@/stores/useToastStore';
 import { getErrorMessage } from '@/shared/lib/api';
-import { useFocusTrap } from '@/shared/hooks/useFocusTrap';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog';
+import { WideModal } from '@/shared/ui/WideModal';
+import { Button } from '@/shared/ui';
 
 import {
   deleteRasterOverlay,
@@ -507,20 +507,6 @@ function OverlayUploadModal({
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const headingId = `geo-overlay-upload-title-${useId()}`;
-
-  // Trap Tab/Shift+Tab inside the modal; restore focus to opener on
-  // close. ESC handled below.
-  useFocusTrap(dialogRef, true);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [busy, onClose]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -554,42 +540,21 @@ function OverlayUploadModal({
   );
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={headingId}
-      data-testid="geo-overlay-upload-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm"
-      style={{ animation: 'geoOverlayFade 150ms cubic-bezier(0.4, 0, 0.2, 1) both' }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !busy) onClose();
-      }}
+    <WideModal
+      open
+      onClose={onClose}
+      title={t('geo.overlays.upload_title', {
+        defaultValue: 'Add overlay to globe',
+      })}
+      size="md"
+      busy={busy}
+      footer={
+        <Button variant="ghost" onClick={onClose} disabled={busy}>
+          {t('common.cancel', { defaultValue: 'Cancel' })}
+        </Button>
+      }
     >
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 dark:text-slate-100"
-        style={{
-          animation:
-            'geoOverlayScale 220ms cubic-bezier(0.4, 0, 0.2, 1) both',
-        }}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h3 id={headingId} className="text-base font-semibold">
-            {t('geo.overlays.upload_title', {
-              defaultValue: 'Add overlay to globe',
-            })}
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-content-tertiary hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue"
-            aria-label={t('common.close', { defaultValue: 'Close' })}
-          >
-            <X size={14} aria-hidden />
-          </button>
-        </div>
+      <div data-testid="geo-overlay-upload-modal">
         <div className="mb-4 flex gap-1 rounded-md bg-surface-secondary p-1">
           {(['pdf', 'image'] as const).map((k) => (
             <button
@@ -663,17 +628,7 @@ function OverlayUploadModal({
             </span>
           </div>
         )}
-        <div className="mt-4 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-content-secondary hover:bg-surface-secondary"
-          >
-            {t('common.cancel', { defaultValue: 'Cancel' })}
-          </button>
-        </div>
-        <div className="mt-2 flex items-center gap-2 text-2xs text-content-tertiary">
+        <div className="mt-3 flex items-center gap-2 text-2xs text-content-tertiary">
           {tab === 'pdf' ? (
             <Upload size={11} aria-hidden />
           ) : (
@@ -686,17 +641,7 @@ function OverlayUploadModal({
           </span>
         </div>
       </div>
-      <style>{`
-        @keyframes geoOverlayFade {
-          from { opacity: 0; }
-          to   { opacity: 1; }
-        }
-        @keyframes geoOverlayScale {
-          from { opacity: 0; transform: scale(0.96); }
-          to   { opacity: 1; transform: scale(1);    }
-        }
-      `}</style>
-    </div>
+    </WideModal>
   );
 }
 

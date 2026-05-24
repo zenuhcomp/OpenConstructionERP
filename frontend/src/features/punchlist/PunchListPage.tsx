@@ -32,6 +32,7 @@ import {
   WideModal,
   WideModalSection,
   WideModalField,
+  SkeletonTable,
 } from '@/shared/ui';
 import { RequiresProject } from '@/shared/auth/RequiresProject';
 import { useConfirm } from '@/shared/hooks/useConfirm';
@@ -1115,9 +1116,7 @@ export function PunchListPage() {
             })}
           >{null}</RequiresProject>
         ) : isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-oe-blue border-t-transparent" />
-          </div>
+          <SkeletonTable rows={6} columns={5} />
         ) : isError ? (
           <RecoveryCard error={error} onRetry={() => refetch()} />
         ) : filteredItems.length === 0 ? (
