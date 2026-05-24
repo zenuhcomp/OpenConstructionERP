@@ -140,5 +140,88 @@
     "purpose_text": "Sale of the unit to a third-party buyer, subject to the Developer's standard transfer procedures.",
     "no_outstanding": "All instalments up to the date of this NOC have been paid in full. No outstanding payments are recorded against this contract.",
     "developer_statement": "The Developer hereby grants permission, subject to the standard transfer fee and procedures, for the Buyer to transfer ownership of the unit to a third party. This NOC does not waive any rights of the Developer under the Sale-Purchase Agreement."
+  },
+  "tenant_lease_agreement": {
+    "title": "Tenant Lease Agreement",
+    "intro": "This Lease Agreement is made between the Landlord (Developer) and the Tenant(s) named below for the residential rental of the property described herein.",
+    "tenant_signature": "Tenant Signature",
+    "headings": {
+      "lease_number": "Lease No.",
+      "tenant": "Tenant",
+      "property": "Property",
+      "term": "Term",
+      "monthly_rent": "Monthly Rent",
+      "security_deposit": "Security Deposit",
+      "use_clause": "Use of the Property",
+      "maintenance": "Maintenance",
+      "termination": "Termination"
+    },
+    "use_clause_text": "The Tenant shall use the Property solely as a private residence for the Tenant and immediate family. Sub-letting and commercial use are prohibited without the Landlord's prior written consent.",
+    "maintenance_text": "The Landlord is responsible for structural maintenance and major appliances installed by the Developer. The Tenant is responsible for day-to-day cleanliness, minor repairs under a reasonable threshold, and any damage caused by misuse.",
+    "termination_text": "Either party may terminate this Lease at the end of the term with written notice not less than 30 days before expiry. Early termination by the Tenant forfeits the security deposit unless the Landlord agrees in writing."
+  },
+  "move_in_checklist": {
+    "title": "Move-in Checklist",
+    "intro": "Room-by-room condition report recorded at the moment of handover. Both parties sign that the listed condition reflects the unit as inspected.",
+    "empty_rooms": "No room data supplied.",
+    "acceptance_text": "By signing below, both parties confirm that the room-by-room condition recorded above accurately reflects the unit at the moment of inspection.",
+    "headings": {
+      "spa_ref": "Agreement No.",
+      "inspection_date": "Inspection Date"
+    },
+    "columns": {
+      "item": "Item",
+      "condition": "Condition",
+      "notes": "Notes"
+    }
+  },
+  "mortgage_clearance_letter": {
+    "title": "Mortgage Clearance Letter",
+    "intro": "This letter is issued by the Developer at the request of the Buyer to confirm that the unit identified below carries no outstanding charges, mortgages, liens or encumbrances in favour of the Developer.",
+    "no_encumbrance_text": "The Developer hereby confirms that, as of the date of this letter, the above unit is held free and clear of any mortgage, charge, lien or encumbrance in favour of the Developer or any related party.",
+    "purpose_text": "This letter is issued solely for the purpose of the Buyer's mortgage application and any related due-diligence requested by the Bank named above. It does not waive any rights of the Developer under the Sale-Purchase Agreement.",
+    "headings": {
+      "bank": "Issued To (Bank)",
+      "spa_ref": "Agreement No.",
+      "unit": "Unit"
+    }
+  },
+  "title_deed_transfer_request": {
+    "title": "Title Deed Transfer Request",
+    "intro": "Formal request to the land registry to transfer the title of the unit described below from the Developer to the new owner(s) named in the Sale-Purchase Agreement.",
+    "request_text": "The Developer hereby requests that the Land Registry record the transfer of title to the above unit in favour of the new owner(s) listed, in the percentages indicated, with effect from the date of this request.",
+    "attachments_text": "Original Sale-Purchase Agreement (executed), final payment receipt, handover certificate, identity documents of all new owners, and any local stamp-duty receipts as required by the registry.",
+    "headings": {
+      "registry": "Land Registry",
+      "spa_ref": "Agreement No.",
+      "unit": "Unit",
+      "new_owners": "New Owner(s)",
+      "request_body": "Request",
+      "attachments": "Attachments"
+    }
+  },
+  "escrow_release_authorization": {
+    "title": "Escrow Release Authorization",
+    "intro": "Instruction to the Escrow Agent to release funds held in the escrow account identified below to the Developer, in respect of the milestone described.",
+    "instruction_text": "The Developer hereby authorises and instructs the Escrow Agent to release the above amount from the named escrow account to the Developer's operating account. This release follows the milestone certification recorded in the Sale-Purchase Agreement.",
+    "headings": {
+      "escrow_account": "Escrow Account No.",
+      "spa_ref": "Agreement No.",
+      "unit": "Unit",
+      "amount_to_release": "Amount to Release",
+      "release_reason": "Release Reason"
+    }
+  },
+  "refund_authorization": {
+    "title": "Refund Authorization",
+    "intro": "This document authorises the refund of the amount identified below in respect of the cancelled reservation or sales contract referenced.",
+    "authorisation_text": "The Developer hereby authorises the refund of the above amount via the stated payment method. Settlement timing follows the Developer's standard finance procedures and any cooling-off / forfeiture rules applicable to the original transaction.",
+    "headings": {
+      "reference": "Reference",
+      "unit": "Unit",
+      "amount": "Refund Amount",
+      "reason": "Reason",
+      "payment_method": "Payment Method"
+    }
   }
 }

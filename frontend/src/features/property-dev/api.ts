@@ -2480,7 +2480,16 @@ export type PropDevDocType =
   | 'payment_receipt'
   | 'handover_certificate'
   | 'warranty_certificate'
-  | 'noc';
+  | 'noc'
+  // New built-ins shipped in v3124 — sample-preview only today; live
+  // ``/documents/{doc_type}`` rendering for these flows lands per-event
+  // in follow-up commits.
+  | 'tenant_lease_agreement'
+  | 'move_in_checklist'
+  | 'mortgage_clearance_letter'
+  | 'title_deed_transfer_request'
+  | 'escrow_release_authorization'
+  | 'refund_authorization';
 
 export interface PropDevDocParams {
   doc_type: PropDevDocType;

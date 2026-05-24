@@ -4229,6 +4229,15 @@ _VALID_DOC_TYPES_HTTP: set[str] = {
     "handover_certificate",
     "warranty_certificate",
     "noc",
+    # New built-ins (v3124). Live ``/documents/{doc_type}`` rendering is
+    # sample-preview only for now — the entity wiring for these flows is
+    # added per-event in follow-up commits as the front-end surfaces them.
+    "tenant_lease_agreement",
+    "move_in_checklist",
+    "mortgage_clearance_letter",
+    "title_deed_transfer_request",
+    "escrow_release_authorization",
+    "refund_authorization",
 }
 
 _SUPPORTED_DOC_LOCALES: set[str] = {"en", "de", "ru", "fr", "ar", "es"}
@@ -4292,6 +4301,12 @@ def _filename_for(doc_type: str, entity_id: uuid.UUID | None) -> str:
         "handover_certificate": "handover-certificate",
         "warranty_certificate": "warranty-certificate",
         "noc": "no-objection-certificate",
+        "tenant_lease_agreement": "tenant-lease-agreement",
+        "move_in_checklist": "move-in-checklist",
+        "mortgage_clearance_letter": "mortgage-clearance-letter",
+        "title_deed_transfer_request": "title-deed-transfer-request",
+        "escrow_release_authorization": "escrow-release-authorization",
+        "refund_authorization": "refund-authorization",
     }.get(doc_type, "document")
     return f"{base}-{suffix}.pdf"
 
@@ -4510,6 +4525,78 @@ _DOC_TEMPLATE_CATALOGUE: list[dict[str, Any]] = [
         "entity": "sales_contract",
         "pages": "1",
     },
+    {
+        "doc_type": "tenant_lease_agreement",
+        "title": "Tenant Lease Agreement",
+        "description": (
+            "Multi-page residential rental contract for developer-owned "
+            "or build-to-rent units. Captures tenant, term, monthly rent, "
+            "security deposit and standard use / maintenance clauses."
+        ),
+        "trigger": "POST /leases/ → status transitions (sample-preview today)",
+        "entity": "sales_contract",
+        "pages": "2",
+    },
+    {
+        "doc_type": "move_in_checklist",
+        "title": "Move-in Checklist",
+        "description": (
+            "Room-by-room property-condition report attached to handover. "
+            "Captures fixtures / fittings / appliance state with notes — "
+            "complements the formal handover certificate."
+        ),
+        "trigger": "POST /handovers/{id}/complete → checklist captured",
+        "entity": "handover",
+        "pages": "2",
+    },
+    {
+        "doc_type": "mortgage_clearance_letter",
+        "title": "Mortgage Clearance Letter",
+        "description": (
+            "Bank-facing letter confirming the unit has no encumbrances "
+            "in favour of the developer. Required by most lenders before "
+            "final draw-down."
+        ),
+        "trigger": "GET /documents/mortgage_clearance_letter?contract_id=…",
+        "entity": "sales_contract",
+        "pages": "1",
+    },
+    {
+        "doc_type": "title_deed_transfer_request",
+        "title": "Title Deed Transfer Request",
+        "description": (
+            "Formal request to the land registry (Grundbuchamt / "
+            "Росреестр / DLD / HM Land Registry) to transfer title from "
+            "the developer to the new owner(s)."
+        ),
+        "trigger": "GET /documents/title_deed_transfer_request?contract_id=…",
+        "entity": "sales_contract",
+        "pages": "1",
+    },
+    {
+        "doc_type": "escrow_release_authorization",
+        "title": "Escrow Release Authorization",
+        "description": (
+            "Instruction to the escrow agent to release milestone funds "
+            "from the project escrow account. Required by RERA / "
+            "MAHARERA / 214-FZ workflows."
+        ),
+        "trigger": "Manual — generated at milestone certification",
+        "entity": "sales_contract",
+        "pages": "1",
+    },
+    {
+        "doc_type": "refund_authorization",
+        "title": "Refund Authorization",
+        "description": (
+            "Formal refund instruction for a cancelled reservation or "
+            "sales contract. Shows refund amount, reason and payment "
+            "method routing."
+        ),
+        "trigger": "POST /reservations/{id}/cancel or /sales-contracts/{id}/cancel",
+        "entity": "sales_contract",
+        "pages": "1",
+    },
 ]
 
 
@@ -4576,10 +4663,16 @@ _ALLOWED_CUSTOM_DOC_TYPES: tuple[str, ...] = (
     "payment_reminder",
     "kyc_checklist",
     "brokerage_commission",
+    "tenant_lease_agreement",
+    "move_in_checklist",
+    "mortgage_clearance_letter",
+    "title_deed_transfer_request",
+    "escrow_release_authorization",
+    "refund_authorization",
 )
 _ALLOWED_CUSTOM_ENTITIES: tuple[str, ...] = (
     "custom", "reservation", "sales_contract", "instalment", "handover",
-    "snag", "broker", "buyer", "plot", "development",
+    "snag", "broker", "buyer", "plot", "development", "tenant",
 )
 _CUSTOM_TEMPLATE_LOG = logging.getLogger(__name__ + ".custom_templates")
 
@@ -5184,11 +5277,17 @@ async def sample_preview_document_template(
 
     # ── Dispatch to the right generator ──
     from app.modules.property_dev.document_templates import (
+        render_escrow_release_authorization_pdf,
         render_handover_certificate_pdf,
+        render_mortgage_clearance_letter_pdf,
+        render_move_in_checklist_pdf,
         render_no_objection_certificate_pdf,
         render_payment_receipt_pdf,
+        render_refund_authorization_pdf,
         render_reservation_receipt_pdf,
         render_sales_contract_pdf,
+        render_tenant_lease_agreement_pdf,
+        render_title_deed_transfer_request_pdf,
         render_warranty_certificate_pdf,
     )
 
@@ -5235,6 +5334,77 @@ async def sample_preview_document_template(
             locale=locale,
             plot=plot,
             development=development,
+        )
+    elif doc_type == "tenant_lease_agreement":
+        lease = SimpleNamespace(
+            id=_uuid.uuid4(),
+            lease_number="LEA-2026-0003",
+            currency="EUR",
+            monthly_rent=Decimal("1800.00"),
+            security_deposit=Decimal("5400.00"),
+            term_months=12,
+            start_date=today.isoformat(),
+            end_date=(today + timedelta(days=365)).isoformat(),
+            status="draft",
+        )
+        pdf_bytes = render_tenant_lease_agreement_pdf(
+            lease, plot, development, buyers, locale=locale,
+        )
+    elif doc_type == "move_in_checklist":
+        rooms = [
+            SimpleNamespace(name="Entry / Hallway", items=[
+                SimpleNamespace(label="Door & locks", condition="Good", notes=""),
+                SimpleNamespace(label="Walls & paint", condition="Good", notes=""),
+                SimpleNamespace(label="Light fittings", condition="Good", notes=""),
+            ]),
+            SimpleNamespace(name="Kitchen", items=[
+                SimpleNamespace(label="Oven", condition="New", notes="Test cooking only"),
+                SimpleNamespace(label="Fridge / freezer", condition="New", notes=""),
+                SimpleNamespace(label="Sink & taps", condition="Good", notes=""),
+                SimpleNamespace(label="Cabinets", condition="Good", notes=""),
+            ]),
+            SimpleNamespace(name="Bathroom", items=[
+                SimpleNamespace(label="Toilet", condition="Good", notes=""),
+                SimpleNamespace(label="Shower / bath", condition="Good", notes=""),
+                SimpleNamespace(label="Mirror & cabinet", condition="Good", notes=""),
+            ]),
+            SimpleNamespace(name="Living room", items=[
+                SimpleNamespace(label="Floor", condition="Good", notes=""),
+                SimpleNamespace(label="Windows & blinds", condition="Good", notes=""),
+            ]),
+        ]
+        pdf_bytes = render_move_in_checklist_pdf(
+            handover, contract, plot, development, rooms, locale=locale,
+        )
+    elif doc_type == "mortgage_clearance_letter":
+        pdf_bytes = render_mortgage_clearance_letter_pdf(
+            contract, plot, development,
+            bank_name="Sample Sparkasse Berlin",
+            locale=locale,
+        )
+    elif doc_type == "title_deed_transfer_request":
+        pdf_bytes = render_title_deed_transfer_request_pdf(
+            contract, plot, development, parties,
+            registry_name="Grundbuchamt Berlin",
+            locale=locale,
+            buyer_lookup={b.id: b for b in buyers},
+        )
+    elif doc_type == "escrow_release_authorization":
+        pdf_bytes = render_escrow_release_authorization_pdf(
+            contract, plot, development,
+            escrow_account_no="DE89-3704-0044-0532-0130-00",
+            amount=Decimal("84000.00"),
+            release_reason="Foundation milestone certified",
+            locale=locale,
+        )
+    elif doc_type == "refund_authorization":
+        pdf_bytes = render_refund_authorization_pdf(
+            contract, plot, development,
+            refund_amount=Decimal("5000.00"),
+            refund_reason="Buyer cancellation within cooling-off period",
+            payment_method="bank_transfer",
+            locale=locale,
+            reservation=reservation,
         )
     else:  # noc
         pdf_bytes = render_no_objection_certificate_pdf(

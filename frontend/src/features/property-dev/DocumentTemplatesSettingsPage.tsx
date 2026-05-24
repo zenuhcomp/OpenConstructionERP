@@ -38,17 +38,23 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertOctagon,
+  Banknote,
   CheckCircle2,
   Download,
   Eye,
   FileSignature,
   FileText,
   Globe2,
+  Home,
   Info,
+  Key,
+  Landmark,
   Loader2,
+  RotateCcw,
   ShieldAlert,
   Trash2,
   Upload as UploadIcon,
+  Vault,
 } from 'lucide-react';
 import {
   Badge,
@@ -83,6 +89,12 @@ const ICON_FOR_DOC: Record<string, React.ReactNode> = {
   handover_certificate: <FileSignature size={16} />,
   warranty_certificate: <ShieldAlert size={16} />,
   noc: <FileSignature size={16} />,
+  tenant_lease_agreement: <Home size={16} />,
+  move_in_checklist: <Key size={16} />,
+  mortgage_clearance_letter: <Banknote size={16} />,
+  title_deed_transfer_request: <Landmark size={16} />,
+  escrow_release_authorization: <Vault size={16} />,
+  refund_authorization: <RotateCcw size={16} />,
 };
 
 // Built-in PropDev doc_types — the only ones the backend can render a
@@ -95,6 +107,12 @@ const BUILTIN_DOC_TYPES = new Set<string>([
   'handover_certificate',
   'warranty_certificate',
   'noc',
+  'tenant_lease_agreement',
+  'move_in_checklist',
+  'mortgage_clearance_letter',
+  'title_deed_transfer_request',
+  'escrow_release_authorization',
+  'refund_authorization',
 ]);
 
 const ACTIVE_DEV_LS_KEY = 'propdev:doc-templates:active-dev';
@@ -546,6 +564,12 @@ function UploadCustomTemplateForm({
             <option value="payment_reminder">payment_reminder</option>
             <option value="kyc_checklist">kyc_checklist</option>
             <option value="brokerage_commission">brokerage_commission</option>
+            <option value="tenant_lease_agreement">tenant_lease_agreement</option>
+            <option value="move_in_checklist">move_in_checklist</option>
+            <option value="mortgage_clearance_letter">mortgage_clearance_letter</option>
+            <option value="title_deed_transfer_request">title_deed_transfer_request</option>
+            <option value="escrow_release_authorization">escrow_release_authorization</option>
+            <option value="refund_authorization">refund_authorization</option>
           </select>
         </div>
         <div className="md:col-span-2">
@@ -570,6 +594,7 @@ function UploadCustomTemplateForm({
             <option value="buyer">buyer</option>
             <option value="plot">plot</option>
             <option value="development">development</option>
+            <option value="tenant">tenant</option>
           </select>
         </div>
         <div className="md:col-span-8">
