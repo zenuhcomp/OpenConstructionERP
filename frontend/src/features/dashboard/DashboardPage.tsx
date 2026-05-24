@@ -60,7 +60,6 @@ import {
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { DashboardLayoutManager } from './DashboardLayoutManager';
 import { DASHBOARD_WIDGET_IDS } from './widgetRegistry';
-import { DashboardRollupProvider } from './context/DashboardRollupContext';
 import {
   useDashboardLayoutStore,
   reconcileOrder,
