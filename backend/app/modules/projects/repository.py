@@ -6,7 +6,8 @@ No business logic — pure data access.
 
 import uuid
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Integer, func, select, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
@@ -112,6 +113,58 @@ class ProjectRepository:
 
         Scans codes like ``PRJ-2026-0001`` and extracts the numeric suffix.
         Returns ``None`` if no matching codes exist.
+
+        Performance: pushes the scan into the database as a single
+        ``SELECT MAX(CAST(SUBSTR(project_code, N) AS INTEGER))`` aggregate
+        scoped by ``LIKE prefix || '%'``. Previously this method loaded
+        every matching row into the application and iterated in Python —
+        an O(n) pull that became measurable past a few hundred projects.
+        The aggregate runs in O(1) wall time on the indexed column with
+        a single round-trip and zero rows transferred.
+
+        ``GLOB`` (SQLite) / ``SIMILAR TO`` (Postgres) would be the
+        absolutely safest filter for the cast, but neither is portable.
+        Instead we feed the cast a substring that's already been
+        prefix-matched, then defensively coalesce a ``NULL`` MAX (no
+        rows) to ``None``. Rows whose suffix isn't a pure integer don't
+        produce a meaningful ``int(...)`` in the old code path either —
+        on SQLite the cast yields ``0`` for them (harmless: 0 < any real
+        sequence), on Postgres the cast raises and we fall through to the
+        Python scan as a safety net (preserves existing semantics for
+        any pre-existing malformed codes).
+        """
+        prefix_len = len(prefix)
+        if prefix_len <= 0:
+            return None
+
+        # SUBSTR is 1-indexed in SQL — pass prefix_len + 1 to start past
+        # the prefix.
+        suffix_expr = func.substr(Project.project_code, prefix_len + 1)
+        max_expr = func.max(func.cast(suffix_expr, Integer))
+        stmt = select(max_expr).where(
+            Project.project_code.isnot(None),
+            Project.project_code.startswith(prefix),
+        )
+        try:
+            result = await self.session.execute(stmt)
+            max_seq = result.scalar()
+        except DBAPIError:
+            # Postgres raises on a non-numeric cast; fall back to the
+            # original Python-side scan so a single malformed historical
+            # row doesn't break code generation.
+            return await self._max_project_code_seq_python_fallback(prefix)
+
+        if max_seq is None or max_seq <= 0:
+            return None
+        return int(max_seq)
+
+    async def _max_project_code_seq_python_fallback(self, prefix: str) -> int | None:
+        """Python-side scan fallback for ``max_project_code_seq``.
+
+        Used only when the SQL CAST raises (e.g. Postgres encountering a
+        non-numeric suffix on a malformed legacy row). Preserves the
+        pre-aggregate behaviour: ignore unparseable codes, return the
+        max integer suffix observed.
         """
         stmt = select(Project.project_code).where(
             Project.project_code.isnot(None),
@@ -128,9 +181,9 @@ class ProjectRepository:
         for code in codes:
             try:
                 seq = int(code[prefix_len:])
-                if seq > max_seq:
-                    max_seq = seq
             except (ValueError, IndexError):
                 continue
+            if seq > max_seq:
+                max_seq = seq
 
         return max_seq if max_seq > 0 else None
