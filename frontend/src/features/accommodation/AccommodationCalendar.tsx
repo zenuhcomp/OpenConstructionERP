@@ -543,7 +543,6 @@ export function AccommodationCalendar({
               role="tab"
               id="accommodation-calendar-view-tab-week"
               aria-selected={view === 'week'}
-              aria-controls="accommodation-calendar-view-panel-week"
               tabIndex={view === 'week' ? 0 : -1}
               onClick={() => setView('week')}
               data-testid="accommodation-calendar-view-week"
@@ -562,7 +561,6 @@ export function AccommodationCalendar({
               role="tab"
               id="accommodation-calendar-view-tab-month"
               aria-selected={view === 'month'}
-              aria-controls="accommodation-calendar-view-panel-month"
               tabIndex={view === 'month' ? 0 : -1}
               onClick={() => setView('month')}
               data-testid="accommodation-calendar-view-month"
@@ -1099,8 +1097,11 @@ function RoomRow({
           })}
         </div>
 
-        {/* Booking blocks (absolutely-positioned over the cell strip) */}
-        <div className="pointer-events-none absolute inset-0">
+        {/* Booking blocks (absolutely-positioned over the cell strip).
+            role="presentation" prevents the inner buttons from being
+            scanned as direct children of role="grid" (axe a11y rule
+            aria-required-children would otherwise flag them). */}
+        <div role="presentation" className="pointer-events-none absolute inset-0">
           {blocks.map(({ booking, startDayIdx, spanDays, lane }) => {
             const left = startDayIdx * DAY_WIDTH_PX + 2;
             const width = spanDays * DAY_WIDTH_PX - 4;
