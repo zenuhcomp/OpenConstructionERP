@@ -1206,7 +1206,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
              hidden" badge when applicable. In edit mode the buttons
              flip to Save / Cancel. */}
         {!iconified && (
-          <li className="pt-3 pb-1 px-3">
+          <div className="pt-3 pb-1 px-3">
             {editMode ? (
               <div className="flex items-center gap-1.5 w-full">
                 <button
@@ -1260,7 +1260,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                 )}
               </div>
             )}
-          </li>
+          </div>
         )}
         {/* Add-a-module CTA — dashed-border tile with a plus icon. Sits at
              the very end of the main nav groups so it reads as "keep going,
@@ -1269,7 +1269,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
              contributors a clearer first step. When iconified, shrinks
              to a centred icon-only square — the dashed border still
              signals "add something". */}
-        <li className={clsx('pt-2 pb-1', iconified ? 'px-0 flex justify-center' : 'px-3')}>
+        <div className={clsx('pt-2 pb-1', iconified ? 'px-0 flex justify-center' : 'px-3')}>
           <NavLink
             to="/modules/developer-guide"
             onClick={onClose}
@@ -1293,7 +1293,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               </span>
             )}
           </NavLink>
-        </li>
+        </div>
         {/* Request-a-custom-module CTA — second dashed tile, purple
              accent, opens a popup instead of navigating. The popup
              routes the request to two destinations depending on the
@@ -1306,7 +1306,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
              on purpose: contributors who want to build a module
              themselves use the guide; users who want us to build it
              for them use this dialog. */}
-        <li className={clsx('pt-1 pb-3', iconified ? 'px-0 flex justify-center' : 'px-3')}>
+        <div className={clsx('pt-1 pb-3', iconified ? 'px-0 flex justify-center' : 'px-3')}>
           <button
             type="button"
             onClick={() => {
@@ -1343,7 +1343,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               </span>
             )}
           </button>
-        </li>
+        </div>
       </nav>
 
       {/* Admin / setup surfaces — rendered as a 2-column button grid
