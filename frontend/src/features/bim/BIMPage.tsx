@@ -54,7 +54,7 @@ import {
   Package,
   GitCompare,
 } from 'lucide-react';
-import { Badge, EmptyState, Breadcrumb, ConfirmDialog } from '@/shared/ui';
+import { Badge, EmptyState, Breadcrumb, ConfirmDialog, ModuleHelpButton } from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
 import { BIMViewer } from '@/shared/ui/BIMViewer';
 import type { BIMElementData, BIMModelData } from '@/shared/ui/BIMViewer';
@@ -2670,6 +2670,7 @@ export function BIMPage() {
                 title={t('bim.filter_toggle', { defaultValue: 'Toggle filter panel' })}
                 aria-label={t('bim.filter_toggle', { defaultValue: 'Toggle filter panel' })}
                 aria-pressed={filterPanelOpen}
+                data-testid="bim-tour-filter-button"
               >
                 <Filter size={13} />
                 {t('bim.filter_button', { defaultValue: 'Filter' })}
@@ -2852,6 +2853,7 @@ export function BIMPage() {
                 title={t('bim.linked_boq_toggle', { defaultValue: 'Toggle linked BOQ panel' })}
                 aria-label={t('bim.linked_boq_toggle', { defaultValue: 'Toggle linked BOQ panel' })}
                 aria-pressed={boqPanelOpen}
+                data-testid="bim-tour-linked-boq-button"
               >
                 <ClipboardList size={13} />
                 {t('bim.linked_boq_button', { defaultValue: 'Linked BOQ' })}
@@ -2981,6 +2983,10 @@ export function BIMPage() {
           <button onClick={() => setUploadOpen((p) => !p)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-oe-blue text-white hover:bg-oe-blue-dark transition-colors shadow-sm">
             <Plus size={13} /> {t('bim.add_model', { defaultValue: 'Add Model' })}
           </button>
+          {/* Per-module Tour CTA — launches the BIM-specific guided tour
+              via the registered TOUR_REGISTRY entry, independent of any
+              global / first-login tour state. */}
+          <ModuleHelpButton tourId="bim" />
         </div>
       </div>
 

@@ -75,6 +75,7 @@ export function GeoModePicker({
       ].join(' ')}
       role="tablist"
       aria-label={t('geo_hub.mode.tablist_label', { defaultValue: 'Map scope' })}
+      data-testid="geo-tour-mode-picker"
     >
       {items.map((it) => {
         const active = it.key === current;

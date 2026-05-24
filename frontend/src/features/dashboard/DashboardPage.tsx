@@ -39,7 +39,7 @@ import {
   Activity,
   LayoutGrid,
 } from 'lucide-react';
-import { Card, CardHeader, CardContent, Button, Badge, Skeleton, ActivityFeed as CrossModuleActivityFeed, EmptyState } from '@/shared/ui';
+import { Card, CardHeader, CardContent, Button, Badge, Skeleton, ActivityFeed as CrossModuleActivityFeed, EmptyState, ModuleHelpButton } from '@/shared/ui';
 import { WhatsNewCard } from '@/shared/ui/WhatsNewCard';
 import BIMCoverageCard from './BIMCoverageCard';
 import { CompactProjectCard } from './components/CompactProjectCard';
@@ -816,6 +816,7 @@ function KpiRibbon({
     <div
       className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4 animate-card-in"
       style={{ animationDelay: '50ms' }}
+      data-testid="dashboard-tour-kpi-ribbon"
     >
       {cards.map((card, i) => {
         const clickable = 'onClick' in card && typeof card.onClick === 'function';
@@ -1365,7 +1366,11 @@ function ProjectMetricCards({
   if (!cards || cards.length === 0) return null;
 
   return (
-    <div className="animate-card-in" style={{ animationDelay: '130ms' }}>
+    <div
+      className="animate-card-in"
+      style={{ animationDelay: '130ms' }}
+      data-testid="dashboard-tour-projects-list"
+    >
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Layers size={16} className="text-content-tertiary" strokeWidth={1.75} />
@@ -2060,7 +2065,11 @@ export function DashboardPage() {
             return t(key, { defaultValue: fallback });
           })()}
         </h1>
-        <div className="flex items-center gap-2 flex-wrap animate-stagger-in" style={{ animationDelay: '100ms' }}>
+        <div
+          className="flex items-center gap-2 flex-wrap animate-stagger-in"
+          style={{ animationDelay: '100ms' }}
+          data-testid="dashboard-tour-hero-actions"
+        >
           <Button
             variant="primary"
             size="md"
@@ -2114,11 +2123,14 @@ export function DashboardPage() {
             title={t('dashboard.layout.customize_hint', {
               defaultValue: 'Reorder, show or hide dashboard sections',
             })}
+            data-testid="dashboard-tour-customize-button"
           >
             {customizing
               ? t('dashboard.layout.done', { defaultValue: 'Done' })
               : t('dashboard.layout.customize', { defaultValue: 'Customize' })}
           </Button>
+          {/* Per-module Tour CTA — launches the Dashboard guided tour. */}
+          <ModuleHelpButton tourId="dashboard" />
         </div>
       </div>
 

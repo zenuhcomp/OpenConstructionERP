@@ -113,7 +113,10 @@ export function GeoOverlayHud({
       </div>
 
       {/* Bottom-left: coordinates + scale bar */}
-      <div className="pointer-events-none absolute bottom-3 left-3 z-10 flex flex-col items-start gap-1.5">
+      <div
+        className="pointer-events-none absolute bottom-3 left-3 z-10 flex flex-col items-start gap-1.5"
+        data-testid="geo-tour-hud"
+      >
         <div className={GLASS_CARD}>
           <span className="text-slate-400 uppercase tracking-wider">
             {t('geo_hub.hud.lat', { defaultValue: 'LAT' })}

@@ -6721,6 +6721,85 @@ const resource = {
     "tour.boq.step.8.body": "Export to Excel (.xlsx), CSV, PDF report, or GAEB XML X83 for German tender submission. Currency, FX rates and markups are baked in so the recipient sees the same totals.",
     // --- /Per-module tour: BOQ Editor ---
 
+    // --- Per-module tour: BIM Hub (7 steps) ---
+    "tour.bim.step.1.title": "Models filmstrip",
+    "tour.bim.step.1.body": "Every model you upload (RVT, IFC, DWG-to-IFC, CSV-with-geometry) lives here. Click a card to load it, the Plus tile to upload a new one, or the chevron to collapse the strip and reclaim the canvas.",
+    "tour.bim.step.2.title": "Active model",
+    "tour.bim.step.2.body": "Shows the name of the model currently in the 3D viewport — drag to rotate, scroll to zoom, right-drag to pan. Hover for the storage breakdown (artifacts + originals on disk).",
+    "tour.bim.step.3.title": "Filter & section box",
+    "tour.bim.step.3.body": "Filter by storey, IFC class, discipline or any property — type a value or pick from the federation tree. Saved filter sets become reusable element groups. Hidden elements vanish from the canvas instantly.",
+    "tour.bim.step.4.title": "Property search",
+    "tour.bim.step.4.body": "Query the DDC-extracted Parquet directly: pick a column, an operator (=, contains, >, <), and a value. Matches are isolated in the viewport so you can audit \"all walls thicker than 30 cm\" in one click.",
+    "tour.bim.step.5.title": "Asset Card & element properties",
+    "tour.bim.step.5.body": "Toggle the floating Asset Card to see every property on the selected element — IFC params, materials, custom asset-register fields. Edit notes / status inline; changes sync to the Asset module.",
+    "tour.bim.step.6.title": "Linked BOQ",
+    "tour.bim.step.6.body": "Opens the right-rail panel showing which BOQ positions reference the selected element. Drag elements onto a position to link them, or click \"Quick takeoff\" on a filter to auto-create a position from a group.",
+    "tour.bim.step.7.title": "View on map & federation",
+    "tour.bim.step.7.body": "Jump to the Geo Hub with this model anchored on the globe, federate multiple models together for clash detection, or open the extracted data in the Data Explorer for SQL-style analysis.",
+    // --- /Per-module tour: BIM Hub ---
+
+    // --- Per-module tour: Geo Hub (6 steps) ---
+    "tour.geo.step.1.title": "Mode picker",
+    "tour.geo.step.1.body": "Three scopes: Global shows every anchored project on one earth-scale map. Project drops into one project — anchor, tilesets, viewpoints. Development is the per-development PropDev plot map.",
+    "tour.geo.step.2.title": "Live HUD",
+    "tour.geo.step.2.body": "Cursor latitude / longitude, camera altitude and a scale bar update as you drag the globe. The north arrow always points up — click it to reset the camera to true-north.",
+    "tour.geo.step.3.title": "Anchored Projects",
+    "tour.geo.step.3.body": "Every project you can access that has a real-world anchor is listed here. Click the name to fly the camera to its pin, or \"Open\" to drop into that project's map. Collapse to a slim pill to reclaim canvas.",
+    "tour.geo.step.4.title": "3D globe",
+    "tour.geo.step.4.body": "Drag to rotate, scroll to zoom, right-drag to pan. Click any pin (project, HSE incident, Punchlist defect, Daily Diary entry) to open it in its module. Tilesets fly into view as you zoom in.",
+    "tour.geo.step.5.title": "Raster overlays",
+    "tour.geo.step.5.body": "Pin a PDF site plan or a georeferenced image onto the globe — click Add, drop the file, then drag the corner handles to align. Use Crop to mask the title block. Opacity slider per overlay.",
+    "tour.geo.step.6.title": "Deep links you can share",
+    "tour.geo.step.6.body": "Every camera move / opened overlay updates the URL — ?model=… anchors a specific BIM tileset, ?plot=… focuses a PropDev plot, ?dev_id=… opens a development map. Copy and paste to colleagues; they land exactly where you are.",
+    // --- /Per-module tour: Geo Hub ---
+
+    // --- Per-module tour: Property Development (7 steps) ---
+    "tour.propdev.step.1.title": "Lifecycle pipeline",
+    "tour.propdev.step.1.body": "A residential sale runs Lead → Reservation → SPA (Sale & Purchase Agreement) → Handover → Warranty. Contract values feed Finance automatically. The banner shows where the active development sits on that path.",
+    "tour.propdev.step.2.title": "Sub-entity tabs",
+    "tour.propdev.step.2.body": "Master data (Developments, Phases, Blocks, Plots, House Types) on the left, sales (Leads, Buyers, Reservations, SPAs, Payment Schedules) in the middle, operations (Brokers, Price Matrix, Escrow, Handovers, Warranty) on the right.",
+    "tour.propdev.step.3.title": "Context-aware Add",
+    "tour.propdev.step.3.body": "The primary button always creates the right entity for the active tab — \"New Plot\" on Plots, \"New Lead\" on Leads, \"New Reservation\" on Reservations. SPA / Payment Schedule rows route back to Reservations because that's where the flow starts.",
+    "tour.propdev.step.4.title": "House Types catalogue",
+    "tour.propdev.step.4.body": "Reusable unit templates with floors, area, bedrooms, base price and ISO 3166-1 region (180+ countries). Pick \"Custom region\" for areas without an ISO code. Variants let you spin off a Type-A-mirrored or Type-A-balcony.",
+    "tour.propdev.step.5.title": "Handovers & Snags",
+    "tour.propdev.step.5.body": "Per handover you can log a snag list (punch list of defects), photo-document each item, and close them out before signing off. Snags are visible to the buyer in the buyer portal and feed the Warranty workflow.",
+    "tour.propdev.step.6.title": "Leads → Reservation",
+    "tour.propdev.step.6.body": "Every inbound enquiry starts as a Lead with source attribution. The \"Convert\" button creates a Reservation (with deposit) on a chosen plot and optionally syncs the buyer to the Contacts directory so CRM and PropDev share one person record.",
+    "tour.propdev.step.7.title": "Dashboards",
+    "tour.propdev.step.7.body": "Six analytics views: Buyer Journey Timeline, Cash Flow Waterfall, Funnel Conversion, Inventory Ageing, Inventory Heatmap, Sales Velocity. Each is shareable as a full-screen URL for stakeholders.",
+    // --- /Per-module tour: Property Development ---
+
+    // --- Per-module tour: Accommodation (7 steps, updated) ---
+    "tour.accommodation.step.1.title": "Accommodation header",
+    "tour.accommodation.step.1.body": "Name, kind badge (worker camp / rental / hotel) and quick links to the linked BIM model and the Geo Hub when geo-coordinates are set. Launch the per-module tour from the Tour button here.",
+    "tour.accommodation.step.2.title": "Tabs",
+    "tour.accommodation.step.2.body": "Rooms, Bookings, Charges and Settings. Each tab scopes its data to this accommodation only — no cross-contamination between properties on the same project.",
+    "tour.accommodation.step.3.title": "Rooms grid",
+    "tour.accommodation.step.3.body": "Colour-coded by status — green available, amber occupied, grey maintenance, red blocked. Click any room tile to assign an occupant or open its booking history.",
+    "tour.accommodation.step.4.title": "Add rooms in bulk",
+    "tour.accommodation.step.4.body": "Generator creates a contiguous block of rooms in one shot: pick a prefix (B-), start number (201) and count (12) and you get B-201..B-212 with default capacity and base rate. Or paste a CSV list.",
+    "tour.accommodation.step.5.title": "Bookings & state machine",
+    "tour.accommodation.step.5.body": "Bookings follow reserved → checked_in → checked_out. Cancel is allowed from any non-final state. The room status flips to occupied on check-in and back to available on check-out / cancel — fully automatic.",
+    "tour.accommodation.step.6.title": "Bootstrap from PropDev",
+    "tour.accommodation.step.6.body": "In Settings → Bootstrap from PropDev, paste a PropDev block id to clone its plots as rooms here. Idempotent — re-run safely whenever the source block grows. Great for staff-quarter accommodation tied to a residential development.",
+    "tour.accommodation.step.7.title": "HR autobook is in the list page",
+    "tour.accommodation.step.7.body": "From /accommodation the \"Suggest room for employee\" button picks the lowest-numbered free worker-camp room for a new hire — feed it an employee id and a check-in date, accept the suggestion, and the booking is created in one click.",
+    // --- /Per-module tour: Accommodation ---
+
+    // --- Per-module tour: Dashboard (5 steps) ---
+    "tour.dashboard.step.1.title": "Primary actions",
+    "tour.dashboard.step.1.body": "Three high-traffic CTAs: New Project starts a fresh project; New Estimate creates a BOQ inside the most recent project; Quick Start resumes your latest BOQ in one click.",
+    "tour.dashboard.step.2.title": "Customize",
+    "tour.dashboard.step.2.body": "Click to open the layout manager: show / hide / reorder every widget on this page. Your layout is saved server-side, so it follows you across browsers and machines under the same account.",
+    "tour.dashboard.step.3.title": "KPI ribbon",
+    "tour.dashboard.step.3.body": "Total Value rolls up every active estimate. Active Estimates excludes archived / closed. Schedule Status counts active programmes. Priced Positions is the live ratio of priced vs total BOQ lines — click it to run validation if it's still null.",
+    "tour.dashboard.step.4.title": "Projects list & drill-in",
+    "tour.dashboard.step.4.body": "Every project card shows BOQ value, position count, open tasks, RFIs and safety incidents. Click any card to make it the active project — every page in the app then scopes its data to that project.",
+    "tour.dashboard.step.5.title": "Some widgets need data",
+    "tour.dashboard.step.5.body": "BIM Coverage, Critical Path, Procurement Pipeline and others render an empty state until the corresponding module has data — every empty card links you straight to the module so you can fill it in.",
+    // --- /Per-module tour: Dashboard ---
+
     // --- ModuleHelpButton (per-module page Tour CTA) ---
     "module_help.tour_button": "Tour",
     "module_help.tour_aria": "Start guided tour for this module",

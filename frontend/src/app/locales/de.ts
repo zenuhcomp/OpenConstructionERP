@@ -6363,6 +6363,85 @@ const resource = {
     "tour.boq.step.8.body": "Export nach Excel (.xlsx), CSV, PDF-Bericht oder GAEB XML X83 für deutsche Ausschreibungen. Währung, Wechselkurse und Zuschläge sind enthalten, sodass der Empfänger dieselben Summen sieht.",
     // --- /Per-module tour: BOQ Editor ---
 
+    // --- Per-module tour: BIM Hub (7 Schritte) ---
+    "tour.bim.step.1.title": "Modell-Filmstreifen",
+    "tour.bim.step.1.body": "Jedes hochgeladene Modell (RVT, IFC, DWG-zu-IFC, CSV mit Geometrie) liegt hier. Klicke eine Kachel zum Laden, das Plus-Feld für einen neuen Upload oder den Chevron, um den Streifen einzuklappen und mehr Canvas zu gewinnen.",
+    "tour.bim.step.2.title": "Aktives Modell",
+    "tour.bim.step.2.body": "Zeigt den Namen des aktuell geladenen Modells im 3D-Viewport — Ziehen zum Rotieren, Scrollen zum Zoomen, Rechtsziehen zum Verschieben. Über dem Namen schwebend siehst du die Speicheraufschlüsselung (Artefakte + Originale auf der Festplatte).",
+    "tour.bim.step.3.title": "Filter & Schnittbox",
+    "tour.bim.step.3.body": "Filtere nach Geschoss, IFC-Klasse, Disziplin oder beliebiger Eigenschaft — Wert eingeben oder aus dem Föderations-Baum wählen. Gespeicherte Filtersätze werden zu wiederverwendbaren Elementgruppen. Ausgeblendete Elemente verschwinden sofort aus dem Canvas.",
+    "tour.bim.step.4.title": "Eigenschaftssuche",
+    "tour.bim.step.4.body": "Frage das von DDC extrahierte Parquet direkt ab: Spalte wählen, Operator (=, enthält, >, <), und Wert. Treffer werden im Viewport isoliert, sodass du z. B. „alle Wände dicker als 30 cm“ mit einem Klick prüfen kannst.",
+    "tour.bim.step.5.title": "Asset-Card & Elementeigenschaften",
+    "tour.bim.step.5.body": "Schalte die schwebende Asset-Card ein, um alle Eigenschaften des gewählten Elements zu sehen — IFC-Parameter, Materialien, eigene Asset-Register-Felder. Notizen / Status inline editieren; Änderungen wandern ins Asset-Modul.",
+    "tour.bim.step.6.title": "Verknüpftes LV",
+    "tour.bim.step.6.body": "Öffnet die rechte Seitenleiste mit allen LV-Positionen, die das gewählte Element referenzieren. Elemente auf eine Position ziehen zum Verknüpfen, oder „Schnellaufmaß“ in einem Filter klicken, um eine Position aus einer Gruppe zu erzeugen.",
+    "tour.bim.step.7.title": "Auf Karte anzeigen & Föderation",
+    "tour.bim.step.7.body": "Springe in den Geo-Hub mit diesem Modell auf dem Globus verankert, föderiere mehrere Modelle für Kollisionserkennung, oder öffne die extrahierten Daten im Data Explorer für SQL-ähnliche Analyse.",
+    // --- /Per-module tour: BIM Hub ---
+
+    // --- Per-module tour: Geo Hub (6 Schritte) ---
+    "tour.geo.step.1.title": "Modusauswahl",
+    "tour.geo.step.1.body": "Drei Bereiche: Global zeigt alle verankerten Projekte auf einer Welt-Karte. Projekt geht in ein Projekt hinein — Anker, Tilesets, Sichtpunkte. Entwicklung ist die per-Development PropDev-Plot-Karte.",
+    "tour.geo.step.2.title": "Live-HUD",
+    "tour.geo.step.2.body": "Cursor-Breite / -Länge, Kamerahöhe und Maßstabsbalken aktualisieren sich beim Ziehen des Globus. Der Nordpfeil zeigt immer nach oben — klicke ihn, um die Kamera auf echten Norden zurückzusetzen.",
+    "tour.geo.step.3.title": "Verankerte Projekte",
+    "tour.geo.step.3.body": "Jedes für dich sichtbare Projekt mit einem realen Anker wird hier gelistet. Klicke den Namen, um die Kamera zu seinem Pin zu fliegen, oder „Öffnen“, um in dessen Karte zu springen. Auf eine Pille einklappen für mehr Canvas.",
+    "tour.geo.step.4.title": "3D-Globus",
+    "tour.geo.step.4.body": "Ziehen zum Rotieren, Scrollen zum Zoomen, Rechtsziehen zum Verschieben. Jeden Pin anklicken (Projekt, HSE-Vorfall, Punchlist-Mangel, Bautagebuch-Eintrag), um ihn im Modul zu öffnen. Tilesets erscheinen beim Hineinzoomen.",
+    "tour.geo.step.5.title": "Raster-Overlays",
+    "tour.geo.step.5.body": "Pinne einen PDF-Lageplan oder ein georeferenziertes Bild auf den Globus — Klick auf Hinzufügen, Datei ablegen, dann Eckpunkte zum Ausrichten ziehen. Zuschneiden für den Schriftfeldbereich. Deckkraft-Slider pro Overlay.",
+    "tour.geo.step.6.title": "Deep-Links zum Teilen",
+    "tour.geo.step.6.body": "Jede Kamerabewegung / jedes geöffnete Overlay aktualisiert die URL — ?model=… verankert ein bestimmtes BIM-Tileset, ?plot=… fokussiert ein PropDev-Plot, ?dev_id=… öffnet eine Entwicklungs-Karte. Kopiere und sende sie Kollegen; sie landen genau wo du bist.",
+    // --- /Per-module tour: Geo Hub ---
+
+    // --- Per-module tour: Property Development (7 Schritte) ---
+    "tour.propdev.step.1.title": "Lebenszyklus-Pipeline",
+    "tour.propdev.step.1.body": "Ein Wohnverkauf läuft Lead → Reservierung → SPA (Kauf- und Verkaufsvertrag) → Übergabe → Gewährleistung. Vertragswerte fließen automatisch in Finance. Das Banner zeigt, wo die aktive Entwicklung auf diesem Weg steht.",
+    "tour.propdev.step.2.title": "Unter-Entity-Tabs",
+    "tour.propdev.step.2.body": "Stammdaten (Entwicklungen, Phasen, Blöcke, Plots, Haustypen) links, Vertrieb (Leads, Käufer, Reservierungen, SPAs, Zahlungspläne) in der Mitte, Operations (Makler, Preismatrix, Treuhand, Übergaben, Gewährleistung) rechts.",
+    "tour.propdev.step.3.title": "Kontextabhängiges Hinzufügen",
+    "tour.propdev.step.3.body": "Die Primärschaltfläche legt immer die richtige Entität für den aktiven Tab an — „Neues Plot“ bei Plots, „Neuer Lead“ bei Leads, „Neue Reservierung“ bei Reservierungen. SPA / Zahlungsplan leiten zurück zu Reservierungen, weil dort der Fluss beginnt.",
+    "tour.propdev.step.4.title": "Haustypen-Katalog",
+    "tour.propdev.step.4.body": "Wiederverwendbare Einheits-Vorlagen mit Geschossen, Fläche, Schlafzimmern, Basispreis und ISO 3166-1 Region (180+ Länder). „Eigene Region“ für Gebiete ohne ISO-Code. Varianten ermöglichen Typ-A-gespiegelt oder Typ-A-mit-Balkon.",
+    "tour.propdev.step.5.title": "Übergaben & Mängel",
+    "tour.propdev.step.5.body": "Pro Übergabe kannst du eine Mängelliste (Punch List) führen, jedes Element fotodokumentieren und vor Abnahme schließen. Mängel sind im Käuferportal sichtbar und fließen in den Gewährleistungs-Workflow.",
+    "tour.propdev.step.6.title": "Leads → Reservierung",
+    "tour.propdev.step.6.body": "Jede eingehende Anfrage startet als Lead mit Quellenangabe. Die „Konvertieren“-Schaltfläche erstellt eine Reservierung (mit Anzahlung) auf einem gewählten Plot und synchronisiert den Käufer optional in das Kontakte-Verzeichnis, sodass CRM und PropDev einen Personensatz teilen.",
+    "tour.propdev.step.7.title": "Dashboards",
+    "tour.propdev.step.7.body": "Sechs Analyseansichten: Käufer-Journey-Timeline, Cashflow-Wasserfall, Funnel-Konversion, Bestandsalterung, Bestands-Heatmap, Verkaufsgeschwindigkeit. Jede ist als Vollbild-URL teilbar.",
+    // --- /Per-module tour: Property Development ---
+
+    // --- Per-module tour: Accommodation (7 Schritte) ---
+    "tour.accommodation.step.1.title": "Unterkunfts-Kopfzeile",
+    "tour.accommodation.step.1.body": "Name, Art-Badge (Arbeitercamp / Vermietung / Hotel) und Schnelllinks zum verknüpften BIM-Modell und Geo-Hub, sofern Koordinaten gesetzt sind. Starte die Modul-Tour über die Tour-Schaltfläche hier.",
+    "tour.accommodation.step.2.title": "Tabs",
+    "tour.accommodation.step.2.body": "Zimmer, Buchungen, Belege und Einstellungen. Jeder Tab beschränkt seine Daten nur auf diese Unterkunft — keine Vermischung zwischen Objekten desselben Projekts.",
+    "tour.accommodation.step.3.title": "Zimmer-Raster",
+    "tour.accommodation.step.3.body": "Farbcodiert nach Status — grün verfügbar, gelb belegt, grau Wartung, rot gesperrt. Klicke eine Kachel, um einen Bewohner zuzuweisen oder die Buchungshistorie zu öffnen.",
+    "tour.accommodation.step.4.title": "Zimmer in Massen anlegen",
+    "tour.accommodation.step.4.body": "Der Generator erzeugt einen zusammenhängenden Block in einem Schritt: Präfix (B-), Startnummer (201), Anzahl (12) — du erhältst B-201..B-212 mit Standardkapazität und Basispreis. Oder eine CSV-Liste einfügen.",
+    "tour.accommodation.step.5.title": "Buchungen & Zustandsautomat",
+    "tour.accommodation.step.5.body": "Buchungen folgen reserviert → eingecheckt → ausgecheckt. Stornieren ist aus jedem Nicht-End-Zustand möglich. Der Zimmerstatus wechselt automatisch beim Check-in auf belegt und beim Check-out / Storno zurück auf verfügbar.",
+    "tour.accommodation.step.6.title": "Aus PropDev übernehmen",
+    "tour.accommodation.step.6.body": "Unter Einstellungen → Aus PropDev übernehmen, eine PropDev-Block-ID einfügen, um deren Plots als Zimmer zu klonen. Idempotent — sicher mehrfach ausführbar wenn der Quellblock wächst. Ideal für Personalunterkunft an einer Wohnungsentwicklung.",
+    "tour.accommodation.step.7.title": "HR-Autobook ist auf der Listenseite",
+    "tour.accommodation.step.7.body": "Auf /accommodation wählt die Schaltfläche „Zimmer für Mitarbeiter vorschlagen“ das niedrigstnummerierte freie Arbeitercamp-Zimmer für einen Neueinstand — Mitarbeiter-ID und Check-in-Datum eingeben, Vorschlag annehmen, Buchung wird in einem Klick erstellt.",
+    // --- /Per-module tour: Accommodation ---
+
+    // --- Per-module tour: Dashboard (5 Schritte) ---
+    "tour.dashboard.step.1.title": "Primäraktionen",
+    "tour.dashboard.step.1.body": "Drei häufig genutzte CTAs: Neues Projekt startet ein neues Projekt; Neue Schätzung legt ein LV im neuesten Projekt an; Schnellstart setzt deine letzte Schätzung mit einem Klick fort.",
+    "tour.dashboard.step.2.title": "Anpassen",
+    "tour.dashboard.step.2.body": "Klicken öffnet den Layout-Manager: zeigen / ausblenden / umsortieren jedes Widgets auf dieser Seite. Dein Layout wird serverseitig gespeichert und folgt dir über Browser und Geräte hinweg unter demselben Konto.",
+    "tour.dashboard.step.3.title": "KPI-Band",
+    "tour.dashboard.step.3.body": "Gesamtwert summiert jede aktive Schätzung. Aktive Schätzungen schließt archivierte / geschlossene aus. Terminplan-Status zählt aktive Pläne. Positionen mit Preis ist das Live-Verhältnis bepreister zu Gesamt-Positionen — klicken zum Starten der Validierung wenn noch leer.",
+    "tour.dashboard.step.4.title": "Projektliste & Drill-in",
+    "tour.dashboard.step.4.body": "Jede Projektkarte zeigt LV-Wert, Positionsanzahl, offene Aufgaben, RFIs und Sicherheitsvorfälle. Klicke eine Karte, um sie zum aktiven Projekt zu machen — jede Seite der App beschränkt ihre Daten dann auf dieses Projekt.",
+    "tour.dashboard.step.5.title": "Manche Widgets brauchen Daten",
+    "tour.dashboard.step.5.body": "BIM-Abdeckung, kritischer Pfad, Beschaffungs-Pipeline und andere zeigen einen Leerzustand, bis das entsprechende Modul Daten hat — jede leere Karte verlinkt direkt zum Modul, damit du sie befüllen kannst.",
+    // --- /Per-module tour: Dashboard ---
+
     // --- ModuleHelpButton ---
     "module_help.tour_button": "Tour",
     "module_help.tour_aria": "Geführte Tour für dieses Modul starten",

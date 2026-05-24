@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 
 import { ApiError } from '@/shared/lib/api';
+import { ModuleHelpButton } from '@/shared/ui';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 
 import { fetchAnchoredProjects } from './api';
@@ -216,6 +217,7 @@ function AnchoredProjectsOverlay({
       aria-label={t('geo_hub.rail.aria', {
         defaultValue: 'Anchored projects',
       })}
+      data-testid="geo-tour-anchored-rail"
     >
       <div className="flex items-center justify-between gap-2 border-b border-black/5 px-3 py-2.5 dark:border-white/10">
         <div className="min-w-0">
@@ -496,8 +498,10 @@ export function GeoHubPage() {
               'Drag to rotate · scroll to zoom · click a project pin to open. Click a project in the left list to fly the camera.',
           })}
         </p>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <GeoModePicker current="global" projectId={activeProjectId} />
+          {/* Per-module Tour CTA — launches the Geo Hub-specific tour. */}
+          <ModuleHelpButton tourId="geo" />
         </div>
       </header>
 

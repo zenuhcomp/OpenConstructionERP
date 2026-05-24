@@ -58,6 +58,7 @@ import {
   SideDrawer,
   ActivityFeed,
   ConfirmDialog,
+  ModuleHelpButton,
 } from '@/shared/ui';
 import {
   WideModal,
@@ -391,9 +392,13 @@ export function PropertyDevPage() {
 
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold text-content-primary">
-            {t('propdev.title', { defaultValue: 'Property Development' })}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold text-content-primary">
+              {t('propdev.title', { defaultValue: 'Property Development' })}
+            </h1>
+            {/* Per-module Tour CTA — launches the PropDev guided tour. */}
+            <ModuleHelpButton tourId="propdev" />
+          </div>
           <p className="mt-1 text-sm text-content-secondary">
             {t('propdev.subtitle', {
               defaultValue:
@@ -409,12 +414,14 @@ export function PropertyDevPage() {
             aria-label={t('propdev.open_dashboards', {
               defaultValue: 'Open analytics dashboards',
             })}
+            data-testid="propdev-tour-dashboards-button"
           >
             {t('propdev.dashboards_short', { defaultValue: 'Dashboards' })}
           </Button>
           <Button
             variant="primary"
             icon={<Plus size={14} />}
+            data-testid="propdev-tour-new-button"
             onClick={() => {
               // From the overview tab, opening the primary CTA falls
               // through to creating a development — the natural first
@@ -486,6 +493,7 @@ export function PropertyDevPage() {
         </div>
       </div>
 
+      <div data-testid="propdev-tour-pipeline">
       <PipelineBanner
         intro={t('propdev.pipeline_intro', {
           defaultValue:
@@ -507,12 +515,16 @@ export function PropertyDevPage() {
           },
         ]}
       />
+      </div>
 
       {/* Tabs — all 16 icon buttons in a single wrap row. Group boundaries
           shown via a thin vertical divider so the master-data → sales →
           operations lifecycle is still discoverable without consuming
           three separate rows on wide screens. */}
-      <div className="rounded-2xl border border-border-light bg-white/60 backdrop-blur-sm px-3 py-3">
+      <div
+        className="rounded-2xl border border-border-light bg-white/60 backdrop-blur-sm px-3 py-3"
+        data-testid="propdev-tour-tabs"
+      >
         <nav
           className="flex flex-wrap items-stretch gap-1.5"
           aria-label={t('propdev.tabs_aria', { defaultValue: 'Property development sections' })}
@@ -559,6 +571,15 @@ export function PropertyDevPage() {
                     setTab(tabItem.id);
                     setSearch('');
                   }}
+                  data-testid={
+                    tabItem.id === 'house_types'
+                      ? 'propdev-tour-house-types-tab'
+                      : tabItem.id === 'handovers'
+                        ? 'propdev-tour-handovers-tab'
+                        : tabItem.id === 'leads'
+                          ? 'propdev-tour-leads-tab'
+                          : undefined
+                  }
                   className={clsx(
                     'group relative flex flex-col items-center justify-center gap-1',
                     'h-[64px] w-[64px] md:h-[68px] md:w-[72px]',
