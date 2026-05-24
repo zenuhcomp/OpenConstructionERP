@@ -108,6 +108,43 @@ class ProjectRepository:
         count = (await self.session.execute(stmt)).scalar_one()
         return bool(count)
 
+    async def existing_project_codes(self, codes: list[str]) -> set[str]:
+        """Bulk variant of :meth:`project_code_exists`.
+
+        Returns the subset of ``codes`` that are already committed in
+        ``Project.project_code``. Issues a single ``WHERE IN (...)``
+        query instead of N point queries — used by the stale-reservation
+        prune in ``ProjectService._generate_project_code`` which can
+        otherwise spend O(N) round-trips checking reservations on every
+        ``create_project`` call when the in-process reservation set has
+        grown (long-running uvicorn workers, batch importer scenarios).
+
+        Empty input → empty set (no query issued).
+
+        Hard cap on input size — refuses to issue an unbounded ``IN``
+        clause that could trip Postgres' parameter-limit (max 32k bind
+        params on the wire). The caller (generator) keeps the
+        reservation set small in practice, but guarding here protects
+        against pathological batch flows.
+        """
+        if not codes:
+            return set()
+        # Postgres caps at ~32k bind parameters per statement; chunk
+        # defensively. 1000 covers any sane in-process reservation set
+        # while staying well below the limit even on the worst engine.
+        BATCH = 1000
+        found: set[str] = set()
+        for start in range(0, len(codes), BATCH):
+            chunk = codes[start:start + BATCH]
+            stmt = select(Project.project_code).where(
+                Project.project_code.in_(chunk),
+            )
+            result = await self.session.execute(stmt)
+            for row in result.all():
+                if row[0] is not None:
+                    found.add(row[0])
+        return found
+
     async def max_project_code_seq(self, prefix: str) -> int | None:
         """Find the maximum sequence number for project codes with the given prefix.
 
