@@ -579,12 +579,33 @@ function ResourceRow({
 
         {/* Name */}
         <td className="px-4 py-3 text-sm text-content-primary font-medium">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 group/name relative">
             {regionInfo && <MiniFlag code={regionInfo.flag} size={11} />}
-            <span className="truncate max-w-[280px]">{resource.name}</span>
+            <span
+              className="truncate max-w-[420px]"
+              title={resource.name}
+            >
+              {resource.name}
+            </span>
+            {/* Pretty hover-tooltip with the full name. Closes issue #156
+                \u2014 long resource names that share a prefix need to be
+                disambiguated without a column-resize. The native ``title=``
+                fallback above keeps the behaviour accessible and works
+                for screen readers / keyboard nav even if CSS fails. */}
+            {resource.name.length > 40 && (
+              <span
+                role="tooltip"
+                className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden max-w-[640px] whitespace-normal rounded-md border border-border-light bg-surface-elevated px-3 py-2 text-xs font-normal text-content-primary shadow-lg group-hover/name:block"
+              >
+                {resource.name}
+              </span>
+            )}
           </div>
           {resource.source === 'boq_import' && resource.specifications?.source_project_name ? (
-            <div className="text-2xs text-content-quaternary mt-0.5 truncate">
+            <div
+              className="text-2xs text-content-quaternary mt-0.5 truncate"
+              title={String(resource.specifications.source_project_name)}
+            >
               {translate('common.from', { defaultValue: 'from' })}{' '}
               {String(resource.specifications.source_project_name)}
               {resource.specifications.saved_at ? (
