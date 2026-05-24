@@ -1137,8 +1137,22 @@ class VariationsService:
     ) -> VariationOrder:
         """Promote an approved VariationRequest into a VariationOrder.
 
-        Emits ``variations.vo.issued`` and ``variations.change_order.requested``
-        — the latter is what oe_changeorders subscribes to.
+        R7 audit: in addition to creating the VariationOrder we now
+        atomically mirror it into oe_changeorders as a draft ChangeOrder
+        and stamp the cross-module soft link
+        (``vo.reference_change_order_id``). All three writes (VO insert,
+        VR.status flip, CO insert) share the calling AsyncSession so a
+        failure in any rolls back the entire promotion — previously the
+        only cross-module linkage was an event publish, which made the CO
+        eventually-consistent at best and silently-dropped at worst when
+        the subscriber wasn't wired up.
+
+        Currency consistency: the CO inherits the VO's currency (which
+        itself inherited from the project on create). Money figures
+        propagate as Decimal throughout — no float coercion.
+
+        Emits ``variations.vo.issued`` and ``variations.change_order.created``
+        once the writes have flushed.
         """
         vr = await self.get_request(vr_id)
         if vr.status != "approved":
@@ -1153,16 +1167,71 @@ class VariationsService:
         forced = VariationOrderCreate(**payload_dict)
         vo = await self.create_order(forced, user_id=user_id)
 
+        # R7 audit: mirror into oe_changeorders inside the same txn. Both
+        # writes share ``self.session`` so a rollback unwinds both. The
+        # CO carries the VO's cost impact + currency so the two rows are
+        # immediately reconcilable; subsequent VO completion can transition
+        # the CO through its own approval chain.
+        co_id: uuid.UUID | None = None
+        try:
+            from app.modules.changeorders.schemas import ChangeOrderCreate
+            from app.modules.changeorders.service import ChangeOrderService
+
+            co_service = ChangeOrderService(self.session)
+            co_payload = ChangeOrderCreate(
+                project_id=vr.project_id,
+                title=vo.title or vr.title or f"VO {vo.code}",
+                description=(
+                    f"Auto-created from variation order {vo.code} "
+                    f"(VR {vr.code}). Cost impact mirrors the VO."
+                ),
+                reason_category="design_change",
+                schedule_impact_days=max(0, int(vo.final_schedule_days or 0)),
+                currency=vo.currency or vr.currency or "",
+                cost_impact=str(_to_decimal(vo.final_cost_impact)),
+                metadata={
+                    "origin": "variations.convert_vr_to_vo",
+                    "variation_request_id": str(vr_id),
+                    "variation_order_id": str(vo.id),
+                },
+            )
+            co = await co_service.create_order(co_payload)
+            co_id = co.id
+            await self.vo_repo.update_fields(
+                vo.id, reference_change_order_id=co_id,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            # Mirror failure must roll back the whole promotion — the
+            # whole point of doing it in the same txn is to avoid an
+            # orphan VO with no CO. Re-raise as 500.
+            logger.exception(
+                "Failed to mirror VR %s -> VO %s into ChangeOrder; "
+                "rolling back the promotion",
+                vr_id, vo.id,
+            )
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "Failed to mirror variation order into change orders "
+                    "module; promotion rolled back."
+                ),
+            )
+
         # Flip VR.status -> converted_to_vo
         await self.vr_repo.update_fields(vr_id, status="converted_to_vo")
         await self.session.refresh(vr)
+        await self.session.refresh(vo)
 
         _safe_publish(
-            "variations.change_order.requested",
+            "variations.change_order.created",
             {
                 "project_id": str(vr.project_id),
                 "request_id": str(vr_id),
                 "vo_id": str(vo.id),
+                "change_order_id": str(co_id) if co_id else None,
                 "title": vo.title,
                 "cost_impact": str(vo.final_cost_impact),
                 "schedule_days": vo.final_schedule_days,
