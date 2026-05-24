@@ -164,6 +164,20 @@ from app.modules.property_dev.service import (
     compute_plot_final_price,
     supported_jurisdictions,
 )
+from app.modules.property_dev.bulk_operations import (
+    bulk_extend_reservation_expiry,
+    bulk_import_leads_csv,
+    bulk_merge_buyers,
+    bulk_plot_status_change,
+    bulk_regenerate_documents,
+)
+from app.modules.property_dev.schemas import (
+    BulkResult,
+    BuyerBulkMerge,
+    DocumentsBulkRegenerate,
+    PlotBulkStatusChange,
+    ReservationBulkExtendExpiry,
+)
 
 router = APIRouter()
 
@@ -5772,3 +5786,152 @@ async def portal_list_my_warranty_claims(
     stmt = stmt.order_by(_WC.created_at.desc()).limit(500)
     rows = (await session.execute(stmt)).scalars().all()
     return [WarrantyClaimResponse.model_validate(r) for r in rows]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Bulk-operations admin console
+# ════════════════════════════════════════════════════════════════════════
+#
+# All five endpoints are MANAGER+ gated and SAVEPOINT-atomic on writes.
+# Per-item IDOR / FSM filtering happens inside the service layer — see
+# bulk_operations.py for the contract. The router is thin on purpose:
+# validation lives in the Pydantic schemas (BULK_MAX_ITEMS cap, target
+# enums, expiry date format) so a malformed payload returns 422 before
+# we even open a transaction.
+
+
+@router.post(
+    "/bulk/plots/bulk-status-change/",
+    response_model=BulkResult,
+    status_code=200,
+    summary="Bulk-flip plot statuses (manager-only)",
+    description=(
+        "Bulk transition for plots OTHER than hold/release (use the "
+        "inventory-map bulk-hold/bulk-release endpoints for those). "
+        "Illegal FSM transitions are rejected per-item (not the whole "
+        "batch). Plots the caller cannot access are silently skipped. "
+        "Pass ``?dry_run=true`` to preview without writing."
+    ),
+)
+async def bulk_plots_status_change(
+    data: PlotBulkStatusChange,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    dry_run: bool = Query(default=False, description="Classify only — no writes."),
+    _perm: None = Depends(RequirePermission("property_dev.bulk.plot_status_change")),
+) -> BulkResult:
+    return await bulk_plot_status_change(
+        session, data, user_payload=user_payload, dry_run=dry_run,
+    )
+
+
+@router.post(
+    "/bulk/reservations/bulk-extend-expiry/",
+    response_model=BulkResult,
+    status_code=200,
+    summary="Bulk-extend reservation expiries (manager-only)",
+    description=(
+        "Push ``expires_at`` to a new ISO date for a set of ACTIVE "
+        "reservations. Past dates are rejected globally (422). "
+        "Already-converted / cancelled / expired reservations are "
+        "rejected per-item."
+    ),
+)
+async def bulk_reservations_extend_expiry(
+    data: ReservationBulkExtendExpiry,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    dry_run: bool = Query(default=False),
+    _perm: None = Depends(RequirePermission("property_dev.bulk.reservation_extend")),
+) -> BulkResult:
+    return await bulk_extend_reservation_expiry(
+        session, data, user_payload=user_payload, dry_run=dry_run,
+    )
+
+
+@router.post(
+    "/bulk/documents/bulk-regenerate/",
+    response_model=BulkResult,
+    status_code=200,
+    summary="Bulk-regenerate sales-pipeline PDFs (manager-only)",
+    description=(
+        "Re-render reservation receipts, sales contracts, NOCs, handover "
+        "and warranty certificates after a template fix. Pass EITHER "
+        "``reservation_ids`` (for reservation_receipt) OR "
+        "``sales_contract_ids`` (for everything else). One render "
+        "failure does NOT abort the batch — failed entries are reported "
+        "in ``BulkResult.failed`` with ``error_code=document_render_failed``."
+    ),
+)
+async def bulk_documents_regenerate(
+    data: DocumentsBulkRegenerate,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    dry_run: bool = Query(default=False),
+    _perm: None = Depends(RequirePermission("property_dev.bulk.document_regenerate")),
+) -> BulkResult:
+    return await bulk_regenerate_documents(
+        session, data, user_payload=user_payload, dry_run=dry_run,
+    )
+
+
+@router.post(
+    "/bulk/leads/bulk-import-csv/",
+    response_model=BulkResult,
+    status_code=200,
+    summary="Bulk-import leads from CSV (manager-only)",
+    description=(
+        "CSV columns required: full_name, email, phone, source, "
+        "plot_type_interest, budget_min, budget_max, notes. "
+        "Magic-byte sniffed to reject binaries renamed .csv. "
+        "Dedupes within the same development (or globally when no "
+        "``development_id`` is passed) by ``lower(email)`` — duplicates "
+        "append to the existing Lead's notes instead of creating a "
+        "second row."
+    ),
+)
+async def bulk_leads_import_csv(
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    file: UploadFile = File(..., description="CSV with the required header row."),
+    development_id: uuid.UUID | None = Query(
+        default=None,
+        description="Optional dev to scope dedupe & ownership to.",
+    ),
+    dry_run: bool = Query(default=False),
+    _perm: None = Depends(RequirePermission("property_dev.bulk.lead_import")),
+) -> BulkResult:
+    return await bulk_import_leads_csv(
+        session,
+        file,
+        user_payload=user_payload,
+        dry_run=dry_run,
+        development_id=development_id,
+    )
+
+
+@router.post(
+    "/bulk/buyers/bulk-merge/",
+    response_model=BulkResult,
+    status_code=200,
+    summary="Bulk-merge duplicate buyers into a primary (manager-only)",
+    description=(
+        "Re-points every FK reference (reservations, sales-contract "
+        "parties, warranty claims, snags) from each duplicate to the "
+        "primary, then soft-deletes the duplicate "
+        "(``status=cancelled``, ``metadata_.merged_into=<primary_id>``). "
+        "Cross-development merges are rejected per-item. The entire "
+        "operation runs inside one SAVEPOINT — any hard FK failure rolls "
+        "back EVERY repoint for that batch (no half-merged state)."
+    ),
+)
+async def bulk_buyers_merge(
+    data: BuyerBulkMerge,
+    session: SessionDep,
+    user_payload: CurrentUserPayload,
+    dry_run: bool = Query(default=False),
+    _perm: None = Depends(RequirePermission("property_dev.bulk.buyer_merge")),
+) -> BulkResult:
+    return await bulk_merge_buyers(
+        session, data, user_payload=user_payload, dry_run=dry_run,
+    )
