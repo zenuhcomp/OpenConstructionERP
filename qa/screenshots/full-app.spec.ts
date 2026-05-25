@@ -29,6 +29,22 @@ const API_URL = process.env.QA_API_URL ?? 'http://localhost:8000';
 const BASE_URL = process.env.QA_BASE_URL ?? 'http://localhost:5180';
 const DEMO_EMAIL = process.env.QA_DEMO_EMAIL ?? 'demo@openestimator.io';
 
+// Wave 16/17/18 parameterisation. Empty string / undefined = use app default.
+//   QA_LOCALE   — i18next language code (en, de, ru, ar, ja, …) seeded into
+//                 localStorage `i18nextLng` before first render.
+//   QA_THEME    — light | dark | system (seeded into localStorage `oe_theme`).
+//   QA_VIEWPORT — "WIDTHxHEIGHT" (e.g. "375x812"); overrides Playwright
+//                 device viewport for mobile/tablet sweeps.
+const FORCE_LOCALE = (process.env.QA_LOCALE ?? '').trim();
+const FORCE_THEME = (process.env.QA_THEME ?? '').trim();
+const FORCE_VIEWPORT = (process.env.QA_VIEWPORT ?? '').trim();
+
+function parseViewport(spec: string): { width: number; height: number } | null {
+  const m = /^(\d+)x(\d+)$/.exec(spec);
+  if (!m) return null;
+  return { width: parseInt(m[1], 10), height: parseInt(m[2], 10) };
+}
+
 const TODAY = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 const SCREENSHOT_ROOT =
   process.env.QA_SCREENSHOT_DIR ?? join(process.cwd(), 'qa-report', 'screenshots', TODAY);
@@ -217,9 +233,14 @@ function resolveRoute(path: string, fixtures: DemoFixtures): string {
 }
 
 async function hydrateAuth(page: Page, accessToken: string): Promise<void> {
-  await page.addInitScript((token) => {
-    localStorage.setItem('oe_access_token', token);
-    localStorage.setItem('oe_refresh_token', token);
+  const params = {
+    token: accessToken,
+    forceLocale: FORCE_LOCALE,
+    forceTheme: FORCE_THEME,
+  };
+  await page.addInitScript((p) => {
+    localStorage.setItem('oe_access_token', p.token);
+    localStorage.setItem('oe_refresh_token', p.token);
     localStorage.setItem('oe_remember', '1');
     localStorage.setItem('oe_user_email', 'demo@openestimator.io');
     // Suppress onboarding/tour overlays — they paint above page content
@@ -228,14 +249,25 @@ async function hydrateAuth(page: Page, accessToken: string): Promise<void> {
     localStorage.setItem('oe_welcome_dismissed', 'true');
     localStorage.setItem('oe_tour_completed', 'true');
     localStorage.setItem('oe.tour_completed', 'true');
-    sessionStorage.setItem('oe_access_token', token);
-    sessionStorage.setItem('oe_refresh_token', token);
+    sessionStorage.setItem('oe_access_token', p.token);
+    sessionStorage.setItem('oe_refresh_token', p.token);
     // Dismiss the public-demo modal on the hosted demo VPS
     // (see frontend/src/shared/ui/DemoBanner.tsx — gated by
     // sessionStorage key `oe_demo_modal_dismissed`). On local-dev runs
     // demo_mode is false and the key is simply ignored.
     sessionStorage.setItem('oe_demo_modal_dismissed', '1');
-  }, accessToken);
+    // Wave 16: locale override (i18next reads `i18nextLng` from localStorage,
+    // see frontend/src/app/i18n.ts ~line 146). Also flag as explicit so the
+    // onboarding wizard's auto-detect doesn't overwrite us mid-flight.
+    if (p.forceLocale) {
+      localStorage.setItem('i18nextLng', p.forceLocale);
+      localStorage.setItem('oe_lang_explicit', '1');
+    }
+    // Wave 17: theme override (useThemeStore reads `oe_theme`).
+    if (p.forceTheme) {
+      localStorage.setItem('oe_theme', p.forceTheme);
+    }
+  }, params);
 }
 
 /**
@@ -326,6 +358,13 @@ interface RouteResult {
 }
 
 // ── Spec ─────────────────────────────────────────────────────────────
+// Wave 18: viewport override applied at the describe level so it propagates
+// to the page fixture. Falls back to playwright.config.ts default if unset.
+const _vp = parseViewport(FORCE_VIEWPORT);
+if (_vp) {
+  test.use({ viewport: _vp });
+}
+
 test.describe('Full-app screenshot grid', () => {
   test('captures every catalogued route', async ({ page, request }, testInfo) => {
     // Single test that loops every route — keeps a stable browser context
