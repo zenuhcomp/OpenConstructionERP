@@ -206,6 +206,25 @@ internal-notes/qa_report/
 internal-notes/qa-reports/
 internal-notes/audit_reports/
 internal-notes/security_audit/
+internal-notes/orphan_test_backups/
+
+# Secrets and ad-hoc dev artifacts under internal-notes/ — never commit
+internal-notes/_pat.txt
+internal-notes/_pat
+internal-notes/token.txt
+internal-notes/_three_cards_*.txt
+internal-notes/_three_ddc_cards.txt
+internal-notes/RELEASE_NOTES_*.md
+internal-notes/PYPI_PUSH_BLOCKER.md
+internal-notes/probe_*.mjs
+internal-notes/probe_*.cjs
+internal-notes/reingest_*.sh
+internal-notes/reingest_*.py
+internal-notes/repro*.cjs
+internal-notes/repro*.mjs
+internal-notes/repro*.py
+internal-notes/swap_emojis.py
+internal-notes/*.rvt
 
 # Ad-hoc QA/test scripts that hit a hardcoded localhost — not real tests
 backend/qa_api_test.py
@@ -219,6 +238,11 @@ backend/tmp_api.json
 # Heavy sample data — fetched on demand, not committed
 data/bim/
 docs/media/*.mp4
+
+# Re-ingest rollback backups (snapshots of a single BIM model's prior
+# state, captured by scripts/reingest_bim_model.py for safe rollback).
+# Large, transient, not source.
+data/reingest_backup_*.json
 
 # Generated license inventories — attached to GH Releases, not committed
 /NOTICE.backend.json
