@@ -1044,7 +1044,7 @@ function FloatingActionBar({
       })}
       className={clsx(
         'fixed inset-x-0 bottom-4 z-40 mx-auto flex w-fit max-w-full items-center gap-2',
-        'rounded-2xl bg-surface-primary px-3 py-2 shadow-lg ring-1 ring-divider/60',
+        'rounded-xl bg-surface-primary px-3 py-2 shadow-lg ring-1 ring-divider/60',
         'md:bottom-6',
       )}
       data-testid="inventory-map-action-bar"

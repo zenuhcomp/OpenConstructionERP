@@ -585,7 +585,7 @@ export function PropertyDevPage() {
                 <section
                   key={g.id}
                   className={clsx(
-                    'rounded-2xl border border-border-light bg-gradient-to-br',
+                    'rounded-xl border border-border-light bg-gradient-to-br',
                     g.accent,
                     'backdrop-blur-sm px-3 pt-2 pb-3',
                   )}

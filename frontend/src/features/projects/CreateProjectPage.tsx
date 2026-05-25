@@ -919,7 +919,7 @@ export function CreateProjectModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="cpw-title"
-        className="relative w-full max-w-2xl mx-4 max-h-[90vh] rounded-2xl bg-surface-elevated border border-border-light shadow-2xl animate-fade-in flex flex-col"
+        className="relative w-full max-w-2xl mx-4 max-h-[90vh] rounded-xl bg-surface-elevated border border-border-light shadow-2xl animate-fade-in flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
@@ -2028,7 +2028,7 @@ export function CreateProjectModal({
             silently throw away everything on a stray backdrop click /
             Escape. */}
         {confirmingClose && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-surface-elevated/85 backdrop-blur-sm">
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-surface-elevated/85 backdrop-blur-sm">
             <div
               role="alertdialog"
               aria-modal="true"

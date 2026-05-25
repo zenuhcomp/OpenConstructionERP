@@ -141,7 +141,7 @@ export function InventoryAgeing({ developmentId }: InventoryAgeingProps) {
                     className={
                       isReservedBucket
                         ? 'absolute inset-y-0 left-0 rounded-full bg-amber-500'
-                        : 'absolute inset-y-0 left-0 rounded-full bg-blue-500'
+                        : 'absolute inset-y-0 left-0 rounded-full bg-oe-blue'
                     }
                     style={{ width: `${pct}%` }}
                   />

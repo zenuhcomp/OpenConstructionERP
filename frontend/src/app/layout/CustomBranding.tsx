@@ -330,7 +330,7 @@ function BrandingEditor({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-md rounded-2xl bg-surface-primary border border-border shadow-2xl shadow-black/30 overflow-hidden">
+      <div className="w-full max-w-md rounded-xl bg-surface-primary border border-border shadow-2xl shadow-black/30 overflow-hidden">
         <header className="flex items-center justify-between px-5 py-4 border-b border-border-light">
           <h2
             id="branding-editor-heading"

@@ -166,7 +166,7 @@ function PhaseRow({
         defaultValue: 'Phase {{name}}',
         name: phase.name || phase.code,
       })}
-      className="rounded-2xl border border-divider/60 bg-surface-primary p-3"
+      className="rounded-xl border border-divider/60 bg-surface-primary p-3"
     >
       <header className="mb-3 flex items-center justify-between gap-3">
         <div>

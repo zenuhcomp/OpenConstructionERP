@@ -122,7 +122,7 @@ export function SharePage() {
           <Logo size="lg" />
         </header>
 
-        <div className="rounded-2xl border border-border-light bg-surface-elevated shadow-xl p-6 sm:p-8 space-y-5">
+        <div className="rounded-xl border border-border-light bg-surface-elevated shadow-xl p-6 sm:p-8 space-y-5">
           <div className="text-center">
             <h1 className="text-base font-semibold text-content-primary">
               {t('share.page.title', { defaultValue: 'Shared file' })}

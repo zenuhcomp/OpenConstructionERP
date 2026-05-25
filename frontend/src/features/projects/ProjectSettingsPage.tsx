@@ -144,7 +144,7 @@ function FxRateModal({
         className="absolute inset-0 bg-black/70 backdrop-blur-lg animate-fade-in"
         onClick={onCancel}
       />
-      <div className="relative w-full max-w-md mx-4 rounded-2xl bg-surface-elevated border border-border-light shadow-2xl animate-fade-in">
+      <div className="relative w-full max-w-md mx-4 rounded-xl bg-surface-elevated border border-border-light shadow-2xl animate-fade-in">
         <div className="flex items-center justify-between px-6 pt-6 pb-2">
           <h3 className="text-lg font-semibold text-content-primary">
             {isEdit

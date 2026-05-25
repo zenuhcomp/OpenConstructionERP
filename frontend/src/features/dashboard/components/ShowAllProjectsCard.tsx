@@ -17,7 +17,7 @@ export function ShowAllProjectsCard({ totalCount, hiddenCount, style }: ShowAllP
     <Card
       hoverable
       padding="none"
-      className="group cursor-pointer relative animate-card-in overflow-hidden rounded-2xl border-2 border-dashed border-border-light/80 bg-gradient-to-b from-surface-secondary/40 to-surface-primary hover:border-oe-blue/50 hover:shadow-lg motion-safe:transition-all"
+      className="group cursor-pointer relative animate-card-in overflow-hidden rounded-xl border-2 border-dashed border-border-light/80 bg-gradient-to-b from-surface-secondary/40 to-surface-primary hover:border-oe-blue/50 hover:shadow-lg focus-within:ring-2 focus-within:ring-oe-blue/30 motion-safe:transition-all"
       style={style}
       onClick={() => navigate('/projects')}
     >

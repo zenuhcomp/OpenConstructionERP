@@ -159,7 +159,7 @@ export default function BIMCoverageCard() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <MetricRow
-          icon={<Link2 size={12} className="text-blue-600" />}
+          icon={<Link2 size={12} className="text-oe-blue" />}
           label={t('dashboard.bim_linked_boq', {
             defaultValue: 'Linked to BOQ',
           })}

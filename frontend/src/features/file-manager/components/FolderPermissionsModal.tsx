@@ -241,7 +241,7 @@ export function FolderPermissionsModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-2xl bg-surface-elevated shadow-2xl border border-border-light"
+        className="w-full max-w-lg rounded-xl bg-surface-elevated shadow-2xl border border-border-light"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-3 border-b border-border-light px-6 py-4">

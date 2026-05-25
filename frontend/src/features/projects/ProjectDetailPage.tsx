@@ -757,7 +757,7 @@ function DropZone({
         ${disabled ? 'opacity-50 pointer-events-none' : ''}
       `}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-secondary">
+      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface-secondary">
         <Upload size={22} className="text-content-tertiary" strokeWidth={1.5} />
       </div>
       <div>
@@ -841,7 +841,7 @@ function ImportDialog({
       />
 
       {/* Dialog */}
-      <div className="relative w-full max-w-lg mx-4 rounded-2xl border border-border-light bg-surface-elevated shadow-xl animate-scale-in">
+      <div className="relative w-full max-w-lg mx-4 rounded-xl border border-border-light bg-surface-elevated shadow-xl animate-scale-in">
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-2">
           <div>

@@ -386,7 +386,7 @@ function BugReportMenu() {
     },
     {
       icon: Mail,
-      iconColor: 'text-blue-500',
+      iconColor: 'text-oe-blue',
       title: t('bug.channel_email', { defaultValue: 'Email the team' }),
       desc: t('bug.channel_email_desc', { defaultValue: 'Opens your mail client with the report attached.' }),
       onClick: handleEmail,
@@ -1181,7 +1181,7 @@ function ProjectSwitcher() {
             )}
             {!isLoading && isError && (
               <div className="px-4 py-4 text-sm text-content-tertiary text-center">
-                <p className="text-red-500 mb-2">
+                <p className="text-semantic-error mb-2">
                   {t('common.load_failed', { defaultValue: 'Could not load projects' })}
                 </p>
                 <button
@@ -1346,7 +1346,7 @@ function UploadQueueIndicator() {
                   <div className="shrink-0">
                     {task.status === 'processing' && <Loader2 size={14} className="text-oe-blue animate-spin" />}
                     {task.status === 'queued' && <Upload size={14} className="text-content-tertiary" />}
-                    {task.status === 'completed' && <CheckCircle2 size={14} className="text-green-500" />}
+                    {task.status === 'completed' && <CheckCircle2 size={14} className="text-semantic-success" />}
                     {task.status === 'error' && <XCircle size={14} className="text-semantic-error" />}
                   </div>
                   <div className="flex-1 min-w-0">

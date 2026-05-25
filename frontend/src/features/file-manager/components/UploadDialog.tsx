@@ -196,7 +196,7 @@ export function UploadDialog({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg mx-4 rounded-2xl bg-surface-elevated shadow-2xl border border-border-light overflow-hidden"
+        className="w-full max-w-lg mx-4 rounded-xl bg-surface-elevated shadow-2xl border border-border-light overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-border-light">
@@ -251,7 +251,8 @@ export function UploadDialog({
             }}
             className={clsx(
               'flex flex-col items-center justify-center text-center cursor-pointer',
-              'rounded-2xl border-2 border-dashed py-10 px-6 transition-all',
+              'rounded-xl border-2 border-dashed py-10 px-6 transition-all',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue focus-visible:ring-offset-1',
               dragOver
                 ? 'border-oe-blue bg-oe-blue/5 scale-[1.005] shadow-md'
                 : 'border-border-medium bg-gradient-to-br from-blue-50/60 via-transparent to-violet-50/40 dark:from-blue-950/20 dark:to-violet-950/20 hover:border-oe-blue/50',
@@ -259,7 +260,7 @@ export function UploadDialog({
           >
             <div
               className={clsx(
-                'mb-3 flex h-14 w-14 items-center justify-center rounded-2xl transition-all',
+                'mb-3 flex h-14 w-14 items-center justify-center rounded-xl transition-all',
                 dragOver
                   ? 'bg-oe-blue/15'
                   : 'bg-gradient-to-br from-oe-blue/10 to-violet-500/10',
