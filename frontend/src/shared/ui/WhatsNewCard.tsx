@@ -28,7 +28,8 @@
  * `window.CustomEvent('oe:start-tour')` exactly as before.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -486,71 +487,27 @@ export function WhatsNewCard({ forceShow = false, versionOverride }: WhatsNewCar
           </span>
         </div>
 
-        {/* Chip row — flex-grow pushes the trailing buttons to the right */}
+        {/* Chip row — flex-grow pushes the trailing buttons to the right.
+         *  Each chip's popover is rendered through a portal (`ChipPopover`
+         *  below) because the parent card uses `backdrop-blur-md`, which
+         *  creates a stacking context. An absolutely-positioned popover
+         *  inside that context cannot escape it via z-index — it always
+         *  paints below sibling widgets on the dashboard. Portaling to
+         *  document.body removes that constraint. */}
         <div className="flex flex-1 flex-wrap items-center gap-1.5 min-w-0">
           {sections.map((s) => {
             const Icon = s.icon;
             const expanded = openChipId === s.id;
             return (
-              <div key={s.id} className="relative">
-                <button
-                  type="button"
-                  onClick={() => setOpenChipId(expanded ? null : s.id)}
-                  aria-expanded={expanded}
-                  aria-controls={`whatsnew-chip-${s.id}-popover`}
-                  title={t(s.titleKey, { defaultValue: s.titleDefault })}
-                  className={[
-                    'inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium',
-                    'ring-1 transition-colors',
-                    expanded
-                      ? 'bg-gradient-to-br from-sky-500 to-blue-600 text-white ring-blue-500/40 shadow-sm shadow-blue-500/30'
-                      : 'bg-white/65 dark:bg-slate-900/45 text-blue-900 dark:text-sky-100 ring-sky-500/25 hover:bg-sky-500/15 dark:hover:bg-sky-400/15',
-                  ].join(' ')}
-                >
-                  <Icon size={11} strokeWidth={2.25} />
-                  <span>{t(s.chipKey, { defaultValue: s.chipDefault })}</span>
-                </button>
-                {expanded && (
-                  <div
-                    id={`whatsnew-chip-${s.id}-popover`}
-                    role="dialog"
-                    aria-label={t(s.titleKey, { defaultValue: s.titleDefault })}
-                    className={[
-                      'absolute left-0 top-full z-30 mt-1.5 w-[360px] sm:w-[400px]',
-                      'rounded-lg border border-sky-300/60 ring-1 ring-sky-500/10',
-                      'dark:border-sky-700/50 dark:ring-sky-400/10',
-                      'bg-white/95 dark:bg-slate-900/95 backdrop-blur-md',
-                      'shadow-lg shadow-sky-500/20 p-3',
-                    ].join(' ')}
-                  >
-                    <h3 className="text-[12px] font-semibold text-blue-900 dark:text-sky-100 leading-snug mb-1.5 line-clamp-4">
-                      {t(s.titleKey, { defaultValue: s.titleDefault })}
-                    </h3>
-                    <ul className="space-y-0.5">
-                      {s.bullets.map((b) => (
-                        <li
-                          key={b.key}
-                          className="flex items-start gap-1.5 text-xs leading-snug text-blue-900/85 dark:text-sky-100/85"
-                        >
-                          <span
-                            aria-hidden="true"
-                            className="mt-[6px] h-1 w-1 shrink-0 rounded-full bg-sky-500/70"
-                          />
-                          <span>{t(b.key, { defaultValue: b.default })}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <button
-                      type="button"
-                      onClick={handleChangelog}
-                      className="mt-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-700 hover:text-blue-800 dark:text-sky-300 dark:hover:text-sky-100 transition-colors"
-                    >
-                      {t('whatsnew.read_more', { defaultValue: 'Read more' })}
-                      <ArrowRight size={11} />
-                    </button>
-                  </div>
-                )}
-              </div>
+              <ChipWithPopover
+                key={s.id}
+                section={s}
+                expanded={expanded}
+                onToggle={() => setOpenChipId(expanded ? null : s.id)}
+                onReadMore={handleChangelog}
+                Icon={Icon}
+                t={t}
+              />
             );
           })}
         </div>
@@ -595,3 +552,157 @@ export function WhatsNewCard({ forceShow = false, versionOverride }: WhatsNewCar
 }
 
 export default WhatsNewCard;
+
+/* ── ChipWithPopover ───────────────────────────────────────────────────────
+ *  A chip that, when expanded, renders its detail popover through a portal
+ *  attached to `document.body`. This is the only way to make the popover
+ *  paint above the rest of the dashboard: the WhatsNewCard root uses
+ *  `backdrop-blur-md`, and any `filter`-style property creates a CSS
+ *  stacking context that traps `position:absolute` descendants — even with
+ *  `z-50` they still render below sibling widgets that live outside the
+ *  card. A portal escapes that context entirely.
+ *
+ *  Position is measured from the chip button's `getBoundingClientRect()`
+ *  on mount and re-measured on scroll / resize so the popover tracks the
+ *  chip if the page moves while it is open.
+ */
+
+interface ChipWithPopoverProps {
+  section: Section;
+  expanded: boolean;
+  onToggle: () => void;
+  onReadMore: () => void;
+  Icon: LucideIcon;
+  t: (key: string, options?: { defaultValue: string }) => string;
+}
+
+function ChipWithPopover({
+  section: s,
+  expanded,
+  onToggle,
+  onReadMore,
+  Icon,
+  t,
+}: ChipWithPopoverProps) {
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Re-measure the chip's screen position so the portaled popover stays
+  // anchored. useLayoutEffect prevents a one-frame flicker at (0,0).
+  useLayoutEffect(() => {
+    if (!expanded) {
+      setPos(null);
+      return undefined;
+    }
+    const measure = () => {
+      const el = chipRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      // Default-align under the chip; clamp right edge so a chip near the
+      // right viewport edge doesn't push the 400px popover off-screen.
+      const POPOVER_WIDTH = 400;
+      const MARGIN = 8;
+      const maxLeft = window.innerWidth - POPOVER_WIDTH - MARGIN;
+      const left = Math.max(MARGIN, Math.min(r.left, maxLeft));
+      setPos({ top: r.bottom + 6, left });
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+    };
+  }, [expanded]);
+
+  // Outside-click handler runs against BOTH the chip and the portaled
+  // popover so clicking inside the popover doesn't close it.
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const onMouseDown = (ev: MouseEvent) => {
+      const target = ev.target as Node;
+      if (chipRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      onToggle();
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [expanded, onToggle]);
+
+  return (
+    <>
+      <button
+        ref={chipRef}
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-controls={`whatsnew-chip-${s.id}-popover`}
+        title={t(s.titleKey, { defaultValue: s.titleDefault })}
+        className={[
+          'inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium',
+          'ring-1 transition-colors',
+          expanded
+            ? 'bg-gradient-to-br from-sky-500 to-blue-600 text-white ring-blue-500/40 shadow-sm shadow-blue-500/30'
+            : 'bg-white/65 dark:bg-slate-900/45 text-blue-900 dark:text-sky-100 ring-sky-500/25 hover:bg-sky-500/15 dark:hover:bg-sky-400/15',
+        ].join(' ')}
+      >
+        <Icon size={11} strokeWidth={2.25} />
+        <span>{t(s.chipKey, { defaultValue: s.chipDefault })}</span>
+      </button>
+      {expanded && pos
+        ? createPortal(
+            <div
+              ref={popoverRef}
+              id={`whatsnew-chip-${s.id}-popover`}
+              role="dialog"
+              aria-label={t(s.titleKey, { defaultValue: s.titleDefault })}
+              style={{
+                position: 'fixed',
+                top: pos.top,
+                left: pos.left,
+                width: 400,
+                // z-[1000] sits above the sticky AppLayout header (z-30),
+                // dashboard widget cards, and any module floating UI we ship.
+                // Modal overlays use z-[2000]+ so this still ducks under them.
+                zIndex: 1000,
+              }}
+              className={[
+                'rounded-lg border border-sky-300/60 ring-1 ring-sky-500/10',
+                'dark:border-sky-700/50 dark:ring-sky-400/10',
+                'bg-white/95 dark:bg-slate-900/95 backdrop-blur-md',
+                'shadow-lg shadow-sky-500/20 p-3',
+              ].join(' ')}
+            >
+              <h3 className="text-[12px] font-semibold text-blue-900 dark:text-sky-100 leading-snug mb-1.5 line-clamp-4">
+                {t(s.titleKey, { defaultValue: s.titleDefault })}
+              </h3>
+              <ul className="space-y-0.5">
+                {s.bullets.map((b) => (
+                  <li
+                    key={b.key}
+                    className="flex items-start gap-1.5 text-xs leading-snug text-blue-900/85 dark:text-sky-100/85"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="mt-[6px] h-1 w-1 shrink-0 rounded-full bg-sky-500/70"
+                    />
+                    <span>{t(b.key, { defaultValue: b.default })}</span>
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={onReadMore}
+                className="mt-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-700 hover:text-blue-800 dark:text-sky-300 dark:hover:text-sky-100 transition-colors"
+              >
+                {t('whatsnew.read_more', { defaultValue: 'Read more' })}
+                <ArrowRight size={11} />
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
