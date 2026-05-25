@@ -5,6 +5,44 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.9.0] - 2026-05-25
+
+Dashboard / settings / docs / converters wave on top of v4.8.0 — every
+fix the user reported on 2026-05-24 → 2026-05-25 bundled into one release.
+
+### Added
+- `formwork` MVP module — systems catalogue + per-BOQ assignments + reuse-aware unit-cost formula `unit_rate * (1 + waste_pct/100) / reuse_count`. 3 tables (`oe_formwork_system`, `oe_formwork_assignment`, `oe_formwork_schedule_line`), alembic v3132. (7bc95240)
+- `OperationsSnapshotCard` — single consolidated dashboard card replacing 9 separate wave-2 widgets (BOQ summary, validation, clash, critical path, top risks, HSE, procurement, budget variance, change orders). 3×3 compact-tile grid, hardened against undefined payload fields. (bbbbe97f, e9d5fbe8)
+- `/settings?tab=converters` now embeds the BIM-style live health banner — smoke-test health pills (verify=true), one-click Install / Update / Reinstall / Re-check buttons with live install-progress bar, and a top-level "X/Y working — update available" summary chip. Existing all-converters SHA-comparison table stays below. (3a70a0ac)
+- Project Detail page customizer + 7 new widgets (commit ec5aec1e).
+- Geo Hub: instant address-search overlay with fly-to + dismissible pin; Cesium ion default-token warning silenced. (e5ceb89e, d2dd0f49)
+- `subcontractors`, `rfi`, `submittals`, `schedule_advanced`, `contracts`, `procurement`, `tendering`, `reporting`, `hse_advanced` — UX polish + module-specific deep features (status pipelines, overdue indicators, ball-in-court, critical-path, multi-currency rollup, GAEB X83, scorecards, insurance expiry). (ba22d6d2 0e679296 d3c77c7b 969f5a05 4a3f717c 25022188 3c29a1ec 124–130)
+- README hero refreshed with feature-grid layout (ec4a9c16) and all 56 emojis (9 ToC + 47 body) swapped for GitHub Octicons with `<picture>` light/dark variants. (9f631f73, d6535269)
+
+### Changed
+- `SUPPORTED_LOCALES` in `property_dev/document_templates.py` expanded from 6 to 27 locales — matches the frontend locale catalogue. Locales without a dedicated JSON in `data/document_locales/` fall back to `en.json` automatically via `_load_locale`. (cbb186fe)
+- `/settings`: BIM/CAD section title and description now read just "Converters" / "DDC converters" — the legacy BIM/CAD prefix misled users into thinking it was a separate BIM section. Legacy `?tab=bimcad` aliased to `?tab=converters`. (8e248c4f, de571d15)
+- PropDev tabs grouped into Master data / Sales / Operations blocks. (bc2ab951)
+- A11y: shell tokens bumped, app-shell button-name on UploadQueue + RecentFAB + remove-task, design-token contrast to WCAG AA for `text-tertiary` / `text-quaternary`. (a15884a5, 02eddcb9, a27da31b)
+- /files sidebar counts now honour `q` + extension filters. (8caf4156)
+- Catalog: full resource name shown in expanded detail panel; portal-rendered tooltip escapes table overflow clipping. (29883084, 88e8eca2, 8e69f0f3)
+- LoginPage: 31 keys backfilled to 14 locales. (c5dda014)
+
+### Fixed
+- `WhatsNewCard` chip popovers now render via `createPortal(document.body)` with `position: fixed` + `z-[1000]` — the parent card's `backdrop-blur-md` creates a stacking context that trapped the old `absolute z-30` popovers behind dashboard widgets. (0b15df9a)
+- `BIMFilterPanel` chip counts now respect active filters (proper facet-UI: each axis counted against elements passing every OTHER axis but not its own). (ba1887cb)
+- BIM `/bim/:id` grouping restored when filtering by category/type. (9a0051e0)
+- `/coordination` dashboard 404 cascade — root cause: stale active project id rejecting every endpoint. (17cf8390)
+- `/projects/:id/geo` crash "Cannot read properties of undefined (reading 'scene')" — `OverlayLayer` cesium effects now guard against undefined viewer. (882f662e)
+- `/clash` mojibake in CAD-BIM picker strings. (9626c014)
+- Shared money formatters hardened against Decimal-string inputs across DashboardPage / CompactProjectCard / `formatters.ts` / `MoneyDisplay.tsx`. (1aa4aaea, 0680e9be)
+- Kill-switch service worker at `frontend/public/sw.js` — auto-unregisters the stale prod SW that pinned `/assets/index-<hash>.js` from an earlier prod build, so every recent dashboard / catalog / snapshot fix actually reaches the user. (b413be31)
+- 20 latent tsc errors swept (PlotStatus `held`/`blocked`, PropDevDocType 6 new records, InventoryMap MoneyDisplay prop, HSEAdvancedPage select cast, unused imports). (c025e6f0)
+
+### Tests
+- Formwork smoke test (`tests/modules/test_formwork_smoke.py`).
+- A11y axe spec + artefacts for V_DESIGN (a27da31b).
+
 ## [4.4.0] - 2026-05-22
 
 PropDev R6 rollup + new Geo Hub module + canonical→3D Tiles pipeline.
