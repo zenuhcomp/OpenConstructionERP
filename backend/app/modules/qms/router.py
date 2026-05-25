@@ -9,9 +9,15 @@ from __future__ import annotations
 import logging
 import uuid
 from decimal import Decimal
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
+from app.core.file_signature import (
+    SIGNATURE_BYTES_REQUIRED,
+    FileSignatureMismatch,
+    require as require_signature,
+)
 from app.core.permissions import permission_registry
 from app.dependencies import (
     CurrentUserId,
@@ -20,6 +26,19 @@ from app.dependencies import (
     SessionDep,
     verify_project_access,
 )
+
+# Allow-list of magic-byte tokens we accept for QMS attachments. Mirrors
+# the correspondence module's tightened list: PDFs, common images, and
+# Office ZIP / OLE containers. XML/HTML deliberately excluded — these
+# files are rendered back as clickable links and HTML has repeatedly
+# been an XSS sink in audited modules.
+_QMS_ALLOWED_ATTACHMENT_TYPES = frozenset(
+    {"pdf", "png", "jpeg", "gif", "webp", "zip", "ole"}
+)
+
+# Per-attachment storage root. Lazy-created on first upload so fresh
+# installs that never use the feature don't ship the directory.
+_QMS_ATTACHMENTS_DIR = Path("uploads/qms/attachments")
 from app.modules.qms.schemas import (
     AuditCreate,
     AuditFindingCreate,
@@ -264,6 +283,102 @@ async def update_inspection(
     return InspectionRead.model_validate(inspection)
 
 
+@router.get("/inspections/{inspection_id}", response_model=InspectionRead)
+async def get_inspection(
+    inspection_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    _perm: None = Depends(RequirePermission("qms.inspection.read")),
+    service: QMSService = Depends(_get_service),
+) -> InspectionRead:
+    """‌⁠‍Fetch one inspection (IDOR-gated by project ownership)."""
+    inspection = await service.repo.get_inspection(inspection_id)
+    if inspection is None:
+        raise _not_found("Inspection not found")
+    # IDOR: 404 (not 403) on cross-project access to avoid UUID disclosure.
+    await verify_project_access(inspection.project_id, user_id, session)
+    return InspectionRead.model_validate(inspection)
+
+
+@router.post(
+    "/inspections/{inspection_id}/attachments",
+    status_code=201,
+)
+async def upload_inspection_attachment(
+    inspection_id: uuid.UUID,
+    session: SessionDep,
+    user_id: CurrentUserId,
+    file: UploadFile = File(...),
+    _perm: None = Depends(RequirePermission("qms.inspection.write")),
+    service: QMSService = Depends(_get_service),
+) -> dict[str, object]:
+    """‌⁠‍Upload an attachment to an inspection (magic-byte gated).
+
+    The ``Content-Type`` header is fully attacker-controlled — magic-byte
+    sniffing is the only thing that decides whether we keep the file. The
+    IDOR check runs BEFORE we read the body so an unauthorised caller
+    never causes us to learn whether the inspection exists.
+    """
+    inspection = await service.repo.get_inspection(inspection_id)
+    if inspection is None:
+        raise _not_found("Inspection not found")
+    await verify_project_access(inspection.project_id, user_id, session)
+
+    try:
+        content = await file.read()
+    except Exception as exc:
+        logger.exception(
+            "Unable to read attachment upload for inspection %s",
+            inspection_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to read uploaded attachment",
+        ) from exc
+
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty",
+        )
+
+    try:
+        require_signature(
+            content[:SIGNATURE_BYTES_REQUIRED],
+            _QMS_ALLOWED_ATTACHMENT_TYPES,
+            filename=file.filename,
+        )
+    except FileSignatureMismatch as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=str(exc),
+        ) from exc
+
+    _QMS_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    ext = Path(file.filename or "attachment.bin").suffix or ".bin"
+    ext = ext.replace("/", "").replace("\\", "")
+    safe_name = f"insp_{inspection_id}_{uuid.uuid4().hex[:8]}{ext}"
+    filepath = _QMS_ATTACHMENTS_DIR / safe_name
+    try:
+        filepath.write_bytes(content)
+    except Exception as exc:
+        logger.exception(
+            "Unable to save attachment for inspection %s", inspection_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save attachment — storage error",
+        ) from exc
+
+    return {
+        "inspection_id": str(inspection_id),
+        "filename": safe_name,
+        "original_filename": file.filename or "",
+        "size_bytes": len(content),
+        "relative_path": f"qms/attachments/{safe_name}",
+    }
+
+
 # ── NCRs ──────────────────────────────────────────────────────────────────
 
 
@@ -389,6 +504,94 @@ async def close_ncr(
     except ValueError as exc:
         raise _bad(str(exc)) from exc
     return NCRRead.model_validate(ncr)
+
+
+@router.get("/ncrs/{ncr_id}", response_model=NCRRead)
+async def get_ncr(
+    ncr_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    _perm: None = Depends(RequirePermission("qms.ncr.read")),
+    service: QMSService = Depends(_get_service),
+) -> NCRRead:
+    """‌⁠‍Fetch one NCR (IDOR-gated by project ownership)."""
+    ncr = await service.repo.get_ncr(ncr_id)
+    if ncr is None:
+        raise _not_found("NCR not found")
+    await verify_project_access(ncr.project_id, user_id, session)
+    return NCRRead.model_validate(ncr)
+
+
+@router.post(
+    "/ncrs/{ncr_id}/attachments",
+    status_code=201,
+)
+async def upload_ncr_attachment(
+    ncr_id: uuid.UUID,
+    session: SessionDep,
+    user_id: CurrentUserId,
+    file: UploadFile = File(...),
+    _perm: None = Depends(RequirePermission("qms.ncr.write")),
+    service: QMSService = Depends(_get_service),
+) -> dict[str, object]:
+    """‌⁠‍Upload an attachment to an NCR (magic-byte gated, IDOR-gated)."""
+    ncr = await service.repo.get_ncr(ncr_id)
+    if ncr is None:
+        raise _not_found("NCR not found")
+    await verify_project_access(ncr.project_id, user_id, session)
+
+    try:
+        content = await file.read()
+    except Exception as exc:
+        logger.exception(
+            "Unable to read attachment upload for NCR %s", ncr_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to read uploaded attachment",
+        ) from exc
+
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty",
+        )
+
+    try:
+        require_signature(
+            content[:SIGNATURE_BYTES_REQUIRED],
+            _QMS_ALLOWED_ATTACHMENT_TYPES,
+            filename=file.filename,
+        )
+    except FileSignatureMismatch as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=str(exc),
+        ) from exc
+
+    _QMS_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    ext = Path(file.filename or "attachment.bin").suffix or ".bin"
+    ext = ext.replace("/", "").replace("\\", "")
+    safe_name = f"ncr_{ncr_id}_{uuid.uuid4().hex[:8]}{ext}"
+    filepath = _QMS_ATTACHMENTS_DIR / safe_name
+    try:
+        filepath.write_bytes(content)
+    except Exception as exc:
+        logger.exception(
+            "Unable to save attachment for NCR %s", ncr_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save attachment — storage error",
+        ) from exc
+
+    return {
+        "ncr_id": str(ncr_id),
+        "filename": safe_name,
+        "original_filename": file.filename or "",
+        "size_bytes": len(content),
+        "relative_path": f"qms/attachments/{safe_name}",
+    }
 
 
 # ── Punch items ───────────────────────────────────────────────────────────

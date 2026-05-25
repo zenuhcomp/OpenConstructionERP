@@ -63,6 +63,7 @@ from app.modules.qms.models import (
     ITPTemplate,
     QMSAudit,
     QMSAuditFinding,
+    QMSAuditLog,
     QMSCalibration,
     QMSInspection,
     QMSInspectionSignature,
@@ -95,6 +96,7 @@ _QMS_TABLES = [
     QMSPunchItem.__table__,
     QMSAudit.__table__,
     QMSAuditFinding.__table__,
+    QMSAuditLog.__table__,
     QMSCalibration.__table__,
 ]
 
