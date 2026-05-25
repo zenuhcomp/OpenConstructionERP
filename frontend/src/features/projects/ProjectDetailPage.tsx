@@ -1,4 +1,4 @@
-import React, { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Component, Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '@/app/i18n';
@@ -35,11 +35,33 @@ import {
   HardHat,
   Calendar,
   Image as ImageIcon,
+  LayoutGrid,
 } from 'lucide-react';
 import {
-  Button, Card, CardHeader, Badge, Skeleton, EmptyState, Breadcrumb,
+  Button, Card, CardHeader, CardContent, Badge, Skeleton, EmptyState, Breadcrumb,
   ProjectMap, ProjectWeather,
 } from '@/shared/ui';
+import { ProjectLayoutManager } from './ProjectLayoutManager';
+import {
+  useProjectDetailLayoutStore,
+  reconcileProjectOrder,
+} from '@/stores/useProjectDetailLayoutStore';
+import { PROJECT_WIDGET_IDS } from './projectWidgetRegistry';
+import {
+  RFIInboxWidget,
+  ChangeOrdersPulseWidget,
+  DailyDiaryWidget,
+  HSEIncidentsWidget,
+  VariationsWidget,
+  AIInsightsWidget,
+  RecentFilesWidget,
+  PhotoStripWidget,
+  ActivityFeedWidget,
+  QualityNCRWidget,
+  BudgetBurnWidget,
+  ComplianceSummaryWidget,
+  ScheduleStripWidget,
+} from './components/ProjectWidgets';
 import { useWidgetSettingsStore } from '@/stores/useWidgetSettingsStore';
 import { apiGet, apiPatch, ApiError } from '@/shared/lib/api';
 import clsx from 'clsx';
@@ -1108,6 +1130,22 @@ export function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<ProjectTab>('dashboard');
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState(INITIAL_PROJECT_EDIT_FORM);
+  const [customizing, setCustomizing] = useState(false);
+
+  // Layout customisation (per-user, localStorage-persisted). The order/
+  // hidden state is read here so the top-of-page widget stack can be
+  // re-arranged or trimmed live. Tab content below the tab bar is NOT
+  // affected — only the always-visible header stack.
+  const layoutOrder = useProjectDetailLayoutStore((s) => s.order);
+  const layoutHidden = useProjectDetailLayoutStore((s) => s.hidden);
+  const resolvedWidgetOrder = useMemo(
+    () => reconcileProjectOrder(layoutOrder, PROJECT_WIDGET_IDS),
+    [layoutOrder],
+  );
+  const isWidgetHidden = useCallback(
+    (id: string) => layoutHidden.includes(id),
+    [layoutHidden],
+  );
 
   const setActiveProject = useProjectContextStore((s) => s.setActiveProject);
 
@@ -1365,14 +1403,46 @@ export function ProjectDetailPage() {
 
   return (
     <div className="w-full animate-fade-in">
-      {/* Breadcrumb */}
-      <Breadcrumb
-        className="mb-4"
-        items={[
-          { label: t('projects.title', 'Projects'), to: '/projects' },
-          { label: project.name },
-        ]}
-      />
+      {/* Breadcrumb + Customize toggle */}
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <Breadcrumb
+          items={[
+            { label: t('projects.title', 'Projects'), to: '/projects' },
+            { label: project.name },
+          ]}
+        />
+        <Button
+          variant={customizing ? 'primary' : 'ghost'}
+          size="sm"
+          icon={<LayoutGrid size={14} />}
+          onClick={() => setCustomizing((v) => !v)}
+          aria-pressed={customizing}
+          title={t('project.layout.customize_hint', {
+            defaultValue: 'Reorder, show or hide widgets on this page',
+          })}
+          data-testid="project-customize-button"
+        >
+          {customizing
+            ? t('project.layout.done', { defaultValue: 'Done' })
+            : t('project.layout.customize', { defaultValue: 'Customize' })}
+        </Button>
+      </div>
+
+      {/* ─── Customize panel (collapsible) — mirrors Dashboard pattern ─── */}
+      {customizing && (
+        <Card className="mb-4 animate-card-in border-oe-blue/30">
+          <CardHeader
+            title={t('project.layout.title', { defaultValue: 'Customize project page' })}
+            subtitle={t('project.layout.subtitle', {
+              defaultValue:
+                'Reorder, show or hide the widgets below. Your layout is saved to this browser.',
+            })}
+          />
+          <CardContent>
+            <ProjectLayoutManager onClose={() => setCustomizing(false)} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Top row: Project Info (left) + Health ring (right) ─────────────
           The two cards end up roughly the same height, so pairing them
@@ -1381,8 +1451,17 @@ export function ProjectDetailPage() {
           column below `lg`. `items-stretch` + `h-full` on both children
           keeps their outer borders aligned; the inner Health content
           vertically centers so the ring doesn't hug the top. */}
-      <div className="mb-4 grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-3 items-stretch">
-      {/* ── Project Info Card ───────────────────────────────────────────── */}
+      {(!isWidgetHidden('project-info') || !isWidgetHidden('health-bar')) && (
+      <div
+        className={clsx(
+          'mb-4 grid gap-3 items-stretch',
+          !isWidgetHidden('project-info') && !isWidgetHidden('health-bar')
+            ? 'grid-cols-1 lg:grid-cols-[3fr_2fr]'
+            : 'grid-cols-1',
+        )}
+      >
+      {!isWidgetHidden('project-info') && (
+      /* ── Project Info Card ───────────────────────────────────────────── */
       <Card padding="md" className="h-full">
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
@@ -1496,17 +1575,97 @@ export function ProjectDetailPage() {
           </div>
         </div>
       </Card>
+      )}
 
-      {/* Health block moves into the top grid (right column). */}
-      <ProjectHealthBar projectId={projectId!} boqs={boqs} boqDetails={boqDetails} />
+      {!isWidgetHidden('health-bar') && (
+        /* Health block moves into the top grid (right column). */
+        <ProjectHealthBar projectId={projectId!} boqs={boqs} boqDetails={boqDetails} />
+      )}
       </div>
+      )}
 
-      {/* ── Location map + weather (toggleable in widget settings) ───────── */}
-      <ProjectLocationPanel project={project} />
+      {!isWidgetHidden('location') && (
+        /* ── Location map + weather (toggleable in widget settings) ───── */
+        <ProjectLocationPanel project={project} />
+      )}
 
-      {/* ── Phase Ribbon ────────────────────────────────────────────────── */}
-      <ProjectPhaseRibbon phase={project.phase ?? null} />
+      {!isWidgetHidden('phase-ribbon') && (
+        /* ── Phase Ribbon ────────────────────────────────────────────── */
+        <ProjectPhaseRibbon phase={project.phase ?? null} />
+      )}
 
+      {/* ── New widgets — interleaved between built-in sections ──────── */}
+      {!isWidgetHidden('rfi-inbox') && (
+        <div className="mb-4">
+          <RFIInboxWidget projectId={projectId!} />
+        </div>
+      )}
+      {!isWidgetHidden('change-orders') && (
+        <div className="mb-4">
+          <ChangeOrdersPulseWidget projectId={projectId!} currency={currency} />
+        </div>
+      )}
+      {!isWidgetHidden('daily-diary') && (
+        <div className="mb-4">
+          <DailyDiaryWidget projectId={projectId!} />
+        </div>
+      )}
+      {!isWidgetHidden('hse-incidents') && (
+        <div className="mb-4">
+          <HSEIncidentsWidget projectId={projectId!} />
+        </div>
+      )}
+      {!isWidgetHidden('variations') && (
+        <div className="mb-4">
+          <VariationsWidget projectId={projectId!} currency={currency} />
+        </div>
+      )}
+      {!isWidgetHidden('schedule-strip') && (
+        <div className="mb-4">
+          <ScheduleStripWidget projectId={projectId!} />
+        </div>
+      )}
+      {!isWidgetHidden('budget-burn') && (
+        <div className="mb-4">
+          <BudgetBurnWidget projectId={projectId!} currency={currency} />
+        </div>
+      )}
+      {!isWidgetHidden('quality-ncr') && (
+        <div className="mb-4">
+          <QualityNCRWidget projectId={projectId!} />
+        </div>
+      )}
+      {!isWidgetHidden('compliance-summary') && (
+        <div className="mb-4">
+          <ComplianceSummaryWidget projectId={projectId!} />
+        </div>
+      )}
+      {!isWidgetHidden('recent-files') && (
+        <div className="mb-4">
+          <RecentFilesWidget projectId={projectId!} />
+        </div>
+      )}
+      {!isWidgetHidden('photo-strip') && (
+        <div className="mb-4">
+          <PhotoStripWidget projectId={projectId!} />
+        </div>
+      )}
+      {!isWidgetHidden('ai-insights') && (
+        <div className="mb-4">
+          <AIInsightsWidget projectId={projectId!} />
+        </div>
+      )}
+      {!isWidgetHidden('activity-feed') && (
+        <div className="mb-4">
+          <ActivityFeedWidget projectId={projectId!} />
+        </div>
+      )}
+      {/* ``weather-alerts`` is a thin pointer to ProjectWeather (already
+          rendered inside the location panel) — no separate render needed
+          here, but the manager still exposes the toggle for future use. */}
+
+      {!isWidgetHidden('team') && (
+      <>
       {/* ── Team Strip ──────────────────────────────────────────────────── */}
       {/* Horizontal avatar row positioned above the tab bar (see Linear /
           Asana). Only the owner / admin sees the manage controls — for
@@ -1536,8 +1695,11 @@ export function ProjectDetailPage() {
           })()}
         />
       </div>
+      </>
+      )}
 
-      {/* ── Summary Cards ───────────────────────────────────────────────── */}
+      {!isWidgetHidden('summary-cards') && (
+      /* ── Summary Cards ───────────────────────────────────────────────── */
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         {(() => {
           const areaMatch = project.description?.match(/(\d[\d.,]*)\s*m[²2]/i);
@@ -1577,6 +1739,7 @@ export function ProjectDetailPage() {
           variant={stats.avgValidationScore >= 0.8 ? 'success' : 'default'}
         />
       </div>
+      )}
 
       {/* ── Tab Bar ──────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 mb-4 border-b border-border-light">
