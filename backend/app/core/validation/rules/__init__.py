@@ -1170,6 +1170,407 @@ class EmptyUnit(ValidationRule):
         return results
 
 
+# ── Wave 24: unit-system consistency (metric vs imperial) ──────────────────
+# Units that are definitively metric (SI) — m, m2, m3, kg, etc.
+_METRIC_BOQ_UNITS: frozenset[str] = frozenset(
+    {
+        "m", "m2", "m3", "m²", "m³",
+        "mm", "cm", "km",
+        "lm",  # "laufende meter" (linear metres, common GAEB)
+        "kg", "t", "tonne",
+        "l", "litre", "liter",
+        "ha",  # hectare
+    },
+)
+# Units that are definitively imperial (US/UK) — ft, lb, etc.
+_IMPERIAL_BOQ_UNITS: frozenset[str] = frozenset(
+    {
+        "ft", "ft2", "ft3", "sqft", "cuft",
+        "in", "inch", "yd", "sqyd", "cy",  # cubic yards
+        "lb", "lbs", "oz", "ton",  # short ton
+        "gal", "gallon",
+    },
+)
+
+
+class BOQUnitSystemConsistencyRule(ValidationRule):
+    """Warn when BOQ position units don't match project_unit_system.
+
+    The rule is a single-result rule (returns one RuleResult, not one
+    per position) so the UI can present the BOQ-wide mismatch summary
+    in the validation dashboard. ``details["mismatch_count"]`` captures
+    how many positions disagree and ``details["mismatches"]`` lists up
+    to the first 10 by ordinal+unit for drill-down.
+
+    Skips silently when project_unit_system is absent or unrecognised
+    (no "unit_system" project setting means the user hasn't opted in to
+    this guard yet).
+    """
+
+    rule_id = "boq_quality.unit_system_consistency"
+    name = "Unit System Consistency"
+    standard = "boq_quality"
+    severity = Severity.WARNING
+    category = RuleCategory.CONSISTENCY
+    description = (
+        "Warn when BOQ positions use units from a different measurement "
+        "system than the project (metric vs imperial)."
+    )
+
+    async def validate(self, context: ValidationContext) -> list[RuleResult]:
+        locale = _get_locale(context)
+        data = context.data if isinstance(context.data, dict) else {}
+        project_system_raw = data.get("project_unit_system")
+        if project_system_raw is None:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    severity=self.severity,
+                    category=self.category,
+                    passed=True,
+                    message=_ok(locale),
+                )
+            ]
+        project_system = str(project_system_raw).strip().lower()
+        if project_system not in {"metric", "imperial"}:
+            # Unknown unit-system value → skip (don't false-positive).
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    severity=self.severity,
+                    category=self.category,
+                    passed=True,
+                    message=_ok(locale),
+                )
+            ]
+        # The "wrong" set is the OTHER system.
+        wrong_set = (
+            _IMPERIAL_BOQ_UNITS if project_system == "metric"
+            else _METRIC_BOQ_UNITS
+        )
+        wrong_label = "imperial" if project_system == "metric" else "metric"
+
+        mismatches: list[dict[str, str]] = []
+        positions = _get_positions(context)
+        for pos in positions:
+            unit = (pos.get("unit") or "").strip().lower()
+            if not unit:
+                continue
+            if unit in wrong_set:
+                mismatches.append(
+                    {
+                        "ordinal": str(pos.get("ordinal", "?")),
+                        "unit": unit,
+                        "id": str(pos.get("id", "")),
+                    },
+                )
+        mismatch_count = len(mismatches)
+        if mismatch_count == 0:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    severity=self.severity,
+                    category=self.category,
+                    passed=True,
+                    message=_ok(locale),
+                    details={"project_unit_system": project_system},
+                )
+            ]
+        # WARNING: at least one position uses the wrong system.
+        first_ordinal = mismatches[0]["ordinal"]
+        first_unit = mismatches[0]["unit"]
+        # The message string is built locally so the test can assert that
+        # both unit-system names appear, plus either the unit or ordinal.
+        message = (
+            f"Project unit system is '{project_system}' but {mismatch_count} "
+            f"BOQ position(s) use {wrong_label} units (e.g. {first_unit} on "
+            f"position {first_ordinal})."
+        )
+        suggestion = (
+            f"Convert {wrong_label} units to {project_system} equivalents "
+            f"or update the project's unit_system if {wrong_label} is "
+            f"actually intended."
+        )
+        return [
+            RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.name,
+                severity=self.severity,
+                category=self.category,
+                passed=False,
+                message=message,
+                suggestion=suggestion,
+                details={
+                    "project_unit_system": project_system,
+                    "wrong_system": wrong_label,
+                    "mismatch_count": mismatch_count,
+                    "mismatches": mismatches[:10],
+                },
+            )
+        ]
+
+
+# ── Wave 27: classification country-mismatch nudge (INFO) ──────────────────
+# Preferred classification standard per country. The rule fires an INFO
+# nudge when a position has classifications but is missing the standard
+# the country normally uses (e.g. a German project with MasterFormat
+# only and no DIN 276).
+_PREFERRED_STANDARD_BY_COUNTRY: dict[str, str] = {
+    # DACH → DIN 276
+    "DE": "din276",
+    "AT": "din276",
+    "CH": "din276",
+    # UK → NRM
+    "GB": "nrm",
+    # US → MasterFormat
+    "US": "masterformat",
+}
+
+# Fallback when only ``region`` is set (no ``country_code``).
+_REGION_TO_DEFAULT_COUNTRY: dict[str, str] = {
+    "DACH": "DE",
+    "UK": "GB",
+    "US": "US",
+}
+
+_COUNTRY_TO_DISPLAY_NAME: dict[str, str] = {
+    "DE": "Germany",
+    "AT": "Austria",
+    "CH": "Switzerland",
+    "GB": "United Kingdom",
+    "US": "United States",
+}
+
+# Rough cross-walk between DIN 276 KG groups and MasterFormat divisions.
+# Used as ``suggested_*`` hints when a position is missing the preferred
+# standard. None means "no mapping available — fire nudge but leave
+# suggestion blank".
+_MF_DIV_TO_DIN276: dict[str, str | None] = {
+    "01": "100",  # General requirements → Grundstück
+    "02": "200",  # Existing conditions → Vorbereitende Maßnahmen
+    "03": "330",  # Concrete → Außenwände / tragende Bauteile
+    "04": "330",  # Masonry → tragende Außenwände
+    "05": "330",  # Metals → tragende Konstruktion
+    "06": "350",  # Wood & plastics → Decken / Holzbau
+    "07": "330",  # Thermal & moisture → Außenwand-Abdichtung
+    "08": "334",  # Openings → Fenster & Türen
+    "09": "340",  # Finishes → Innenwände (Oberflächen)
+    "10": "375",  # Specialties
+    "11": "375",  # Equipment
+    "12": "370",  # Furnishings → Ausstattung
+    "13": "390",  # Special construction
+    "14": "440",  # Conveying equipment → Aufzüge
+    "21": "410",  # Fire suppression → Sanitär / Brandschutz
+    "22": "410",  # Plumbing → Sanitäranlagen
+    "23": "420",  # HVAC → Wärmeversorgung / RLT
+    "26": "440",  # Electrical → Starkstromanlagen
+    "27": "450",  # Communications → Fernmelde-Anlagen
+    "28": "450",  # Safety & security → Sicherheitsanlagen
+    "31": "210",  # Earthwork → Herrichten
+    "32": "500",  # Exterior improvements → Außenanlagen
+    "33": "590",  # Utilities → Anlagen ausserhalb
+}
+
+_DIN276_KG_TO_MF_DIV: dict[str, str] = {
+    "100": "01",
+    "200": "02",
+    "300": "03",  # Bauwerk-Konstruktion family → Concrete (representative)
+    "330": "03",
+    "340": "09",
+    "350": "06",
+    "360": "07",
+    "370": "12",
+    "400": "26",  # Bauwerk-Technik family → Electrical (representative)
+    "410": "22",
+    "420": "23",
+    "440": "26",
+    "450": "27",
+    "500": "32",
+    "600": "12",
+    "700": "01",
+}
+
+# NRM elements (RICS) → DIN 276 KG / MasterFormat division.
+_NRM_ELEM_TO_DIN276: dict[str, str] = {
+    "0": "100",  # Facilitating works → Grundstück
+    "1": "320",  # Substructure → Gründung
+    "2": "330",  # Superstructure → tragende Außenwände
+    "3": "340",  # Internal finishes → Innenwände-Oberflächen
+    "4": "370",  # Fittings & furniture → Einbauten
+    "5": "410",  # Services → Sanitär / MEP
+    "6": "440",  # Prefabricated buildings & units
+    "7": "210",  # Work to existing buildings → Vorbereitende Maßnahmen
+    "8": "500",  # External works → Außenanlagen
+}
+
+_NRM_ELEM_TO_MF_DIV: dict[str, str] = {
+    "0": "01",
+    "1": "31",
+    "2": "03",
+    "3": "09",
+    "4": "12",
+    "5": "22",
+    "6": "13",
+    "7": "02",
+    "8": "32",
+}
+
+
+def _normalize_country_code(
+    metadata: dict[str, Any], region: str | None,
+) -> str | None:
+    """Resolve the active country code from metadata or fall back to region."""
+    cc = metadata.get("country_code") if isinstance(metadata, dict) else None
+    if cc:
+        return str(cc).strip().upper()
+    if region:
+        return _REGION_TO_DEFAULT_COUNTRY.get(str(region).strip().upper())
+    return None
+
+
+class ClassificationCountryMismatchRule(ValidationRule):
+    """INFO nudge when classification standards don't match the country.
+
+    Returns one RuleResult that summarises the whole BOQ (passed=True if
+    no nudge needed, else passed=False with a suggested standard).
+
+    Quiet behaviours:
+      * Skip silently when country/region context is unknown.
+      * Skip silently when a position has no classifications at all
+        (completeness rules own that case).
+      * Pass when the preferred standard is present (even alongside
+        other standards).
+    """
+
+    rule_id = "classification_nudge.country_mismatch"
+    name = "Classification Standard Matches Country"
+    standard = "classification_nudge"
+    severity = Severity.INFO
+    category = RuleCategory.COMPLIANCE
+    description = (
+        "Nudge when a project's classifications don't include the country's "
+        "preferred standard (DIN 276 for DACH, NRM for UK, MasterFormat for US)."
+    )
+
+    async def validate(self, context: ValidationContext) -> list[RuleResult]:
+        locale = _get_locale(context)
+        metadata = getattr(context, "metadata", {}) or {}
+        region = getattr(context, "region", None)
+        country = _normalize_country_code(metadata, region)
+        # No country context → cannot judge → pass silently.
+        if not country or country not in _PREFERRED_STANDARD_BY_COUNTRY:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    severity=self.severity,
+                    category=self.category,
+                    passed=True,
+                    message=_ok(locale),
+                )
+            ]
+        preferred = _PREFERRED_STANDARD_BY_COUNTRY[country]
+        country_display = _COUNTRY_TO_DISPLAY_NAME.get(country, country)
+        positions = _get_positions(context)
+
+        # Find the first position that triggers a nudge — i.e. classifications
+        # present but missing the preferred standard for this country.
+        nudge_pos: dict[str, Any] | None = None
+        for pos in positions:
+            cls = pos.get("classification", {}) or {}
+            if not cls:
+                continue
+            if cls.get(preferred):
+                continue  # preferred present → no nudge for this row
+            # at least one OTHER standard is set → nudge candidate
+            if cls.get("din276") or cls.get("nrm") or cls.get("masterformat"):
+                nudge_pos = pos
+                break
+
+        if nudge_pos is None:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    severity=self.severity,
+                    category=self.category,
+                    passed=True,
+                    message=_ok(locale),
+                    details={"country": country},
+                )
+            ]
+
+        cls = nudge_pos.get("classification", {}) or {}
+        details: dict[str, Any] = {
+            "country": country,
+            "preferred_standard": preferred,
+        }
+        suggestion_target_display = {
+            "din276": "DIN 276",
+            "nrm": "NRM",
+            "masterformat": "MasterFormat",
+        }[preferred]
+
+        # Compute suggested target classification code(s) from whichever
+        # other standard the user already supplied.
+        if preferred == "din276":
+            details["suggested_din276"] = None
+            if cls.get("masterformat"):
+                mf = str(cls["masterformat"]).strip().split()[0][:2]
+                details["suggested_din276"] = _MF_DIV_TO_DIN276.get(mf)
+            elif cls.get("nrm"):
+                nrm = str(cls["nrm"]).strip().split(".")[0]
+                details["suggested_din276"] = _NRM_ELEM_TO_DIN276.get(nrm)
+        elif preferred == "nrm":
+            details["suggested_nrm"] = None
+            if cls.get("din276"):
+                # KG 3xx → NRM 2, 4xx → 5, 5xx → 8 (rough)
+                kg = str(cls["din276"]).strip()[:1]
+                kg_to_nrm = {"1": "0", "2": "1", "3": "2", "4": "5",
+                             "5": "8", "6": "4", "7": "0"}
+                details["suggested_nrm"] = kg_to_nrm.get(kg)
+            elif cls.get("masterformat"):
+                mf = str(cls["masterformat"]).strip().split()[0][:2]
+                # Best-effort
+                mf_to_nrm = {"03": "2", "22": "5", "26": "5", "32": "8"}
+                details["suggested_nrm"] = mf_to_nrm.get(mf)
+        elif preferred == "masterformat":
+            details["suggested_masterformat"] = None
+            if cls.get("din276"):
+                kg = str(cls["din276"]).strip()[:3]
+                details["suggested_masterformat"] = _DIN276_KG_TO_MF_DIV.get(kg)
+            elif cls.get("nrm"):
+                nrm = str(cls["nrm"]).strip().split(".")[0]
+                details["suggested_masterformat"] = _NRM_ELEM_TO_MF_DIV.get(nrm)
+
+        message = (
+            f"Project is in {country_display} but positions use a different "
+            f"classification standard. Consider adding {suggestion_target_display} "
+            f"alongside the existing classification."
+        )
+        suggestion = (
+            f"In {country_display}, {suggestion_target_display} is the standard "
+            f"classification expected by clients, regulators and cost databases. "
+            f"Adding it improves report compatibility."
+        )
+        return [
+            RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.name,
+                severity=self.severity,
+                category=self.category,
+                passed=False,
+                message=message,
+                suggestion=suggestion,
+                element_ref=nudge_pos.get("id"),
+                details=details,
+            )
+        ]
+
+
 class SectionWithoutItems(ValidationRule):
     rule_id = "boq_quality.section_without_items"
     name = "Section Has Child Items"
