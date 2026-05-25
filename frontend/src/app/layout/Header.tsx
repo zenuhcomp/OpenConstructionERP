@@ -1300,6 +1300,9 @@ function UploadQueueIndicator() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
+        aria-label={t('queue.title', { defaultValue: 'Upload Queue' })}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         className={clsx(
           'relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
           totalActive > 0 ? 'text-oe-blue bg-oe-blue-subtle' : 'text-content-tertiary hover:bg-surface-secondary',
@@ -1307,9 +1310,9 @@ function UploadQueueIndicator() {
         title={t('queue.title', { defaultValue: 'Upload Queue' })}
       >
         {totalActive > 0 ? (
-          <Loader2 size={16} className="animate-spin" />
+          <Loader2 size={16} className="animate-spin" aria-hidden="true" />
         ) : (
-          <Upload size={16} />
+          <Upload size={16} aria-hidden="true" />
         )}
         {(totalActive > 0 || errorTasks.length > 0) && (
           <span className={`absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white ${
@@ -1371,8 +1374,13 @@ function UploadQueueIndicator() {
                     </div>
                   </div>
                   {(task.status === 'completed' || task.status === 'error') && (
-                    <button onClick={() => removeTask(task.id)} className="shrink-0 p-1 rounded hover:bg-surface-secondary text-content-quaternary">
-                      <XCircle size={12} />
+                    <button
+                      onClick={() => removeTask(task.id)}
+                      aria-label={t('queue.remove_task', { defaultValue: 'Remove {{filename}} from queue', filename: task.filename })}
+                      title={t('queue.remove_task_short', { defaultValue: 'Remove from queue' })}
+                      className="shrink-0 p-1 rounded hover:bg-surface-secondary text-content-quaternary"
+                    >
+                      <XCircle size={12} aria-hidden="true" />
                     </button>
                   )}
                 </div>

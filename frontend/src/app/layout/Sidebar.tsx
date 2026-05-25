@@ -1966,8 +1966,13 @@ export function FloatingRecentButton() {
         <div className="absolute bottom-12 end-0 w-72 rounded-xl border border-border-light bg-surface-primary shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-150">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-light">
             <span className="text-xs font-semibold text-content-primary">{t('nav.recent', { defaultValue: 'Recent' })}</span>
-            <button onClick={() => setOpen(false)} className="p-0.5 rounded text-content-tertiary hover:text-content-primary">
-              <X size={14} />
+            <button
+              onClick={() => setOpen(false)}
+              aria-label={t('common.close', { defaultValue: 'Close' })}
+              title={t('common.close', { defaultValue: 'Close' })}
+              className="p-0.5 rounded text-content-tertiary hover:text-content-primary"
+            >
+              <X size={14} aria-hidden="true" />
             </button>
           </div>
           <ul className="py-1.5 max-h-60 overflow-y-auto">
@@ -1997,6 +2002,9 @@ export function FloatingRecentButton() {
       {/* FAB button */}
       <button
         onClick={() => setOpen((p) => !p)}
+        aria-label={t('nav.recent', { defaultValue: 'Recent' })}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         className={clsx(
           'w-10 h-10 rounded-full flex items-center justify-center shadow-lg border transition-all duration-200 hover:scale-105 active:scale-95',
           open
@@ -2005,7 +2013,7 @@ export function FloatingRecentButton() {
         )}
         title={t('nav.recent', { defaultValue: 'Recent' })}
       >
-        <History size={18} strokeWidth={2} />
+        <History size={18} strokeWidth={2} aria-hidden="true" />
       </button>
     </div>
   );
