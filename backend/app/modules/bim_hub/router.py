@@ -1040,6 +1040,85 @@ _NEEDS_CONVERTER_EXTS = {".rvt", ".dwg", ".dgn"}
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+# Module-level counter for Parquet sidecar write failures. No prometheus
+# framework is wired into the backend yet (see task #155), so we expose
+# the count via a structured log event AND a process-local counter that
+# the future /metrics surface can poll without re-instrumenting.
+_PARQUET_FAILURE_COUNTER: dict[str, int] = {}
+
+
+def _record_parquet_attempt_init() -> tuple[str, str | None]:
+    """Return the default (status, error) tuple before a Parquet attempt.
+
+    "skipped" is the conservative default: if the path that mutates these
+    values is never reached (raw_elements empty, exception before the
+    try/except, etc.) the UI still gets a sane value rather than ``None``.
+    """
+    return "skipped", None
+
+
+def _surface_parquet_failure(
+    *,
+    exc: BaseException,
+    project_id: str,
+    model_id: str,
+    model_format: str,
+    row_count: int,
+) -> tuple[str, str]:
+    """Emit structured diagnostics for a failed Parquet sidecar write.
+
+    Logs at ERROR level (degraded state — even if non-fatal for the user's
+    current upload, operators should see how often this fires), bumps a
+    process-local counter, and returns the ``(status, error)`` pair the
+    caller stamps onto ``model.metadata_``.
+
+    The structured payload travels in ``logger.error``'s ``extra`` dict so
+    log-aggregation systems (ELK / Loki / Datadog) can pick the fields up
+    individually rather than parsing the message string.
+    """
+    import traceback as _tb
+
+    exc_type = type(exc).__name__
+    exc_msg = str(exc) or "<no message>"
+    # Truncate traceback to ~2KB so we don't blow up log lines or the
+    # metadata JSON column for pathological deep stacks.
+    tb_text = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))
+    if len(tb_text) > 2048:
+        tb_text = tb_text[:2048] + "...[truncated]"
+
+    fmt_key = (model_format or "unknown").lower().lstrip(".")
+    _PARQUET_FAILURE_COUNTER[fmt_key] = _PARQUET_FAILURE_COUNTER.get(fmt_key, 0) + 1
+
+    logger.error(
+        "bim_parquet_write_failed model=%s project=%s format=%s rows=%d "
+        "exc=%s msg=%s",
+        model_id,
+        project_id,
+        fmt_key,
+        row_count,
+        exc_type,
+        exc_msg,
+        extra={
+            "event": "bim_parquet_write_failed",
+            "project_id": project_id,
+            "model_id": model_id,
+            "model_format": fmt_key,
+            "row_count": row_count,
+            "exception_type": exc_type,
+            "exception_message": exc_msg,
+            "traceback": tb_text,
+            "metric": "bim_parquet_write_failed_total",
+            "metric_labels": {"model_format": fmt_key},
+        },
+    )
+
+    # The error string stamped onto the model row stays short — the full
+    # traceback is in the log event. The UI only needs enough to render
+    # "ParquetWriteError: disk full" without exposing the whole stack.
+    short_error = f"{exc_type}: {exc_msg}"[:500]
+    return "failed", short_error
+
+
 async def _process_cad_in_background(
     *,
     project_id: str,
@@ -1196,6 +1275,7 @@ async def _process_cad_in_background(
                     )
 
             raw_elements = result.get("raw_elements", [])
+            parquet_status, parquet_error = _record_parquet_attempt_init()
             if raw_elements:
                 try:
                     from app.modules.bim_hub.dataframe_store import write_dataframe
@@ -1206,8 +1286,20 @@ async def _process_cad_in_background(
                         model_id=model_id,
                         rows=raw_elements,
                     )
+                    parquet_status = "ok"
                 except Exception as exc:
-                    logger.warning("Parquet write failed (non-fatal): %s", exc)
+                    parquet_status, parquet_error = _surface_parquet_failure(
+                        exc=exc,
+                        project_id=project_id,
+                        model_id=model_id,
+                        model_format=ext.lstrip("."),
+                        row_count=len(raw_elements),
+                    )
+            else:
+                # No rows means we never tried — keep "skipped" so the UI
+                # can distinguish "ingest produced nothing" from a real
+                # write failure that needs operator attention.
+                parquet_status = "skipped"
 
         async with async_session_factory() as session:
             # Defensive: the upload endpoint commits before scheduling us, but
@@ -1323,6 +1415,14 @@ async def _process_cad_in_background(
                         if result.get("converter_cli_outdated")
                         else {}
                     ),
+                    # Parquet sidecar status — non-fatal for the model
+                    # itself, but operators want to know how often the
+                    # sidecar write fails so the analytics surface
+                    # (/dataframe/* endpoints) doesn't silently return
+                    # empty data. Task #155 surfaces this in the API.
+                    "parquet_status": parquet_status,
+                    "parquet_error": parquet_error,
+                    "parquet_attempted_at": _dt.now(_UTC).isoformat(),
                 }
 
                 # BUG-V320-DDC-01 / D-TKC-NEW-01 — non-destructive honesty
@@ -2120,6 +2220,122 @@ async def retry_model_processing(
     return {
         "status": "scheduled",
         "model_id": str(model_id),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Parquet sidecar status & retry (Task #155)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/models/{model_id}/parquet-status/")
+async def get_parquet_status(
+    model_id: uuid.UUID,
+    user_id: CurrentUserId = None,  # type: ignore[assignment]
+    _perm: None = Depends(RequirePermission("bim.read")),
+    service: BIMHubService = Depends(_get_service),
+) -> dict[str, Any]:
+    """Return the last-known Parquet sidecar status for *model_id*.
+
+    Surfaces the silent-failure state stamped onto ``model.metadata_`` by
+    the background ingester so the UI can show a "Parquet sidecar failed —
+    retry?" affordance instead of silently serving an empty dataframe.
+    """
+    model = await _verify_model_access(service, model_id, user_id or "")
+    meta = model.metadata_ or {}
+    return {
+        "model_id": str(model_id),
+        "status": meta.get("parquet_status"),
+        "error": meta.get("parquet_error"),
+        "attempted_at": meta.get("parquet_attempted_at"),
+        "retry_endpoint": f"/api/v1/bim-hub/models/{model_id}/parquet/retry/",
+    }
+
+
+@router.post("/models/{model_id}/parquet/retry/", status_code=202)
+async def retry_parquet_write(
+    model_id: uuid.UUID,
+    user_id: CurrentUserId,
+    _perm: None = Depends(RequirePermission("bim.update")),
+    service: BIMHubService = Depends(_get_service),
+) -> dict[str, Any]:
+    """Re-run the Parquet sidecar write from existing element rows in the DB.
+
+    Cheap recovery for the case where the original DDC conversion succeeded
+    (elements landed in ``oe_bim_element``) but the Parquet write failed
+    (disk full, permission denied, pyarrow crash). Does NOT re-run DDC.
+    """
+    from app.modules.bim_hub.dataframe_store import write_dataframe
+    from app.modules.bim_hub.models import BIMElement
+
+    model = await _verify_model_access(service, model_id, user_id or "")
+
+    # Pull the rows back out of the DB — same projection the converter
+    # would have produced for the Parquet write (one dict per element).
+    rows_q = await service.session.execute(
+        select(BIMElement).where(BIMElement.model_id == model_id)
+    )
+    elements = rows_q.scalars().all()
+    if not elements:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Model has no elements in the database — cannot retry "
+                "Parquet write. Re-upload the model instead."
+            ),
+        )
+
+    rows: list[dict[str, Any]] = []
+    for el in elements:
+        row: dict[str, Any] = {
+            "stable_id": el.stable_id,
+            "element_type": el.element_type,
+            "name": el.name,
+            "storey": el.storey,
+            "discipline": el.discipline,
+        }
+        # Flatten properties + quantities into the row dict so the Parquet
+        # column set matches the original DDC shape closely enough for the
+        # dataframe endpoints to work.
+        if isinstance(el.properties, dict):
+            row.update(el.properties)
+        if isinstance(el.quantities, dict):
+            row.update(el.quantities)
+        rows.append(row)
+
+    import asyncio as _asyncio
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    try:
+        await _asyncio.to_thread(
+            write_dataframe,
+            project_id=str(model.project_id),
+            model_id=str(model_id),
+            rows=rows,
+        )
+        new_status, new_error = "ok", None
+    except Exception as exc:
+        new_status, new_error = _surface_parquet_failure(
+            exc=exc,
+            project_id=str(model.project_id),
+            model_id=str(model_id),
+            model_format=model.model_format or "",
+            row_count=len(rows),
+        )
+
+    meta = dict(model.metadata_ or {})
+    meta["parquet_status"] = new_status
+    meta["parquet_error"] = new_error
+    meta["parquet_attempted_at"] = _dt.now(_UTC).isoformat()
+    model.metadata_ = meta
+    await service.session.commit()
+
+    return {
+        "model_id": str(model_id),
+        "status": new_status,
+        "error": new_error,
+        "rows_attempted": len(rows),
     }
 
 
