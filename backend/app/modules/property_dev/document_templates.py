@@ -76,9 +76,21 @@ from reportlab.platypus import (
 
 # ── Constants ───────────────────────────────────────────────────────────
 
-#: Locales explicitly shipped with translated templates. Anything else
-#: falls back to English.
-SUPPORTED_LOCALES: tuple[str, ...] = ("en", "de", "ru", "fr", "ar", "es")
+#: All locales offered in the document-templates UI picker. Locales
+#: without a dedicated translation JSON in ``data/document_locales/``
+#: fall back to ``en.json`` automatically (see ``_load_locale``); the
+#: list below stays in sync with the frontend's ``app/locales/*.ts``
+#: catalogue so every UI language has at least an English-content
+#: template option available rather than being silently dropped from
+#: the picker. Adding a new translation = drop a ``<code>.json`` file
+#: into ``data/document_locales/`` — no code change required.
+SUPPORTED_LOCALES: tuple[str, ...] = (
+    "en", "de", "ru", "fr", "ar", "es",
+    "it", "pt", "pl", "nl", "tr", "zh",
+    "ja", "ko", "cs", "da", "fi", "no",
+    "sv", "hi", "vi", "th", "id", "ro",
+    "bg", "hr", "mn",
+)
 
 #: RTL locales — paragraph wordWrap set to ``RTL`` and alignment flipped.
 RTL_LOCALES: frozenset[str] = frozenset({"ar", "he", "fa", "ur"})
