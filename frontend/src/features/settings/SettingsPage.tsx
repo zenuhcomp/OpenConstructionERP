@@ -1057,7 +1057,19 @@ export function SettingsPage() {
 
   // ── Tab state with URL sync ──────────────────────────────────────────
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = (searchParams.get('tab') as SettingsTab) || 'general';
+  // Resolve legacy/renamed tab ids so old bookmarks keep working.
+  // ``?tab=bimcad`` was the pre-v4.6 id for the CAD/BIM panel which was
+  // renamed to ``converters`` in #76 — landing on the stale URL used to
+  // silently fall back to General, making it look like the redesign had
+  // been reverted.
+  const TAB_ALIASES: Record<string, SettingsTab> = {
+    bimcad: 'converters',
+    'bim-cad': 'converters',
+    'bim_cad': 'converters',
+    cad: 'converters',
+  };
+  const rawTab = searchParams.get('tab') ?? '';
+  const initialTab = (TAB_ALIASES[rawTab] ?? (rawTab as SettingsTab)) || 'general';
   const validTabIds = useMemo(() => TABS.map((t) => t.id), []);
   const [activeTab, setActiveTab] = useState<SettingsTab>(
     validTabIds.includes(initialTab) ? initialTab : 'general',
