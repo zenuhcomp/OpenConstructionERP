@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -520,6 +521,62 @@ function PriceBar({
   );
 }
 
+/* ── Hover-tooltip with full text ─────────────────────────────────────
+   Renders via React portal so the popup escapes the table's
+   ``overflow-x-auto`` wrapper (which per CSS spec computes overflow-y
+   to ``auto`` too, clipping any absolutely-positioned descendant).
+   Anchors fixed-position to the wrapped element's bounding rect.
+   Closes the gap left by the CSS-only ``group-hover/name:block``
+   approach which clipped inside the table viewport. */
+function HoverTooltip({
+  text,
+  className,
+  children,
+}: {
+  text: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const show = useCallback(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+  }, []);
+  const hide = useCallback(() => setPos(null), []);
+
+  return (
+    <>
+      <span
+        ref={wrapRef}
+        className={className}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        title={text}
+      >
+        {children}
+      </span>
+      {pos
+        ? createPortal(
+            <div
+              role="tooltip"
+              className="pointer-events-none fixed z-[200] max-w-[640px] whitespace-normal rounded-md border border-border-light bg-surface-elevated px-3 py-2 text-xs font-normal text-content-primary shadow-xl"
+              style={{ top: pos.top, left: pos.left }}
+            >
+              {text}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
 /* ── Resource Row ────────────────────────────────────────────────────── */
 
 function ResourceRow({
@@ -580,29 +637,11 @@ function ResourceRow({
 
         {/* Name */}
         <td className="px-4 py-3 text-sm text-content-primary font-medium">
-          {/* hover:z-50 elevates this cell's whole stacking context above
-              sibling rows on hover so the tooltip below (z-[70]) reliably
-              paints over the next <tr>'s cells. Without this, tooltip
-              clipped behind subsequent rows in default table flow. */}
-          <div className="flex items-center gap-2 group/name relative hover:z-50">
+          <div className="flex items-center gap-2">
             {regionInfo && <MiniFlag code={regionInfo.flag} size={11} />}
-            <span
-              className="truncate max-w-[420px]"
-              title={resource.name}
-            >
+            <HoverTooltip text={resource.name} className="truncate max-w-[420px] inline-block">
               {resource.name}
-            </span>
-            {/* Pretty hover-tooltip with the full name. Always rendered so
-                Cyrillic / CJK / wide-glyph names that truncate below a
-                40-char gate still get disambiguated on hover. The native
-                ``title=`` fallback above keeps it accessible for screen
-                readers / keyboard nav even if CSS fails. */}
-            <span
-              role="tooltip"
-              className="pointer-events-none absolute left-0 top-full z-[70] mt-1 hidden max-w-[640px] whitespace-normal rounded-md border border-border-light bg-surface-elevated px-3 py-2 text-xs font-normal text-content-primary shadow-xl group-hover/name:block"
-            >
-              {resource.name}
-            </span>
+            </HoverTooltip>
           </div>
           {resource.source === 'boq_import' && resource.specifications?.source_project_name ? (
             <div
@@ -793,17 +832,11 @@ function ResourceDetailPanel({
         {/* Info grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {/* Identity */}
-          <div className="rounded-lg bg-surface-primary border border-border-light p-2.5 relative">
+          <div className="rounded-lg bg-surface-primary border border-border-light p-2.5">
             <div className="text-2xs text-content-quaternary uppercase tracking-wider mb-1">{t('catalog.resource_label', { defaultValue: 'Resource' })}</div>
-            <div className="group/cardname relative">
-              <div className="text-xs font-medium text-content-primary truncate" title={resource.name}>{resource.name}</div>
-              <span
-                role="tooltip"
-                className="pointer-events-none absolute left-0 top-full z-[70] mt-1 hidden max-w-[480px] whitespace-normal rounded-md border border-border-light bg-surface-elevated px-3 py-2 text-xs font-normal text-content-primary shadow-xl group-hover/cardname:block"
-              >
-                {resource.name}
-              </span>
-            </div>
+            <HoverTooltip text={resource.name} className="block text-xs font-medium text-content-primary truncate">
+              {resource.name}
+            </HoverTooltip>
             <div className="text-2xs text-content-tertiary font-mono mt-0.5 truncate" title={resource.resource_code}>{resource.resource_code}</div>
           </div>
 
