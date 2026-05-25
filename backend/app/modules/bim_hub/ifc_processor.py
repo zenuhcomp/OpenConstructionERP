@@ -310,10 +310,28 @@ def _try_cad2data(ifc_path: Path, output_dir: Path, *, conversion_depth: str = "
             # were not expected``; the matrix below lets us suppress those
             # tokens up front and avoid the exit-15 trap entirely.
             caps = detect_converter_capabilities(ext)
+            # Resolve the CLI profile up front so the args-builder and the
+            # retry path can branch off it without re-reading the dict on
+            # every call.  v18 binaries (flag-driven CLI) and v17/legacy
+            # binaries (positional CLI) build completely different command
+            # lines — see ``cad_import.build_ddc_args`` for the canonical
+            # mapping.
+            from app.modules.boq.cad_import import (
+                CLI_PROFILE_LEGACY,
+                CLI_PROFILE_V17_POSITIONAL,
+                CLI_PROFILE_V18_FLAG,
+                build_ddc_args,
+            )
+            cli_profile = caps.get("cli_profile", CLI_PROFILE_LEGACY)
             # Track whether the conservative path was taken for any reason
             # (probe-driven OR exit-15 retry) so callers can surface a
-            # "converter_outdated" diagnostic to the UI.
-            outdated_cli_observed = not caps.get("accepts_no_collada_flag", False)
+            # "converter_outdated" diagnostic to the UI.  v18 is the
+            # current release — only v17_positional / legacy / no-flag
+            # paths get the "outdated" badge.
+            outdated_cli_observed = cli_profile not in (
+                CLI_PROFILE_V18_FLAG,
+                CLI_PROFILE_V17_POSITIONAL,
+            )
 
             # Stderr substrings that prove the failure was specifically an
             # "unknown argument" rejection — keep these tight to avoid
@@ -356,6 +374,17 @@ def _try_cad2data(ifc_path: Path, output_dir: Path, *, conversion_depth: str = "
             ) -> list[str]:
                 """‌⁠‍Compose the CLI invocation honouring the capability flags.
 
+                Routes through ``cad_import.build_ddc_args`` whenever the
+                probe identified a v18 flag-driven binary — that path
+                emits ``-x out.xlsx`` / ``-d out.dae`` / ``-m mode``
+                / ``--force-path`` instead of the legacy positional
+                ``output [mode] [-no-collada]`` shape that v18 rejects
+                with exit 15.
+
+                For v17 positional / legacy binaries the historical layout
+                is preserved verbatim so the existing test contract (and
+                any user with an old binary on disk) keeps working.
+
                 Depth-mode is only appended when both the caller asked for
                 it AND the binary advertises support.  ``extra`` is the
                 tuple of caller-supplied flags (currently only
@@ -363,9 +392,39 @@ def _try_cad2data(ifc_path: Path, output_dir: Path, *, conversion_depth: str = "
                 against ``allow_no_collada`` so a probe-confirmed legacy
                 binary never sees the flag at all.
                 """
+                ddc_mode = "complete" if conversion_depth == "complete" else "standard"
+
+                if cli_profile == CLI_PROFILE_V18_FLAG:
+                    # The output extension picks which v18 flag we emit:
+                    # .xlsx / .xls → ``-x`` and suppress DAE; .dae → ``-d``
+                    # and suppress XLSX.  Suppressing the other output
+                    # halves wall-time per pass (the bundled exporter
+                    # writes both by default).
+                    suffix = out_path.suffix.lower()
+                    is_xlsx = suffix in (".xlsx", ".xls")
+                    is_dae = suffix == ".dae"
+                    # ``allow_depth_mode`` is gated on the legacy
+                    # ``accepts_depth_mode`` boolean (v17 positional);
+                    # v18 uses ``accepts_flag_mode`` (``-m``).  Honour
+                    # caller intent across both: emit the mode whenever
+                    # EITHER capability is on.
+                    return build_ddc_args(
+                        converter,
+                        input_abs,
+                        caps=caps,
+                        xlsx_out=out_path if is_xlsx else None,
+                        dae_out=out_path if is_dae else None,
+                        mode=ddc_mode,
+                        # Default-skip the *other* output on every v18
+                        # single-output pass — saves a roundtrip and
+                        # keeps the work on-spec.
+                        include_no_dae=is_xlsx,
+                        include_no_xlsx=is_dae,
+                    )
+
+                # Legacy / v17 positional path — unchanged historical behaviour.
                 args_list = [str(converter), str(input_abs), str(out_path)]
                 if ext in ("rvt", "ifc") and allow_depth_mode:
-                    ddc_mode = "complete" if conversion_depth == "complete" else "standard"
                     args_list.append(ddc_mode)
                 for arg in extra:
                     if arg == "-no-collada" and not allow_no_collada:
@@ -423,23 +482,52 @@ def _try_cad2data(ifc_path: Path, output_dir: Path, *, conversion_depth: str = "
                 # error.  Either both signals (exit 15 + stderr marker) or
                 # any-exit + stderr marker is sufficient — DDC has shipped
                 # at least one release that exits 64 for unknown args.
-                already_bare = not (
-                    caps.get("accepts_depth_mode") or caps.get("accepts_no_collada_flag")
+                #
+                # "Already bare" is profile-dependent: on the v18 flag
+                # CLI the minimum-acceptable call is
+                # ``[exe, input, -x out, -m standard, --force-path]`` (or
+                # ``-d`` for the COLLADA pass) — never the bare positional
+                # ``[exe, input, output]`` that the v17/legacy bare branch
+                # would emit.  Recognising this prevents a v18 binary from
+                # retrying with a shape it doesn't understand, and prevents
+                # a legacy binary from retrying with v18 flags it doesn't
+                # understand.
+                already_bare = (
+                    cli_profile == CLI_PROFILE_LEGACY
+                    and not (caps.get("accepts_depth_mode") or caps.get("accepts_no_collada_flag"))
                 )
                 stderr_hit = _stderr_indicates_unknown_arg(stderr)
                 if already_bare:
                     return rc, stdout, stderr
                 if rc == 15 or stderr_hit:
-                    bare_args = _build_args(
-                        out_path,
-                        allow_depth_mode=False,
-                        allow_no_collada=False,
-                        extra=(),
-                    )
+                    if cli_profile == CLI_PROFILE_V18_FLAG:
+                        # v18 retry: keep the flag CLI but drop the
+                        # output-suppression flags + mode preset — leaves
+                        # ``[exe, input, -x out, --force-path]`` (or -d).
+                        # If THIS still fails we surface the original
+                        # error; falling through to the legacy positional
+                        # bare shape would just trade one parse error for
+                        # another.
+                        suffix = out_path.suffix.lower()
+                        is_xlsx = suffix in (".xlsx", ".xls")
+                        bare_args = [str(converter), str(input_abs)]
+                        if is_xlsx:
+                            bare_args.extend(["-x", str(out_path)])
+                        else:
+                            bare_args.extend(["-d", str(out_path)])
+                        if caps.get("accepts_flag_force_path"):
+                            bare_args.append("--force-path")
+                    else:
+                        bare_args = _build_args(
+                            out_path,
+                            allow_depth_mode=False,
+                            allow_no_collada=False,
+                            extra=(),
+                        )
                     logger.warning(
-                        "DDC converter rejected modern CLI args (rc=%d, marker=%s) — "
-                        "retrying with bare invocation: %s",
-                        rc, stderr_hit, bare_args,
+                        "DDC converter rejected modern CLI args (rc=%d, marker=%s, profile=%s) — "
+                        "retrying with reduced invocation: %s",
+                        rc, stderr_hit, cli_profile, bare_args,
                     )
                     rc2, stdout2, stderr2 = _invoke(bare_args)
                     if rc2 == 0:

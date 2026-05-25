@@ -130,17 +130,27 @@ def test_no_binary_installed_returns_unprobed_sentinel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """‌⁠‍With no converter installed, ``probed`` is False so a later install
-    triggers a fresh probe instead of reading a stale "old CLI" entry."""
+    triggers a fresh probe instead of reading a stale "old CLI" entry.
+
+    The capability dict gained v18-era keys in task #164 (``accepts_flag_*``,
+    ``cli_profile``, ``legacy_positional_input_output``); this test now
+    asserts the core-historical contract as a *subset* rather than a
+    strict equality, so future capability-key additions don't force a
+    test edit just to keep the legacy invariants pinned.
+    """
     monkeypatch.setattr(cad_import, "find_converter", lambda _ext: None)
 
     caps = cad_import.detect_converter_capabilities("rvt")
 
-    assert caps == {
-        "accepts_depth_mode": False,
-        "accepts_no_collada_flag": False,
-        "version_text": None,
-        "probed": False,
-    }
+    # Core contract pinned since v4.6.2:
+    assert caps["accepts_depth_mode"] is False
+    assert caps["accepts_no_collada_flag"] is False
+    assert caps["version_text"] is None
+    assert caps["probed"] is False
+    # New in task #164: no-binary sentinel should be a distinct profile
+    # (``unknown``) so callers can differentiate "binary missing" from
+    # "binary present but legacy".
+    assert caps["cli_profile"] == cad_import.CLI_PROFILE_UNKNOWN
 
 
 def test_capability_cache_short_circuits_second_call(
