@@ -45,6 +45,9 @@ import {
   type UpdateSubmittalPayload,
   type ApproveSubmittalPayload,
 } from './api';
+import { SubmittalStatusPipeline } from './SubmittalStatusPipeline';
+import { DueDateBadge } from './DueDateBadge';
+import { DaysInCourtBadge } from './DaysInCourtBadge';
 
 /* ── Constants ─────────────────────────────────────────────────────────── */
 
@@ -492,27 +495,48 @@ const SubmittalRow = React.memo(function SubmittalRow({
           {t(`submittals.type_${submittal.type}`, { defaultValue: TYPE_LABELS[submittal.type] })}
         </Badge>
 
-        {/* Status badge */}
-        <Badge variant={statusCfg.variant} size="sm" className={statusCfg.cls}>
-          {t(`submittals.status_${submittal.status}`, {
-            defaultValue: STATUS_LABELS[submittal.status],
-          })}
-        </Badge>
+        {/* Status badge + pipeline. Stacked column so the dot-stepper
+            never pushes the row width (matches the procurement pattern
+            and keeps mobile layout intact). The pipeline mirrors the
+            backend FSM in submittals/service.py. */}
+        <div className="flex flex-col items-center gap-1 w-28 shrink-0">
+          <Badge variant={statusCfg.variant} size="sm" className={statusCfg.cls}>
+            {t(`submittals.status_${submittal.status}`, {
+              defaultValue: STATUS_LABELS[submittal.status],
+            })}
+          </Badge>
+          <SubmittalStatusPipeline status={submittal.status} />
+        </div>
 
-        {/* Ball in Court */}
-        <span className="text-xs text-content-tertiary w-24 truncate shrink-0 hidden md:block">
-          {submittal.ball_in_court_name || submittal.ball_in_court || '-'}
-        </span>
+        {/* Ball in Court + days-with-reviewer SLA chip. The chip only
+            renders while the submittal is actively in the reviewer's
+            court (submitted / under_review) and the elapsed time has
+            crossed the neutral threshold — so most rows show just the
+            name. */}
+        <div className="w-24 shrink-0 hidden md:flex md:flex-col md:items-start md:gap-0.5">
+          <span className="text-xs text-content-tertiary truncate w-full">
+            {submittal.ball_in_court_name || submittal.ball_in_court || '-'}
+          </span>
+          <DaysInCourtBadge
+            dateSubmitted={submittal.date_submitted}
+            status={submittal.status}
+          />
+        </div>
 
         {/* Rev # */}
         <span className="text-xs text-content-tertiary w-10 text-center shrink-0 tabular-nums hidden sm:block">
           R{submittal.revision}
         </span>
 
-        {/* Date Required */}
-        <span className="text-xs w-20 shrink-0 hidden lg:block">
+        {/* Date Required + overdue countdown badge. Stacked column so
+            the badge does not steal width from the date. */}
+        <div className="text-xs w-20 shrink-0 hidden lg:flex lg:flex-col lg:items-start lg:gap-0.5">
           <DateDisplay value={submittal.date_required} className="text-xs text-content-tertiary" />
-        </span>
+          <DueDateBadge
+            dateRequired={submittal.date_required}
+            status={submittal.status}
+          />
+        </div>
       </div>
 
       {/* Expanded detail */}
@@ -1082,6 +1106,9 @@ export function SubmittalsPage() {
                 </span>
                 <span className="w-28 text-center">
                   {t('submittals.col_status', { defaultValue: 'Status' })}
+                </span>
+                <span className="sr-only">
+                  {t('submittals.col_pipeline_sr', { defaultValue: 'Pipeline' })}
                 </span>
                 <span className="w-24 hidden md:block">
                   {t('submittals.col_bic', { defaultValue: 'Ball in Court' })}
