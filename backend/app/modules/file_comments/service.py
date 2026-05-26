@@ -254,7 +254,11 @@ async def create_comment(
     await session.flush()
 
     mentions = await _extract_and_persist_mentions(
-        session, comment.id, comment.body, exclude_user_id=author_id
+        session,
+        comment.id,
+        comment.body,
+        exclude_user_id=author_id,
+        comment=comment,
     )
     return comment, mentions
 
@@ -265,11 +269,19 @@ async def _extract_and_persist_mentions(
     body: str,
     *,
     exclude_user_id: uuid.UUID | None = None,
+    comment: FileComment | None = None,
 ) -> list[FileCommentMention]:
     """Find ``@handle`` tokens, resolve them, write mention rows.
 
     Self-mentions are dropped so the author does not see their own
     note in the unread-mentions inbox.
+
+    Epic B / B1: after persisting mention rows we publish a detached
+    ``file_comments.mention.created`` event per resolved user so the
+    Notifications module can fan an in-app / email / webhook
+    notification out to the mentioned user.  Publishing is detached
+    (asyncio.create_task) so a misbehaving subscriber never blocks the
+    upstream comment insert.
     """
     handles_raw = _MENTION_RE.findall(body)
     if not handles_raw:
@@ -310,6 +322,41 @@ async def _extract_and_persist_mentions(
         rows.append(row)
     if rows:
         await session.flush()
+
+    # Best-effort bridge to the Notifications module (Epic B / B1).
+    # We publish detached so the comment insert is never blocked by a
+    # downstream subscriber, and the comment context lookup is cheap
+    # because the row is already in scope.
+    if rows:
+        try:
+            from app.core.events import event_bus
+
+            ctx_comment = comment
+            if ctx_comment is None:
+                ctx_comment = (
+                    await session.execute(
+                        select(FileComment).where(FileComment.id == comment_id)
+                    )
+                ).scalar_one_or_none()
+            for row in rows:
+                event_bus.publish_detached(
+                    "file_comments.mention.created",
+                    {
+                        "comment_id": str(comment_id),
+                        "mention_id": str(row.id),
+                        "mentioned_user_id": str(row.mentioned_user_id),
+                        "author_id": str(exclude_user_id) if exclude_user_id else None,
+                        "project_id": (
+                            str(ctx_comment.project_id) if ctx_comment else None
+                        ),
+                        "file_kind": ctx_comment.file_kind if ctx_comment else None,
+                        "file_id": ctx_comment.file_id if ctx_comment else None,
+                        "body_excerpt": (body or "")[:160],
+                    },
+                    source_module="oe_file_comments",
+                )
+        except Exception:  # noqa: BLE001 — event publish must never break the comment insert
+            logger.debug("file_comments: mention event publish failed", exc_info=True)
     return rows
 
 
@@ -366,6 +413,7 @@ async def update_comment(
             comment_id,
             comment.body,
             exclude_user_id=comment.author_id,
+            comment=comment,
         )
 
     mention_stmt = select(FileCommentMention).where(
