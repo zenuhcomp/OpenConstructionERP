@@ -1784,12 +1784,30 @@ async def restore_qdrant_snapshot(
             )
             logger.info("Created Qdrant collection: %s", collection_name)
 
-        # Recover snapshot — uses the Qdrant HTTP API under the hood
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: client.recover_snapshot(collection_name, location=str(local_path)),
+        # Upload snapshot via multipart — client.recover_snapshot() only
+        # accepts URIs the Qdrant SERVER can fetch (http://, s3://, file://
+        # on the server's own disk). Our snapshot sits on the app container,
+        # so we POST the bytes directly to /collections/{name}/snapshots/upload.
+        from app.modules.costs.qdrant_snapshot_loader import restore_snapshot_file
+
+        qdrant_url = _v3_qdrant_url()
+        if not qdrant_url:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Qdrant URL not configured — set QDRANT_URL or CWICR_QDRANT_URL",
+            )
+        ok = await asyncio.to_thread(
+            restore_snapshot_file,
+            qdrant_url=qdrant_url,
+            collection_name=collection_name,
+            snapshot_path=local_path,
+            timeout_s=1800,
         )
+        if not ok:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                f"Failed to restore Qdrant snapshot for {db_id}. Check Qdrant logs.",
+            )
         logger.info("Snapshot restored for collection %s", collection_name)
     except Exception as exc:
         logger.error("Failed to restore snapshot for %s: %s", db_id, exc)
