@@ -244,43 +244,41 @@ def _backfill_chain(
 def upgrade() -> None:
     bind = op.get_bind()
 
-    # ── file_comment: add FK column ───────────────────────────────────
+    # ── file_comment: add FK column (batch_alter_table for SQLite) ────
     if _table_exists(bind, "oe_file_comment") and not _column_exists(
         bind, "oe_file_comment", "file_version_id"
     ):
-        op.add_column(
-            "oe_file_comment",
-            sa.Column(
-                "file_version_id",
-                sa.String(length=36),
-                sa.ForeignKey("oe_file_version.id", ondelete="SET NULL"),
-                nullable=True,
-            ),
-        )
-        op.create_index(
-            "ix_oe_file_comment_file_version_id",
-            "oe_file_comment",
-            ["file_version_id"],
-        )
+        with op.batch_alter_table("oe_file_comment") as batch_op:
+            batch_op.add_column(
+                sa.Column(
+                    "file_version_id",
+                    sa.String(length=36),
+                    sa.ForeignKey("oe_file_version.id", ondelete="SET NULL"),
+                    nullable=True,
+                ),
+            )
+            batch_op.create_index(
+                "ix_oe_file_comment_file_version_id",
+                ["file_version_id"],
+            )
 
-    # ── markups_markup: add FK column ─────────────────────────────────
+    # ── markups_markup: add FK column (batch_alter_table for SQLite) ──
     if _table_exists(bind, "oe_markups_markup") and not _column_exists(
         bind, "oe_markups_markup", "file_version_id"
     ):
-        op.add_column(
-            "oe_markups_markup",
-            sa.Column(
-                "file_version_id",
-                sa.String(length=36),
-                sa.ForeignKey("oe_file_version.id", ondelete="SET NULL"),
-                nullable=True,
-            ),
-        )
-        op.create_index(
-            "ix_oe_markups_markup_file_version_id",
-            "oe_markups_markup",
-            ["file_version_id"],
-        )
+        with op.batch_alter_table("oe_markups_markup") as batch_op:
+            batch_op.add_column(
+                sa.Column(
+                    "file_version_id",
+                    sa.String(length=36),
+                    sa.ForeignKey("oe_file_version.id", ondelete="SET NULL"),
+                    nullable=True,
+                ),
+            )
+            batch_op.create_index(
+                "ix_oe_markups_markup_file_version_id",
+                ["file_version_id"],
+            )
 
     # ── Backfill: one v1 FileVersion per existing source row ──────────
     #
@@ -320,24 +318,20 @@ def downgrade() -> None:
     bind = op.get_bind()
 
     if _column_exists(bind, "oe_markups_markup", "file_version_id"):
-        try:
-            op.drop_index(
-                "ix_oe_markups_markup_file_version_id",
-                table_name="oe_markups_markup",
-            )
-        except Exception:
-            logger.debug("ix_oe_markups_markup_file_version_id absent on downgrade")
-        op.drop_column("oe_markups_markup", "file_version_id")
+        with op.batch_alter_table("oe_markups_markup") as batch_op:
+            try:
+                batch_op.drop_index("ix_oe_markups_markup_file_version_id")
+            except Exception:
+                logger.debug("ix_oe_markups_markup_file_version_id absent on downgrade")
+            batch_op.drop_column("file_version_id")
 
     if _column_exists(bind, "oe_file_comment", "file_version_id"):
-        try:
-            op.drop_index(
-                "ix_oe_file_comment_file_version_id",
-                table_name="oe_file_comment",
-            )
-        except Exception:
-            logger.debug("ix_oe_file_comment_file_version_id absent on downgrade")
-        op.drop_column("oe_file_comment", "file_version_id")
+        with op.batch_alter_table("oe_file_comment") as batch_op:
+            try:
+                batch_op.drop_index("ix_oe_file_comment_file_version_id")
+            except Exception:
+                logger.debug("ix_oe_file_comment_file_version_id absent on downgrade")
+            batch_op.drop_column("file_version_id")
     # The backfilled FileVersion rows are intentionally NOT removed on
     # downgrade — they are valid chain seeds and removing them would
     # invalidate the version-chain feature for every existing file.
