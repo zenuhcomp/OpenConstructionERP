@@ -969,6 +969,18 @@ def create_app() -> FastAPI:
     # lines carry the ID via the RequestIDLogFilter context) ───────────────
     from app.middleware.request_id import RequestIDMiddleware
 
+    # ── Universal audit capture context (Epic H) ──────────────────────────
+    # Sets the per-request AuditContext ContextVar so :func:`log_activity`
+    # can persist the peer IP, User-Agent, and correlation ID without
+    # service-layer callers having to thread the values manually.
+    # Starlette runs middleware in REVERSE registration order — the
+    # ``add_middleware(RequestIDMiddleware)`` call below must come AFTER
+    # this one so the request-id ContextVar is set BEFORE
+    # ActorContextMiddleware reads it via ``get_request_id()``.
+    from app.middleware.actor_context import ActorContextMiddleware
+
+    app.add_middleware(ActorContextMiddleware)
+
     app.add_middleware(RequestIDMiddleware)
 
     # ── Slow request logger (warns on > 500ms responses) ──────────────────

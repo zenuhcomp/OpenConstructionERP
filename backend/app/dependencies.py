@@ -497,3 +497,54 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUserPayload = Annotated[dict[str, Any], Depends(get_current_user_payload)]
 CurrentUserId = Annotated[str, Depends(get_current_user_id)]
 OptionalUserPayload = Annotated[dict[str, Any] | None, Depends(get_optional_user_payload)]
+
+
+# ── Epic H — universal audit context dependency ────────────────────────────
+
+
+async def audit_context_dep(
+    payload: Annotated[
+        dict[str, Any] | None, Depends(get_optional_user_payload),
+    ] = None,
+) -> None:
+    """Enrich the per-request :class:`AuditContext` with resolved identity.
+
+    The :class:`app.middleware.actor_context.ActorContextMiddleware`
+    already populated the ContextVar with IP / UA / request-id at the top
+    of the request. By the time a router handler resolves dependencies,
+    the JWT has been decoded and we can layer the actor/tenant IDs onto
+    the same ContextVar so :func:`app.core.audit_log.log_activity` calls
+    deeper in the call stack pick them up automatically.
+
+    Mounting this dependency on every router (or via a global router
+    dependency) is optional — service-layer callers that pass
+    ``actor_id=`` / ``tenant_id=`` explicitly continue to work unchanged.
+    Using the dep just spares them the boilerplate.
+    """
+    from app.core.audit_log import (
+        AuditContext,
+        get_audit_context,
+        set_audit_context,
+    )
+
+    if payload is None:
+        return  # anonymous request — middleware capture is enough
+
+    current = get_audit_context() or AuditContext()
+    actor_id = payload.get("sub")
+    tenant_id = payload.get("tenant_id")
+    if actor_id is None and tenant_id is None:
+        return
+
+    import dataclasses as _dc
+
+    set_audit_context(
+        _dc.replace(
+            current,
+            actor_id=str(actor_id) if actor_id else current.actor_id,
+            tenant_id=str(tenant_id) if tenant_id else current.tenant_id,
+        ),
+    )
+
+
+AuditContextDep = Annotated[None, Depends(audit_context_dep)]
