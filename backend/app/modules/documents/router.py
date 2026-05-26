@@ -1506,6 +1506,59 @@ async def update_document(
     return _doc_to_response(doc)
 
 
+# ── Revisions (Epic C — Document Versioning Unification) ────────────────
+
+
+@router.post("/{document_id}/revisions/", response_model=DocumentResponse, status_code=201)
+async def upload_document_revision(
+    document_id: uuid.UUID,
+    session: SessionDep,
+    file: UploadFile = File(...),
+    notes: str | None = Form(default=None),
+    user_id: CurrentUserId = "",  # type: ignore[assignment]
+    _perm: None = Depends(RequirePermission("documents.update")),
+    service: DocumentService = Depends(_get_service),
+) -> DocumentResponse:
+    """Upload a new revision against an existing document.
+
+    Epic C unification:
+        * The chain key stays anchored to the existing document's name
+          so version_number monotonically increments.
+        * Stored bytes are written to disk; the Document row's
+          ``file_path`` / ``file_size`` / ``mime_type`` are bumped to
+          point at the new revision.
+        * A new ``FileVersion`` row is inserted with ``is_current=True``
+          and the prior current is superseded inside one transaction.
+
+    Returns the (now updated) Document. The chain is queryable at
+    ``GET /api/v1/file-versions/?file_id={id}&kind=document``.
+    """
+    existing = await service.get_document(document_id)
+    await verify_project_access(existing.project_id, user_id, session)
+
+    allowed, _ = upload_limiter.is_allowed(str(user_id))
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many uploads. Please wait a moment and try again.",
+            headers={"Retry-After": "60"},
+        )
+
+    try:
+        doc = await service.upload_document_revision(
+            document_id, file, str(user_id) if user_id else "", notes=notes
+        )
+        return _doc_to_response(doc)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to upload document revision")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload document revision",
+        )
+
+
 # ── Delete ───────────────────────────────────────────────────────────────────
 
 

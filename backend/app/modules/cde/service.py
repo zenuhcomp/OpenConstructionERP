@@ -482,6 +482,45 @@ class CDEService:
                     revision_id,
                     doc_id,
                 )
+
+                # Epic C — also register a unified ``oe_file_version``
+                # row so the chain is continuous across modules. Best
+                # effort; failure does not roll back the revision.
+                try:
+                    from app.modules.file_versions.helpers import (
+                        canonical_name_for,
+                    )
+                    from app.modules.file_versions.schemas import (
+                        FileVersionCreate,
+                    )
+                    from app.modules.file_versions.service import (
+                        FileVersionService,
+                    )
+
+                    fv_svc = FileVersionService(self.session)
+                    try:
+                        uploader = (
+                            uuid.UUID(str(user_id)) if user_id else None
+                        )
+                    except (TypeError, ValueError):
+                        uploader = None
+                    fv_payload = FileVersionCreate(
+                        project_id=container.project_id,
+                        file_kind="document",
+                        file_id=str(doc_id),
+                        canonical_name=canonical_name_for("document", doc),
+                        file_size=file_size_int,
+                        notes=data.change_summary,
+                    )
+                    await fv_svc.register_new_version(
+                        fv_payload, uploaded_by_id=uploader
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to register FileVersion for CDE revision (doc=%s)",
+                        doc_id,
+                        exc_info=True,
+                    )
             except Exception:
                 logger.exception(
                     "Failed to cross-link CDE revision to Documents hub (revision=%s)",
