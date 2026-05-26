@@ -206,6 +206,16 @@
       "suggestion": "Используйте стандартные метрические единицы: m, m2, m3, kg, t, 式 и т.п."
     }
   },
+  "bc3": {
+    "code_required": {
+      "fail": "У позиции {ordinal} отсутствует код FIEBDC-3",
+      "suggestion": "Назначьте код FIEBDC-3 (например, E04CM040 или 01.02.01)"
+    },
+    "valid_code": {
+      "fail": "Некорректный код FIEBDC-3 '{code}' в позиции {ordinal}",
+      "suggestion": "Используйте формат FIEBDC-3: буквенно-цифровой (например, E04CM040, 01.02.01, CAP01#)"
+    }
+  },
   "pipeline": {
     "side_effecting_requires_gate": {
       "fail": "Узлы с побочными эффектами без шлюза: {nodes}",

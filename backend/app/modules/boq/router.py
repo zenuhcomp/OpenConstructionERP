@@ -2498,12 +2498,17 @@ def _build_rule_sets(
         "cpwd": "cpwd",
         "birimfiyat": "birimfiyat",
         "sekisan": "sekisan",
+        "bc3": "bc3",
     }
     std_rule = STANDARD_RULES.get(classification_standard)
     if std_rule and std_rule not in rule_sets:
         rule_sets.append(std_rule)
 
-    # Map region → additional rule sets
+    # Map region → additional rule sets. Hispanophone markets (ES + LATAM
+    # via Epic I) pick up BC3 — FIEBDC-3 is the de-facto BOQ format in
+    # Spain (AENOR-mandated for public tenders) and ~70% of LATAM. We
+    # add MasterFormat on the US-/CA-leaning LATAM markets that have
+    # historically adopted CSI classification alongside BC3.
     REGION_RULES: dict[str, list[str]] = {
         "DACH": ["gaeb", "din276"],
         "DE": ["gaeb", "din276"],
@@ -2522,6 +2527,15 @@ def _build_rule_sets(
         "JP": ["sekisan"],
         "UAE": ["nrm"],
         "GCC": ["nrm"],
+        # Epic I8: Spain + Hispanophone LATAM — BC3 first, MasterFormat
+        # second (LATAM exporters increasingly carry both classification
+        # schemes; BC3 is the source-of-truth for the tender format).
+        "ES": ["bc3", "masterformat"],
+        "MX": ["bc3", "masterformat"],
+        "AR": ["bc3", "masterformat"],
+        "CL": ["bc3", "masterformat"],
+        "CO": ["bc3", "masterformat"],
+        "PE": ["bc3", "masterformat"],
     }
     for rs in REGION_RULES.get(region.upper(), []):
         if rs not in rule_sets:

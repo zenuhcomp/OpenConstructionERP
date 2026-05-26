@@ -206,6 +206,16 @@
       "suggestion": "Use standard metric units: m, m2, m3, kg, t, 式, etc."
     }
   },
+  "bc3": {
+    "code_required": {
+      "fail": "Position {ordinal} missing FIEBDC-3 concept code",
+      "suggestion": "Assign a FIEBDC-3 code (e.g., E04CM040 or 01.02.01)"
+    },
+    "valid_code": {
+      "fail": "Invalid FIEBDC-3 code '{code}' in position {ordinal}",
+      "suggestion": "Use FIEBDC-3 alphanumeric format (e.g., E04CM040, 01.02.01, CAP01#)"
+    }
+  },
   "pipeline": {
     "side_effecting_requires_gate": {
       "fail": "Side-effecting node(s) without a gate: {nodes}",

@@ -3057,6 +3057,130 @@ class SekisanMetricUnits(ValidationRule):
         return results
 
 
+# ── BC3 / FIEBDC-3 Rules (Spain + LATAM) ────────────────────────────────
+
+
+class BC3CodeRequired(ValidationRule):
+    """Every BC3 position must have a FIEBDC-3 concept code.
+
+    BC3 ties every partida back to a concept code (``~C`` record); a
+    position without one cannot be exported back to FIEBDC-3 without
+    losing the original catalogue reference. Rule fires only when the
+    project's classification_standard is bc3 or region is ES / LATAM —
+    other regions can leave the field blank without penalty.
+    """
+
+    rule_id = "bc3.code_required"
+    name = "BC3 Concept Code Required"
+    standard = "bc3"
+    severity = Severity.ERROR
+    category = RuleCategory.COMPLIANCE
+    description = "BOQ positions should have a FIEBDC-3 concept code"
+
+    async def validate(self, context: ValidationContext) -> list[RuleResult]:
+        locale = _get_locale(context)
+        results: list[RuleResult] = []
+        for pos in _get_positions(context):
+            # Skip section rows — chapters carry their own code in ordinal.
+            if (pos.get("type") or "position") == "section":
+                continue
+            classification = pos.get("classification") or {}
+            code = classification.get("bc3_code") or classification.get("code") or ""
+            passed = bool(str(code).strip())
+            if passed:
+                message = _ok(locale)
+                suggestion = None
+            else:
+                message = translate(
+                    "bc3.code_required.fail",
+                    locale=locale,
+                    ordinal=pos.get("ordinal", "?"),
+                )
+                suggestion = translate(
+                    "bc3.code_required.suggestion",
+                    locale=locale,
+                )
+            results.append(
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    severity=self.severity,
+                    category=self.category,
+                    passed=passed,
+                    message=message,
+                    element_ref=pos.get("id"),
+                    suggestion=suggestion,
+                )
+            )
+        return results
+
+
+class BC3ValidCode(ValidationRule):
+    """FIEBDC-3 concept codes follow a hierarchical dotted/hash format.
+
+    Valid patterns (per the FIEBDC-3 specification):
+
+    * Chapter:    ``CC#`` / ``CC.CC#`` (trailing ``#`` is the chapter marker)
+    * Partida:    ``CCCC.CCCC.CCCC`` (1–4 alphanumeric segments)
+    * Resource:   ``%`` prefix (auxiliary; not normally surfaced as a BOQ row)
+
+    Codes can be alphanumeric (e.g. ``E04CM040`` is a valid common code).
+    We reject obviously malformed values (spaces, leading dots, control
+    chars) — the FIEBDC-3 spec doesn't fix a strict length, so we lean
+    on shape rather than length.
+    """
+
+    rule_id = "bc3.valid_code"
+    name = "Valid FIEBDC-3 Code Format"
+    standard = "bc3"
+    severity = Severity.WARNING
+    category = RuleCategory.COMPLIANCE
+    description = "FIEBDC-3 codes must use the canonical alphanumeric / dotted format"
+
+    _PATTERN = re.compile(r"^[A-Za-z0-9_%][A-Za-z0-9_.#%-]*$")
+
+    async def validate(self, context: ValidationContext) -> list[RuleResult]:
+        locale = _get_locale(context)
+        results: list[RuleResult] = []
+        for pos in _get_positions(context):
+            classification = pos.get("classification") or {}
+            code = str(
+                classification.get("bc3_code") or classification.get("code") or ""
+            ).strip()
+            if not code:
+                continue
+            # Reject whitespace, leading dot, and shapes the spec forbids.
+            passed = bool(self._PATTERN.match(code)) and not code.startswith(".")
+            if passed:
+                message = _ok(locale)
+                suggestion = None
+            else:
+                message = translate(
+                    "bc3.valid_code.fail",
+                    locale=locale,
+                    code=code,
+                    ordinal=pos.get("ordinal", "?"),
+                )
+                suggestion = translate(
+                    "bc3.valid_code.suggestion",
+                    locale=locale,
+                )
+            results.append(
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.name,
+                    severity=self.severity,
+                    category=self.category,
+                    passed=passed,
+                    message=message,
+                    element_ref=pos.get("id"),
+                    details={"given_code": code},
+                    suggestion=suggestion,
+                )
+            )
+        return results
+
+
 # ── Universal Additional Rules ──────────────────────────────────────────
 
 
@@ -4377,6 +4501,9 @@ def register_builtin_rules() -> None:
         # Sekisan (Japan)
         (SekisanCodeRequired(), None),
         (SekisanMetricUnits(), None),
+        # BC3 / FIEBDC-3 (Spain + LATAM)
+        (BC3CodeRequired(), None),
+        (BC3ValidCode(), None),
         # Pipeline Builder — structural graph-validity gate
         (PipelineSideEffectGated(), None),
         # Property Development (task #139)

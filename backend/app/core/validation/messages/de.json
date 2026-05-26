@@ -206,6 +206,16 @@
       "suggestion": "Standard-Metrikeinheiten verwenden: m, m2, m3, kg, t, 式 usw."
     }
   },
+  "bc3": {
+    "code_required": {
+      "fail": "Position {ordinal} ohne FIEBDC-3-Konzeptcode",
+      "suggestion": "FIEBDC-3-Code vergeben (z. B. E04CM040 oder 01.02.01)"
+    },
+    "valid_code": {
+      "fail": "Ungültiger FIEBDC-3-Code '{code}' in Position {ordinal}",
+      "suggestion": "FIEBDC-3-Format verwenden: alphanumerisch (z. B. E04CM040, 01.02.01, CAP01#)"
+    }
+  },
   "pipeline": {
     "side_effecting_requires_gate": {
       "fail": "Schreibende Knoten ohne Gate: {nodes}",
