@@ -14,6 +14,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNotificationsWebSocket } from './useNotificationsWebSocket';
 import {
   Bell,
   CheckCircle2,
@@ -187,6 +188,23 @@ export function NotificationBell() {
   });
 
   const unreadCount = unreadData?.count ?? 0;
+
+  /* Epic B / B10: sub-second push via /api/v1/notifications/ws/.
+     On a `notification.created` event we invalidate both queries so
+     the bell jumps immediately — the 30s polling cadence stays as a
+     belt-and-braces fallback for proxies that drop WS connections. */
+  useNotificationsWebSocket({
+    enabled: true,
+    onNotification: useCallback(
+      (evt) => {
+        if (evt.event === 'notification.created') {
+          queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
+          queryClient.invalidateQueries({ queryKey: ['notifications-list'] });
+        }
+      },
+      [queryClient],
+    ),
+  });
 
   /* List query only fires when the dropdown opens. The server returns the
      envelope `{items, total, unread_count}`; we tolerate the bare-array

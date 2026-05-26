@@ -185,6 +185,12 @@ const PermissionsMatrixPage = lazy(() =>
     default: m.PermissionsMatrixPage,
   })),
 );
+// Admin: Epic B / B11 — outbound notification webhook targets.
+const WebhookTargetsPage = lazy(() =>
+  import('@/features/admin/WebhookTargetsPage').then((m) => ({
+    default: m.WebhookTargetsPage,
+  })),
+);
 const ArchitectureMapPage = lazy(() =>
   import('@/features/architecture/ArchitectureMapPage').then((m) => ({ default: m.ArchitectureMapPage }))
 );
@@ -813,6 +819,7 @@ export default function App() {
         <Route path="/users" element={<P title="User Management"><UserManagementPage /></P>} />
         <Route path="/admin/audit-log" element={<P title="Audit Log"><AuditLogPage /></P>} />
         <Route path="/admin/permissions" element={<P title="Permissions Matrix"><PermissionsMatrixPage /></P>} />
+        <Route path="/admin/webhook-targets" element={<P title="Webhook Targets"><WebhookTargetsPage /></P>} />
         <Route path="/admin/validation-rules" element={<P title="Validation Rules"><ValidationRulesSettingsPage /></P>} />
         {/* Legacy redirect — moved 2026-05-23 from PropDev settings to platform-wide admin. */}
         <Route path="/property-dev/settings/validation-rules" element={<Navigate to="/admin/validation-rules" replace />} />
