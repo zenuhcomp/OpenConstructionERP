@@ -196,7 +196,7 @@ export function NotificationBell() {
   useNotificationsWebSocket({
     enabled: true,
     onNotification: useCallback(
-      (evt) => {
+      (evt: { event: string }) => {
         if (evt.event === 'notification.created') {
           queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
           queryClient.invalidateQueries({ queryKey: ['notifications-list'] });

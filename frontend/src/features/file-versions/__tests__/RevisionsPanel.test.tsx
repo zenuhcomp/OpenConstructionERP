@@ -63,11 +63,9 @@ function makeVersion(
   overrides: Partial<FileVersionResponse> & { id: string; version_number: number },
 ): FileVersionResponse {
   return {
-    id: overrides.id,
     project_id: 'proj-001',
     file_kind: 'document',
     file_id: 'file-001',
-    version_number: overrides.version_number,
     canonical_name: 'plans.pdf',
     previous_version_id: null,
     is_current: false,
