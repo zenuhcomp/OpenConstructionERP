@@ -1,6 +1,6 @@
 [project]
 name = "openconstructionerp"
-version = "5.2.3"
+version = "5.2.4"
 description = "Open-source construction cost estimation — multi-currency BOQ, AI vector matching, CAD/BIM takeoff without IfcOpenShell, resource-based cost DB import with example templates, 48 regional catalogues, 24 languages. AGPL-3.0. After install, run: openconstructionerp"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.12"
@@ -32,7 +32,11 @@ classifiers = [
 
 dependencies = [
     # Web framework
-    "fastapi>=0.115.0,<1",
+    # FastAPI 0.115.0-0.115.7 had a regression where @router.delete(status_code=204)
+    # routes with `-> None` annotation fail with AssertionError "Status code 204 must
+    # not have a response body". Floor at 0.116 forces the fix. Affected installs on
+    # 4.5.0 wheel could not start at all (issue #157).
+    "fastapi>=0.116.0,<1",
     "uvicorn[standard]>=0.32.0,<1",
     "python-multipart>=0.0.26",  # CVE-2026-40347: request smuggling via malformed multipart
     # Database (SQLite — works out of the box, no external DB needed)

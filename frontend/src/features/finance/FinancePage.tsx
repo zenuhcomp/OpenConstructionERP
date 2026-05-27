@@ -134,8 +134,12 @@ interface Payment {
   id: string;
   invoice_id: string;
   invoice_number: string;
-  amount: number;
-  currency: string;
+  // Backend serialises Decimal as string ("250000.00") per Wave 8 sweep.
+  // Accept both for back-compat with older fixtures.
+  amount: string | number;
+  // Backend field is `currency_code`; older payloads used `currency`.
+  currency?: string;
+  currency_code?: string;
   payment_date: string;
   method: string;
   reference: string;
@@ -2434,7 +2438,7 @@ function PaymentsTab({
     const total = payments.reduce((s, p) => s + Number(p.amount ?? 0), 0);
     // Currency from the payment data; undefined → MoneyDisplay uses the
     // user's preferred currency symbol (never hardcode EUR — task #217).
-    const currency = payments[0]?.currency || undefined;
+    const currency = payments[0]?.currency_code || payments[0]?.currency || undefined;
     return { total, currency };
   }, [payments]);
 
@@ -2516,7 +2520,7 @@ function PaymentsTab({
                   <DateDisplay value={p.payment_date} />
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <MoneyDisplay amount={p.amount} currency={p.currency} />
+                  <MoneyDisplay amount={p.amount} currency={p.currency_code || p.currency} />
                 </td>
                 <td className="px-4 py-3 text-content-secondary capitalize">
                   {p.method}
