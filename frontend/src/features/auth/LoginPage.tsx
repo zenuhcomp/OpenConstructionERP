@@ -514,8 +514,11 @@ export function LoginPage() {
             glass card reads against a calm canvas. The decorative show
             (orbs / mesh) lives on the marketing column on the right. */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden hidden lg:block" aria-hidden>
-          <div className="absolute inset-0 bg-white dark:bg-[#0b0d12]" />
-          <div className="absolute inset-0 bg-gradient-to-l from-white/0 via-white/60 to-white dark:from-[#0b0d12]/0 dark:via-[#0b0d12]/60 dark:to-[#0b0d12]" />
+          {/* Dark mode: use #070912 (DARKER than #0f1117 surface-primary so
+              form inputs lift visibly off the column backdrop). Previously
+              #0b0d12 — too close to input bg, made inputs invisible. */}
+          <div className="absolute inset-0 bg-white dark:bg-[#070912]" />
+          <div className="absolute inset-0 bg-gradient-to-l from-white/0 via-white/60 to-white dark:from-[#070912]/0 dark:via-[#070912]/60 dark:to-[#070912]" />
           {/* Tiny far-corner sky tint just to soften the edge - the glass
               still has something to lift off, but the field reads white. */}
           <div className="absolute -top-24 -left-24 w-[420px] h-[420px] rounded-full bg-sky-100/55 dark:bg-sky-500/12 blur-[110px]" />
@@ -715,7 +718,7 @@ export function LoginPage() {
                       type="button"
                       onClick={() => handleDemoLogin(acct.email)}
                       disabled={demoLoading !== null}
-                      className="flex w-full items-center gap-3 rounded-xl border border-border-light/50 bg-surface-secondary/50 px-3.5 py-2.5 text-left transition-all hover:border-oe-blue/40 hover:bg-oe-blue/[0.05] hover:shadow-sm disabled:opacity-50 group"
+                      className="flex w-full items-center gap-3 rounded-xl border border-border-light/50 dark:border-white/12 bg-surface-secondary/50 dark:bg-white/[0.06] px-3.5 py-2.5 text-left transition-all hover:border-oe-blue/40 hover:bg-oe-blue/[0.05] dark:hover:bg-oe-blue/[0.14] hover:shadow-sm disabled:opacity-50 group"
                     >
                       <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${acct.color} text-white text-sm font-bold shadow-sm`}>
                         {demoLoading === acct.email ? (
@@ -726,7 +729,7 @@ export function LoginPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[13px] font-semibold text-content-primary">{acct.name}</div>
-                        <div className="text-[11px] text-content-tertiary truncate">{acct.email} · {acct.role}</div>
+                        <div className="text-[11px] text-content-tertiary dark:text-content-secondary truncate">{acct.email} · {acct.role}</div>
                       </div>
                       <ChevronDown size={15} className="text-content-quaternary -rotate-90 group-hover:text-oe-blue transition-colors shrink-0" />
                     </button>
@@ -747,22 +750,22 @@ export function LoginPage() {
               target="_blank"
               rel="noopener noreferrer"
               aria-label={`${t('login.github', { defaultValue: 'GitHub' })} - ${t('login.github_sub', { defaultValue: 'Source code' })}`}
-              className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border-light/70 bg-white/75 dark:bg-surface-elevated/80 backdrop-blur-sm px-3.5 py-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/90 dark:hover:bg-surface-elevated/90 hover:border-content-primary/25 hover:shadow-lg"
+              className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border-light/70 dark:border-white/15 bg-white/75 dark:bg-white/[0.07] backdrop-blur-sm px-3.5 py-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/90 dark:hover:bg-white/[0.12] dark:hover:border-white/25 hover:border-content-primary/25 hover:shadow-lg"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-content-primary/[0.06] text-content-primary transition-colors group-hover:bg-content-primary/10">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-content-primary/[0.06] dark:bg-white/10 text-content-primary transition-colors group-hover:bg-content-primary/10 dark:group-hover:bg-white/15">
                 <Github size={17} strokeWidth={1.9} />
               </span>
               <span className="min-w-0 flex-1 leading-tight">
                 <span className="block text-[13px] font-semibold text-content-primary">
                   {t('login.github', { defaultValue: 'GitHub' })}
                 </span>
-                <span className="block truncate text-[11px] text-content-tertiary">
+                <span className="block truncate text-[11px] text-content-tertiary dark:text-content-secondary">
                   {t('login.github_sub', { defaultValue: 'Source code' })}
                 </span>
               </span>
               <ArrowUpRight
                 size={15}
-                className="shrink-0 text-content-quaternary transition-all duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-content-secondary"
+                className="shrink-0 text-content-quaternary dark:text-content-tertiary transition-all duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-content-secondary"
               />
             </a>
             <a
@@ -770,22 +773,22 @@ export function LoginPage() {
               target="_blank"
               rel="noopener noreferrer"
               aria-label={`${t('login.community', { defaultValue: 'Community' })} - ${t('login.community_sub', { defaultValue: 'Get help & discuss' })}`}
-              className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border-light/70 bg-white/75 dark:bg-surface-elevated/80 backdrop-blur-sm px-3.5 py-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/90 dark:hover:bg-surface-elevated/90 hover:border-content-primary/25 hover:shadow-lg"
+              className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border-light/70 dark:border-white/15 bg-white/75 dark:bg-white/[0.07] backdrop-blur-sm px-3.5 py-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/90 dark:hover:bg-white/[0.12] dark:hover:border-white/25 hover:border-content-primary/25 hover:shadow-lg"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-content-primary/[0.06] text-content-primary transition-colors group-hover:bg-content-primary/10">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-content-primary/[0.06] dark:bg-white/10 text-content-primary transition-colors group-hover:bg-content-primary/10 dark:group-hover:bg-white/15">
                 <Users size={17} strokeWidth={1.9} />
               </span>
               <span className="min-w-0 flex-1 leading-tight">
                 <span className="block text-[13px] font-semibold text-content-primary">
                   {t('login.community', { defaultValue: 'Community' })}
                 </span>
-                <span className="block truncate text-[11px] text-content-tertiary">
+                <span className="block truncate text-[11px] text-content-tertiary dark:text-content-secondary">
                   {t('login.community_sub', { defaultValue: 'Get help & discuss' })}
                 </span>
               </span>
               <ArrowUpRight
                 size={15}
-                className="shrink-0 text-content-quaternary transition-all duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-content-secondary"
+                className="shrink-0 text-content-quaternary dark:text-content-tertiary transition-all duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-content-secondary"
               />
             </a>
           </div>

@@ -16,10 +16,12 @@ import {
   FileText,
   ClipboardList,
   Activity,
+  Eye,
+  X,
 } from 'lucide-react';
 import { Breadcrumb, Button, Card, CardContent, EmptyState, Skeleton } from '@/shared/ui';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
-import { apiGet, apiPost } from '@/shared/lib/api';
+import { apiGet, apiPost, API_BASE, getAuthToken, ApiError } from '@/shared/lib/api';
 import { projectsApi, type Project } from '@/features/projects/api';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
@@ -1126,6 +1128,10 @@ function ReportsTab({ project }: { project?: Project }) {
   const [templatesError, setTemplatesError] = useState(false);
   const [reportsError, setReportsError] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
+  // W23 P0 (#252): viewer state — opens the rendered HTML from the
+  // /reports/{id}/content endpoint in a modal so users can finally
+  // read the generated body instead of staring at a row that does nothing.
+  const [viewing, setViewing] = useState<GeneratedReport | null>(null);
 
   const projectId = project?.id;
 
@@ -1311,6 +1317,7 @@ function ReportsTab({ project }: { project?: Project }) {
                     <th className="px-4 py-3">{t('reporting.report_type', { defaultValue: 'Type' })}</th>
                     <th className="px-4 py-3">{t('reporting.report_format', { defaultValue: 'Format' })}</th>
                     <th className="px-4 py-3">{t('reporting.report_generated_at', { defaultValue: 'Generated' })}</th>
+                    <th className="px-4 py-3 text-right">{t('reporting.actions', { defaultValue: 'Actions' })}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1323,6 +1330,20 @@ function ReportsTab({ project }: { project?: Project }) {
                         <td className="px-4 py-3 text-content-secondary">{r.report_type}</td>
                         <td className="px-4 py-3 text-content-secondary uppercase">{r.format}</td>
                         <td className="px-4 py-3 text-content-secondary">{ts}</td>
+                        <td className="px-4 py-3 text-right">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setViewing(r)}
+                            aria-label={t('reporting.view_report_aria', {
+                              defaultValue: 'View report: {{title}}',
+                              title: r.title,
+                            })}
+                          >
+                            <Eye size={14} className="mr-1" />
+                            {t('reporting.view', { defaultValue: 'View' })}
+                          </Button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -1332,6 +1353,256 @@ function ReportsTab({ project }: { project?: Project }) {
           )}
         </CardContent>
       </Card>
+
+      {viewing && (
+        <ReportViewerModal report={viewing} onClose={() => setViewing(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ── Report viewer modal — renders the HTML body inside a sandboxed iframe ─ */
+
+/**
+ * Modal viewer for a generated report.
+ *
+ * Fetches the rendered HTML from ``/v1/reporting/reports/{id}/content`` (the
+ * endpoint added in the W23 P0 backend fix for #252) and pipes the body into
+ * a sandboxed ``<iframe srcDoc>``. Sandboxing is mandatory — the renderer
+ * already HTML-escapes user-supplied values but defence-in-depth keeps a
+ * future renderer regression from turning into a stored-XSS hole.
+ *
+ * Loading / 410-not-yet-rendered / 404 / generic-error states all surface
+ * distinct messages so the user knows whether to wait, regenerate, or
+ * complain to support.
+ */
+function ReportViewerModal({
+  report,
+  onClose,
+}: {
+  report: GeneratedReport;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [html, setHtml] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorKind, setErrorKind] = useState<'not_rendered' | 'not_found' | 'network' | null>(null);
+
+  // Fetch the rendered HTML body. We bypass apiGet because it always parses
+  // JSON — this endpoint returns text/html.
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setErrorKind(null);
+      try {
+        const token = getAuthToken();
+        const res = await fetch(
+          `${API_BASE}/v1/reporting/reports/${report.id}/content`,
+          {
+            method: 'GET',
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              Accept: 'text/html',
+              'X-DDC-Client': 'OE/1.0',
+            },
+            signal: controller.signal,
+          },
+        );
+        if (cancelled) return;
+        if (res.status === 410) {
+          setErrorKind('not_rendered');
+          setLoading(false);
+          return;
+        }
+        if (res.status === 404) {
+          setErrorKind('not_found');
+          setLoading(false);
+          return;
+        }
+        if (!res.ok) {
+          setErrorKind('network');
+          setLoading(false);
+          return;
+        }
+        const body = await res.text();
+        if (!cancelled) {
+          setHtml(body);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError) {
+          setErrorKind('network');
+        } else if (err instanceof DOMException && err.name === 'AbortError') {
+          // Component unmounted — silently ignore.
+          return;
+        } else {
+          setErrorKind('network');
+        }
+        setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [report.id]);
+
+  // Escape key closes the modal — matches the rest of the app's modals.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="report-viewer-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8"
+    >
+      <button
+        type="button"
+        aria-label={t('common.close', { defaultValue: 'Close' })}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
+      />
+      <div className="relative flex h-full max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border-light bg-surface-primary shadow-2xl animate-scale-in">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 border-b border-border-light px-5 py-3">
+          <div className="min-w-0">
+            <h2
+              id="report-viewer-title"
+              className="truncate text-base font-semibold text-content-primary"
+            >
+              {report.title}
+            </h2>
+            <p className="truncate text-xs text-content-secondary">
+              {report.report_type} · {report.format?.toUpperCase()}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                // Open the same URL in a fresh tab so users can use the
+                // browser's native Print / Save-As-PDF flow.
+                const token = getAuthToken();
+                // We can't easily send Authorization on a window.open(),
+                // but the auth cookie (when present) covers the case.
+                // For Bearer-only auth we copy the URL to clipboard as
+                // a graceful fallback.
+                const url = `${API_BASE}/v1/reporting/reports/${report.id}/content`;
+                if (token) {
+                  // Trigger a fetch + blob URL so we can carry the Authorization.
+                  fetch(url, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  })
+                    .then((r) => (r.ok ? r.blob() : Promise.reject(r)))
+                    .then((blob) => {
+                      const objUrl = URL.createObjectURL(blob);
+                      window.open(objUrl, '_blank', 'noopener,noreferrer');
+                      // Revoke after a delay so the new tab has time to load.
+                      setTimeout(() => URL.revokeObjectURL(objUrl), 30_000);
+                    })
+                    .catch(() => {
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                    });
+                } else {
+                  window.open(url, '_blank', 'noopener,noreferrer');
+                }
+              }}
+              disabled={loading || !!errorKind}
+              aria-label={t('reporting.open_in_new_tab', { defaultValue: 'Open in new tab' })}
+            >
+              {t('reporting.open_in_new_tab', { defaultValue: 'Open in new tab' })}
+            </Button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t('common.close', { defaultValue: 'Close' })}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary transition-colors hover:bg-surface-secondary hover:text-content-primary"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-hidden bg-surface-secondary">
+          {loading && (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-content-secondary">
+              <Loader2 size={28} className="animate-spin" />
+              <p className="text-sm">
+                {t('reporting.loading_report', { defaultValue: 'Loading report…' })}
+              </p>
+            </div>
+          )}
+
+          {!loading && errorKind === 'not_rendered' && (
+            <div
+              role="alert"
+              className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center"
+            >
+              <Clock size={36} className="text-amber-500" />
+              <p className="max-w-md text-sm text-content-secondary">
+                {t('reporting.report_not_rendered', {
+                  defaultValue:
+                    'This report has been queued but no body has been rendered yet. Re-generate it from the templates list above.',
+                })}
+              </p>
+            </div>
+          )}
+
+          {!loading && errorKind === 'not_found' && (
+            <div
+              role="alert"
+              className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center"
+            >
+              <AlertTriangle size={36} className="text-red-500" />
+              <p className="max-w-md text-sm text-content-secondary">
+                {t('reporting.report_not_found', {
+                  defaultValue:
+                    'This report was not found. It may have been deleted by another user.',
+                })}
+              </p>
+            </div>
+          )}
+
+          {!loading && errorKind === 'network' && (
+            <div
+              role="alert"
+              className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center"
+            >
+              <AlertTriangle size={36} className="text-red-500" />
+              <p className="max-w-md text-sm text-content-secondary">
+                {t('reporting.report_load_failed', {
+                  defaultValue:
+                    'Could not load the report body. Check your connection and try again.',
+                })}
+              </p>
+            </div>
+          )}
+
+          {!loading && !errorKind && html != null && (
+            <iframe
+              // Sandbox: forbid scripts, top-navigation, popups, form submission.
+              // The renderer already escapes user input but defence-in-depth
+              // matters — a future regression should NOT turn into XSS.
+              sandbox=""
+              srcDoc={html}
+              title={report.title}
+              className="h-full w-full border-0 bg-white"
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -12,7 +12,9 @@ defaults can stringify-without-rounding nondeterministically.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class _Widget(BaseModel):
@@ -362,6 +364,136 @@ class RollupResponse(BaseModel):
     project_count: int = 0
 
 
+# ── Widget-config request schemas (used by POST /rollup with body) ─────────
+#
+# The legacy ``GET /rollup/?widgets=…`` query-string flow takes a flat list
+# of widget ids with no per-widget overrides. The richer config-aware path
+# accepts a list of ``WidgetConfigItem``s instead so the caller can ask for,
+# e.g., ``{"widget_id": "boq_summary", "config": {"max_by_project": 25}}``.
+#
+# The 422-path is enforced here in Pydantic (rather than in the router) so
+# the OpenAPI schema documents which keys + value bounds are accepted per
+# widget. The error messages match the patterns ``tests/unit/test_dashboard_
+# rollup.py::TestWidgetConfigValidation`` checks.
+
+# Map widget_id → ``{config_key: (type, min, max)}``. ``type`` is the
+# Python type the value must coerce to; ``min`` / ``max`` are inclusive
+# bounds (``None`` to skip the bound).
+_WIDGET_CONFIG_SPEC: dict[str, dict[str, tuple[type, Any, Any]]] = {
+    "boq_summary": {
+        "show_last_boq": (bool, None, None),
+        "max_by_project": (int, 1, 500),
+    },
+    "validation_score": {
+        "target_score": (float, 0.0, 1.0),
+    },
+    "clash_health": {},
+    "schedule_critical": {
+        "lookahead_days": (int, 1, 365),
+    },
+    "risk_top": {
+        "limit": (int, 1, 100),
+    },
+    "hse_scorecard": {},
+    "procurement_pipeline": {},
+    "budget_variance": {},
+    "change_orders": {
+        "limit": (int, 1, 100),
+    },
+    "weather_site": {},
+}
+
+_KNOWN_CONFIG_WIDGETS: frozenset[str] = frozenset(_WIDGET_CONFIG_SPEC)
+
+
+class WidgetConfigItem(BaseModel):
+    """One ``(widget_id, config)`` pair from a config-aware rollup request.
+
+    Validates two layers:
+      * ``widget_id`` is one of the known configurable widgets (10 of them).
+      * Every key in ``config`` is allowed for that widget, with the right
+        type and within the documented bounds. Unknown keys reject — we
+        don't silently drop them because that has historically caused
+        silent regressions when a config key was renamed.
+    """
+
+    widget_id: str
+    config: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("widget_id")
+    @classmethod
+    def _validate_widget_id(cls, v: str) -> str:
+        if v not in _KNOWN_CONFIG_WIDGETS:
+            allowed = ", ".join(sorted(_KNOWN_CONFIG_WIDGETS))
+            raise ValueError(f"Unknown widget_id {v!r}. Allowed: {allowed}")
+        return v
+
+    @field_validator("config")
+    @classmethod
+    def _validate_config(cls, v: dict[str, Any], info: Any) -> dict[str, Any]:
+        widget_id = info.data.get("widget_id")
+        if widget_id is None or widget_id not in _WIDGET_CONFIG_SPEC:
+            # widget_id either failed its own validation or is unknown;
+            # leave the config alone and let the widget_id error surface.
+            return v
+        spec = _WIDGET_CONFIG_SPEC[widget_id]
+        if not v:
+            # Empty config is always valid — no per-widget defaults to apply.
+            return v
+        for key, value in v.items():
+            if key not in spec:
+                allowed = ", ".join(sorted(spec)) or "(none)"
+                raise ValueError(
+                    f"Unknown config key {key!r} for widget_id={widget_id!r}. "
+                    f"Allowed: {allowed}"
+                )
+            expected_type, lo, hi = spec[key]
+            # bool is a subclass of int in Python, so check it first.
+            if expected_type is bool:
+                if not isinstance(value, bool):
+                    raise ValueError(
+                        f"Config value for {widget_id!r}.{key!r} must be bool"
+                    )
+                continue
+            if expected_type is int:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ValueError(
+                        f"Config value for {widget_id!r}.{key!r} must be int"
+                    )
+                if lo is not None and hi is not None and not (lo <= value <= hi):
+                    raise ValueError(
+                        f"Config value for {widget_id!r}.{key!r} must be "
+                        f"between {lo} and {hi}"
+                    )
+                continue
+            if expected_type is float:
+                if isinstance(value, bool) or not isinstance(value, int | float):
+                    raise ValueError(
+                        f"Config value for {widget_id!r}.{key!r} must be float"
+                    )
+                fval = float(value)
+                if lo is not None and hi is not None and not (lo <= fval <= hi):
+                    raise ValueError(
+                        f"Config value for {widget_id!r}.{key!r} must be "
+                        f"between {lo} and {hi}"
+                    )
+                continue
+        return v
+
+
+class RollupRequest(BaseModel):
+    """Config-aware rollup request body (POST flavour).
+
+    Accepts a list of ``WidgetConfigItem``s instead of a CSV string of
+    widget ids. The GET endpoint stays the canonical "fast path"; this
+    request body is reserved for callers that need per-widget overrides
+    (e.g. the dashboard customisation panel).
+    """
+
+    widget_configs: list[WidgetConfigItem] = Field(default_factory=list)
+    project_ids: list[str] | None = None
+
+
 __all__ = [
     "BOQByProject",
     "BOQSummaryPayload",
@@ -392,9 +524,11 @@ __all__ = [
     "ProjectVariationsPayload",
     "RiskItem",
     "RiskTopPayload",
+    "RollupRequest",
     "RollupResponse",
     "ScheduleCriticalPayload",
     "ValidationByProject",
     "ValidationScorePayload",
     "WeatherSitePayload",
+    "WidgetConfigItem",
 ]
