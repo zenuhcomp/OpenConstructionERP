@@ -27,7 +27,7 @@ import {
   WideModalField,
 } from '@/shared/ui/WideModal';
 import { useConfirm } from '@/shared/hooks/useConfirm';
-import { apiGet, apiPost, apiPatch } from '@/shared/lib/api';
+import { apiGet, apiPost, apiPatch, getAuthToken, triggerDownload } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { BidComparisonChart } from './BidComparisonChart';
@@ -854,16 +854,47 @@ function PackageDetail({
     return recommend(comparison.bid_totals);
   }, [comparison]);
 
-  const handleDownloadPdf = useCallback(() => {
-    // Open the protected endpoint in a new tab — apiGet is JSON-only,
-    // so a plain link works (browser carries the auth cookie / Bearer).
-    window.open(`/api/v1/tendering/packages/${packageId}/export/pdf/`, '_blank');
-  }, [packageId]);
+  // Authenticated file download — ``window.open`` would lose the Bearer
+  // token (JWT lives in localStorage, not a cookie) and silently 401 in a
+  // blank tab. We fetch with the auth header, then trigger a regular
+  // anchor-based download (Wave 12 audit fix).
+  const handleDownloadPdf = useCallback(async () => {
+    try {
+      const token = getAuthToken();
+      const r = await fetch(
+        `/api/v1/tendering/packages/${packageId}/export/pdf/`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      if (!r.ok) {
+        addToast({ type: 'error', title: t('tendering.export_failed', { defaultValue: 'Export failed' }) });
+        return;
+      }
+      const blob = await r.blob();
+      const name = pkg?.name?.replace(/[^a-z0-9_-]+/gi, '_') || 'tender';
+      triggerDownload(blob, `${name}.pdf`);
+    } catch {
+      addToast({ type: 'error', title: t('tendering.export_failed', { defaultValue: 'Export failed' }) });
+    }
+  }, [packageId, pkg?.name, addToast, t]);
 
-  const handleDownloadGaeb = useCallback(() => {
+  const handleDownloadGaeb = useCallback(async () => {
     if (!pkg?.boq_id) return;
-    window.open(`/api/v1/boq/boqs/${pkg.boq_id}/export/gaeb`, '_blank');
-  }, [pkg?.boq_id]);
+    try {
+      const token = getAuthToken();
+      const r = await fetch(`/api/v1/boq/boqs/${pkg.boq_id}/export/gaeb/`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!r.ok) {
+        addToast({ type: 'error', title: t('tendering.export_failed', { defaultValue: 'Export failed' }) });
+        return;
+      }
+      const blob = await r.blob();
+      const name = pkg?.name?.replace(/[^a-z0-9_-]+/gi, '_') || 'tender';
+      triggerDownload(blob, `${name}.xml`);
+    } catch {
+      addToast({ type: 'error', title: t('tendering.export_failed', { defaultValue: 'Export failed' }) });
+    }
+  }, [pkg?.boq_id, pkg?.name, addToast, t]);
 
   if (pkgLoading || (!pkg && !pkgError)) {
     return (
@@ -1001,13 +1032,22 @@ function PackageDetail({
         </div>
       </Card>
 
-      {/* Sub-tab strip — RIB iTWO-style: bids ↔ addenda ↔ leveling */}
+      {/* Sub-tab strip — RIB iTWO-style: bids ↔ addenda ↔ leveling.
+          Addenda and Leveling are hidden until their backend routes ship
+          (the matching ``/addenda/`` and ``/leveling-matrix/`` endpoints
+          do not exist on tendering/router.py yet — Wave 12 audit found
+          the tabs were silently 404-ing). Set ``VITE_TENDERING_ADDENDA``
+          / ``VITE_TENDERING_LEVELING`` to ``"1"`` to opt-in for QA. */}
       <div className="flex items-center gap-1 border-b border-border-light">
         {([
-          { id: 'bids', label: t('tendering.tab_bids', 'Bids & Comparison') },
-          { id: 'addenda', label: t('tendering.tab_addenda', 'Addenda') },
-          { id: 'leveling', label: t('tendering.tab_leveling', 'Leveling') },
-        ] as const).map((tab) => (
+          { id: 'bids' as const, label: t('tendering.tab_bids', 'Bids & Comparison') },
+          ...(import.meta.env.VITE_TENDERING_ADDENDA === '1'
+            ? [{ id: 'addenda' as const, label: t('tendering.tab_addenda', 'Addenda') }]
+            : []),
+          ...(import.meta.env.VITE_TENDERING_LEVELING === '1'
+            ? [{ id: 'leveling' as const, label: t('tendering.tab_leveling', 'Leveling') }]
+            : []),
+        ]).map((tab) => (
           <button
             key={tab.id}
             type="button"

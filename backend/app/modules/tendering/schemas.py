@@ -4,12 +4,20 @@ Defines create, update, and response schemas for tender packages and bids.
 v3 §10 — money fields are Decimal-as-string in JSON.
 """
 
+import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+
+
+# Pragmatic email regex — RFC 5322 is impractical to validate at the
+# schema layer, so we apply the same shape check the frontend ``type=email``
+# input uses (HTML5 living standard). Empty string stays valid because the
+# field is optional on a bid (Wave 12 audit added validation).
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 # ── v3 §10 money serialisation helper ─────────────────────────────────────
@@ -59,7 +67,14 @@ class PackageUpdate(BaseModel):
 
 
 class PackageResponse(BaseModel):
-    """Tender package returned from the API."""
+    """Tender package returned from the API.
+
+    ``validation_alias='metadata_'`` lets the model read the ORM column
+    named ``metadata_`` while emitting the canonical ``metadata`` key on
+    the wire. FastAPI defaults ``response_model_by_alias=True``, which
+    used to leak ``metadata_`` to the frontend — the frontend reads
+    ``metadata`` and was getting ``undefined`` (Wave 12 audit).
+    """
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -70,7 +85,7 @@ class PackageResponse(BaseModel):
     description: str
     status: str
     deadline: str | None
-    metadata: dict[str, Any] = Field(default_factory=dict, alias="metadata_")
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
     bid_count: int = 0
@@ -120,6 +135,16 @@ class BidCreate(BaseModel):
     line_items: list[BidLineItem] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("contact_email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        # Optional field — empty stays empty. Anything non-empty must look
+        # like an email so we don't accept garbage strings the buyer can
+        # later try to send notifications to (Wave 12 audit).
+        if v and not _EMAIL_RE.match(v):
+            raise ValueError("contact_email must be a valid email address")
+        return v
+
 
 class BidUpdate(BaseModel):
     """Partial update for a bid."""
@@ -135,6 +160,13 @@ class BidUpdate(BaseModel):
     notes: str | None = None
     line_items: list[BidLineItem] | None = None
     metadata: dict[str, Any] | None = None
+
+    @field_validator("contact_email")
+    @classmethod
+    def _check_email(cls, v: str | None) -> str | None:
+        if v and not _EMAIL_RE.match(v):
+            raise ValueError("contact_email must be a valid email address")
+        return v
 
 
 class BidResponse(BaseModel):
@@ -152,7 +184,9 @@ class BidResponse(BaseModel):
     status: str
     notes: str
     line_items: list[dict[str, Any]]
-    metadata: dict[str, Any] = Field(default_factory=dict, alias="metadata_")
+    # See PackageResponse.metadata for why this uses ``validation_alias``
+    # rather than ``alias`` (Wave 12 audit fix).
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
 
