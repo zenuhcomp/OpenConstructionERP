@@ -11,6 +11,7 @@ Stateless service layer. Handles:
 import asyncio  # noqa: F401 - reload trigger
 import hashlib
 import logging
+import os
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -171,6 +172,21 @@ async def _audit_last_login(
 
 
 # ── Service class ──────────────────────────────────────────────────────────
+
+
+# Whitelist of seeded demo accounts. Must mirror the same set in
+# ``backend/app/modules/users/router.py:_DEMO_EMAIL_WHITELIST`` and
+# ``backend/app/main.py:_seed_demo_account``. The integration test
+# ``test_demo_login_endpoint.py`` asserts router and seeder stay in sync;
+# this duplicate exists so ``login()`` can route demo logins without
+# importing from router (which would create a circular import).
+_DEMO_EMAIL_WHITELIST: frozenset[str] = frozenset(
+    {
+        "demo@openestimator.io",
+        "estimator@openestimator.io",
+        "manager@openestimator.io",
+    }
+)
 
 
 class UserService:
@@ -356,7 +372,29 @@ class UserService:
         """Authenticate user and return JWT tokens.
 
         Raises HTTPException 401 on invalid credentials.
+
+        Demo-account UX shortcut: if the email matches one of the seeded
+        demo accounts and ``SEED_DEMO`` is enabled (default on community /
+        self-host installs, disabled in production), we route through
+        ``demo_login`` — which issues tokens without verifying the
+        password. Why: BUG-D01 randomised demo passwords per install for
+        security, but users who typed the documented ``DemoPass1234!``
+        into the manual form got 401 "Invalid email or password" because
+        the stored hash was now a ``secrets.token_urlsafe(16)`` instead.
+        Keeping demo emails password-free in the manual path makes the
+        documented credentials JustWork without reintroducing a
+        hardcoded password into ``main.py`` (the source-grep test in
+        ``test_demo_credentials.py`` stays green). Production installs
+        set ``SEED_DEMO=false`` so this shortcut is dead code there.
         """
+        email_norm = (data.email or "").strip().lower()
+        if (
+            email_norm in _DEMO_EMAIL_WHITELIST
+            and os.environ.get("SEED_DEMO", "true").lower()
+            not in ("false", "0", "no")
+        ):
+            return await self.demo_login(email_norm)
+
         user = await self.user_repo.get_by_email(data.email)
 
         if user is None:
