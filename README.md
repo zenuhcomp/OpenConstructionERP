@@ -4,6 +4,8 @@
 
 ### The #1 open-source workspace for construction project management
 
+**Like WordPress for construction companies** — pick modules from the marketplace, drop in your own, or replace ours with custom-built ones. Same plug-and-play model, but for BOQ, scheduling, cost control, BIM, and tendering.
+
 Professional BOQ, 4D scheduling, 5D cost model, and tendering — all in one open-source platform.
 
 [▶ Watch the 12-min walkthrough](https://www.youtube.com/watch?v=X06cIaroAeI) · [Demo](https://openconstructionerp.com) · [Documentation](https://openconstructionerp.com/docs) · [Discussions](https://t.me/datadrivenconstruction) · [Report Bug](https://github.com/datadrivenconstruction/OpenConstructionERP/issues)

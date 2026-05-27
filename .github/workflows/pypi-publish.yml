@@ -94,11 +94,31 @@ jobs:
           print(f'wheel OK: {whl} — {len(files)} files, _frontend_dist present')
           PY
 
-      - name: Publish to PyPI (Trusted Publishing — no token)
+      - name: Detect publish mode
+        id: pubmode
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -n "${PYPI_API_TOKEN:-}" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+            echo "Publishing via API token (PYPI_API_TOKEN secret present)."
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "Publishing via Trusted Publishing (OIDC)."
+          fi
+
+      - name: Publish to PyPI (Trusted Publishing)
+        if: steps.pubmode.outputs.has_token == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
-          # No `password` field — Trusted Publishing handles auth via OIDC.
-          # If the PyPI side hasn't been configured yet, this step fails
-          # with a clear error pointing to the pending-publisher flow.
           verbose: true
+
+      - name: Publish to PyPI (API token fallback)
+        if: steps.pubmode.outputs.has_token == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          verbose: true
+          attestations: false
