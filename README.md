@@ -2,11 +2,22 @@
 
 # OpenConstructionERP
 
-**Open-source ERP for construction estimation and project management**
+### The #1 open-source workspace for construction project management
 
-Professional BOQ, 4D/5D planning, AI-powered estimation, CAD/BIM takeoff — all in one platform.
+Professional BOQ, 4D scheduling, 5D cost model, and tendering — all in one open-source platform.
 
 [▶ Watch the 12-min walkthrough](https://www.youtube.com/watch?v=X06cIaroAeI) · [Demo](https://openconstructionerp.com) · [Documentation](https://openconstructionerp.com/docs) · [Discussions](https://t.me/datadrivenconstruction) · [Report Bug](https://github.com/datadrivenconstruction/OpenConstructionERP/issues)
+
+<table>
+<tr>
+<td align="center" width="16.66%"><b>55K+</b><br/><sub>cost items</sub></td>
+<td align="center" width="16.66%"><b>24</b><br/><sub>languages</sub></td>
+<td align="center" width="16.66%"><b>48</b><br/><sub>regions</sub></td>
+<td align="center" width="16.66%"><b>6</b><br/><sub>CAD formats</sub></td>
+<td align="center" width="16.66%"><b>100+</b><br/><sub>modules</sub></td>
+<td align="center" width="16.66%"><b>12</b><br/><sub>sections</sub></td>
+</tr>
+</table>
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Version](https://img.shields.io/github/v/release/datadrivenconstruction/OpenConstructionERP?label=version&color=green&v=5.2.7)](https://github.com/datadrivenconstruction/OpenConstructionERP/releases/latest)
