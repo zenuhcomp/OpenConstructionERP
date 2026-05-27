@@ -9,8 +9,8 @@ Professional BOQ, 4D/5D planning, AI-powered estimation, CAD/BIM takeoff — all
 [▶ Watch the 12-min walkthrough](https://www.youtube.com/watch?v=X06cIaroAeI) · [Demo](https://openconstructionerp.com) · [Documentation](https://openconstructionerp.com/docs) · [Discussions](https://t.me/datadrivenconstruction) · [Report Bug](https://github.com/datadrivenconstruction/OpenConstructionERP/issues)
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
-[![Version](https://img.shields.io/github/v/release/datadrivenconstruction/OpenConstructionERP?label=version&color=green&v=5.2.5)](https://github.com/datadrivenconstruction/OpenConstructionERP/releases/latest)
-[![PyPI](https://img.shields.io/pypi/v/openconstructionerp?color=informational&label=pypi&v=5.2.5)](https://pypi.org/project/openconstructionerp/)
+[![Version](https://img.shields.io/github/v/release/datadrivenconstruction/OpenConstructionERP?label=version&color=green&v=5.2.6)](https://github.com/datadrivenconstruction/OpenConstructionERP/releases/latest)
+[![PyPI](https://img.shields.io/pypi/v/openconstructionerp?color=informational&label=pypi&v=5.2.6)](https://pypi.org/project/openconstructionerp/)
 [![Downloads (pepy · per month)](https://static.pepy.tech/personalized-badge/openconstructionerp?period=month&units=international_system&left_color=grey&right_color=blue&left_text=downloads%20(pepy%20%C2%B7%20per%20month))](https://pepy.tech/project/openconstructionerp)
 [![Stars](https://img.shields.io/github/stars/datadrivenconstruction/OpenConstructionERP?style=flat&logo=github)](https://github.com/datadrivenconstruction/OpenConstructionERP/stargazers)
 <br/>
@@ -137,7 +137,43 @@ Star OpenConstructionERP on GitHub and be instantly notified of new releases.
 
 ---
 
-## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/sparkle-fill-dark.svg"><img src="docs/readme-icons/sparkle-fill-light.svg" width="14" align="center" alt=""></picture> What's New in v5.2.5 — International BOQ + Universal audit trail + Install-crash fix
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/sparkle-fill-dark.svg"><img src="docs/readme-icons/sparkle-fill-light.svg" width="14" align="center" alt=""></picture> What's New in v5.2.6 — Login fix (BUG-D02) + WCAG-AA contrast + Reporting renderer + Dashboard rollup + 1197 JA keys
+
+**v5.2.6** is a quality-of-life wave on top of v5.2.5's install-crash fix. The headline change is **demo login works again from the manual form** — BUG-D01 had randomised the demo password per install for security, but everyone who typed the documented `DemoPass1234!` got 401. The new path short-circuits whitelisted demo emails through the password-free `demo_login` service when `SEED_DEMO=true` (default on community / self-host, off in production). The button + manual form + documented credential all work in one step now.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/log-dark.svg"><img src="docs/readme-icons/log-light.svg" width="14" align="center" alt=""></picture> BUG-D02 — Demo login JustWorks**
+Manual login form accepts the documented `DemoPass1234!` for the three seeded demo emails (`demo@`, `estimator@`, `manager@`) without checking the bcrypt hash. Production installs (`SEED_DEMO=false`) fall back to the normal verify path — no security regression. Whitelist sync test now covers router + service + seeder. 76 unit + 6 integration tests green.
+
+**<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/checks-dark.svg"><img src="docs/readme-icons/checks-light.svg" width="14" align="center" alt=""></picture> #216 — WCAG-AA contrast tokens**
+Five semantic tokens (success / warning / error / info / blue-subtle) raised from sub-3:1 to 5.2–6.6:1 against their token backgrounds. Estimated **~700 of 863** axe-flagged contrast violations resolved at the design-system layer — no per-component patching. Apple Liquid button palette preserved; new `--oe-*-vivid` tokens keep saturated hues available for dots / status pips.
+
+**<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/sparkle-dark.svg"><img src="docs/readme-icons/sparkle-light.svg" width="14" align="center" alt=""></picture> #252 — Reporting renderer (built from scratch)**
+`POST /reports/generate` previously stored a row but rendered nothing; the engine never existed. `ReportRenderer` (stdlib-only, no Jinja/WeasyPrint) now dispatches section types, escapes HTML, formats list-of-dicts as tables. New `GET /reports/{id}/content` returns rendered HTML. 7 new pytest cases + 38 existing reporting tests pass = 45/45.
+
+</td>
+<td width="50%" valign="top">
+
+**<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/zap-dark.svg"><img src="docs/readme-icons/zap-light.svg" width="14" align="center" alt=""></picture> #253 — ProjectWidgets → /dashboard/rollup/**
+Project-detail page used to fan out 8 parallel widget requests on every paint. Now a single `/dashboard/rollup/?widgets=…` call feeds all 8 via a React context. Rollup endpoint grew from 10 → 18 known widget keys (additive — existing endpoints untouched). 5 widgets still standalone because their backend endpoints don't exist yet (graceful-null today). Mirrors VPS-502-mid-run mitigation memory note.
+
+**<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/globe-dark.svg"><img src="docs/readme-icons/globe-light.svg" width="14" align="center" alt=""></picture> #245 — JA locale: 1197 keys translated**
+High-traffic surfaces covered: nav, sidebar admin grid, common buttons (Save / Cancel / Delete / …), validation messages, BOQ jargon (内訳明細書 / Position / Section / Resource / Assembly), project widgets, finance, procurement, match-elements. Acronyms (BOQ / IFC / BIM / GAEB / DIN) stay in Latin. ~529 long-tail keys (multi-sentence tooltips / onboarding paragraphs) deferred to a focused next pass.
+
+**<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/broadcast-dark.svg"><img src="docs/readme-icons/broadcast-light.svg" width="14" align="center" alt=""></picture> Latest alembic head**: `v3144` (unchanged from v5.2.5) — single-head invariant maintained.
+
+</td>
+</tr>
+</table>
+
+See the [latest release](https://github.com/datadrivenconstruction/OpenConstructionERP/releases/latest) and the [CHANGELOG](CHANGELOG.md) for the per-release breakdown.
+
+---
+
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/log-dark.svg"><img src="docs/readme-icons/log-light.svg" width="14" align="center" alt=""></picture> What's New in v5.2.5 — International BOQ + Universal audit trail + Install-crash fix
 
 The **v5.2.x** line graduates the platform to **116 modules** with three foundation epics from the Deep-Coordination initiative, plus **Epic I — International BOQ** for worldwide tender formats. **v5.2.5** specifically unblocks fresh `pip install` — the previous 4.5.0 wheel on PyPI crashed at startup because of a FastAPI 0.115.x regression on `@router.delete(status_code=204)` routes, and v5.2.5 pins `fastapi>=0.116`. Everyone stuck on 4.5.0 can now simply `pip install --upgrade openconstructionerp`.
 
