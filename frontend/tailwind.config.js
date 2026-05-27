@@ -33,12 +33,16 @@ export default {
         semantic: {
           success: 'var(--oe-success)',
           'success-bg': 'var(--oe-success-bg)',
+          'success-vivid': 'var(--oe-success-vivid)',
           warning: 'var(--oe-warning)',
           'warning-bg': 'var(--oe-warning-bg)',
+          'warning-vivid': 'var(--oe-warning-vivid)',
           error: 'var(--oe-error)',
           'error-bg': 'var(--oe-error-bg)',
+          'error-vivid': 'var(--oe-error-vivid)',
           info: 'var(--oe-info)',
           'info-bg': 'var(--oe-info-bg)',
+          'info-vivid': 'var(--oe-info-vivid)',
         },
       },
       fontFamily: {
