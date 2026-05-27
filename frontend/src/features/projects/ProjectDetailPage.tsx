@@ -1594,71 +1594,60 @@ export function ProjectDetailPage() {
           ``useGracefulQuery`` — adding them to the rollup would require
           new backend endpoints. */}
       <ProjectWidgetsRollupProvider projectId={projectId!}>
-        {!isWidgetHidden('rfi-inbox') && (
-          <div className="mb-4">
+        {/* Responsive widget grid: 1 col mobile, 2 cols sm, 3 cols lg.
+            Wide widgets (schedule strip, budget burn, photo strip, activity
+            feed, AI insights, recent files) span 2 cells on lg+ because
+            their content (timeline, history bars, photo carousel, log
+            feed) reads poorly cramped into a single column. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4 items-start">
+          {!isWidgetHidden('rfi-inbox') && (
             <RFIInboxWidget projectId={projectId!} />
-          </div>
-        )}
-        {!isWidgetHidden('change-orders') && (
-          <div className="mb-4">
+          )}
+          {!isWidgetHidden('change-orders') && (
             <ChangeOrdersPulseWidget projectId={projectId!} currency={currency} />
-          </div>
-        )}
-        {!isWidgetHidden('daily-diary') && (
-          <div className="mb-4">
+          )}
+          {!isWidgetHidden('daily-diary') && (
             <DailyDiaryWidget projectId={projectId!} />
-          </div>
-        )}
-        {!isWidgetHidden('hse-incidents') && (
-          <div className="mb-4">
+          )}
+          {!isWidgetHidden('hse-incidents') && (
             <HSEIncidentsWidget projectId={projectId!} />
-          </div>
-        )}
-        {!isWidgetHidden('variations') && (
-          <div className="mb-4">
+          )}
+          {!isWidgetHidden('variations') && (
             <VariationsWidget projectId={projectId!} currency={currency} />
-          </div>
-        )}
-        {!isWidgetHidden('schedule-strip') && (
-          <div className="mb-4">
-            <ScheduleStripWidget projectId={projectId!} />
-          </div>
-        )}
-        {!isWidgetHidden('budget-burn') && (
-          <div className="mb-4">
-            <BudgetBurnWidget projectId={projectId!} currency={currency} />
-          </div>
-        )}
-        {!isWidgetHidden('quality-ncr') && (
-          <div className="mb-4">
+          )}
+          {!isWidgetHidden('quality-ncr') && (
             <QualityNCRWidget projectId={projectId!} />
-          </div>
-        )}
-        {!isWidgetHidden('compliance-summary') && (
-          <div className="mb-4">
+          )}
+          {!isWidgetHidden('compliance-summary') && (
             <ComplianceSummaryWidget projectId={projectId!} />
-          </div>
-        )}
-        {!isWidgetHidden('recent-files') && (
-          <div className="mb-4">
+          )}
+          {!isWidgetHidden('schedule-strip') && (
+            <div className="lg:col-span-2">
+              <ScheduleStripWidget projectId={projectId!} />
+            </div>
+          )}
+          {!isWidgetHidden('budget-burn') && (
+            <div className="lg:col-span-2">
+              <BudgetBurnWidget projectId={projectId!} currency={currency} />
+            </div>
+          )}
+          {!isWidgetHidden('recent-files') && (
             <RecentFilesWidget projectId={projectId!} />
-          </div>
-        )}
-        {!isWidgetHidden('photo-strip') && (
-          <div className="mb-4">
-            <PhotoStripWidget projectId={projectId!} />
-          </div>
-        )}
-        {!isWidgetHidden('ai-insights') && (
-          <div className="mb-4">
+          )}
+          {!isWidgetHidden('photo-strip') && (
+            <div className="lg:col-span-2">
+              <PhotoStripWidget projectId={projectId!} />
+            </div>
+          )}
+          {!isWidgetHidden('ai-insights') && (
             <AIInsightsWidget projectId={projectId!} />
-          </div>
-        )}
-        {!isWidgetHidden('activity-feed') && (
-          <div className="mb-4">
-            <ActivityFeedWidget projectId={projectId!} />
-          </div>
-        )}
+          )}
+          {!isWidgetHidden('activity-feed') && (
+            <div className="sm:col-span-2 lg:col-span-3">
+              <ActivityFeedWidget projectId={projectId!} />
+            </div>
+          )}
+        </div>
       </ProjectWidgetsRollupProvider>
       {/* ``weather-alerts`` is a thin pointer to ProjectWeather (already
           rendered inside the location panel) — no separate render needed

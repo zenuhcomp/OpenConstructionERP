@@ -9,8 +9,8 @@ Professional BOQ, 4D/5D planning, AI-powered estimation, CAD/BIM takeoff — all
 [▶ Watch the 12-min walkthrough](https://www.youtube.com/watch?v=X06cIaroAeI) · [Demo](https://openconstructionerp.com) · [Documentation](https://openconstructionerp.com/docs) · [Discussions](https://t.me/datadrivenconstruction) · [Report Bug](https://github.com/datadrivenconstruction/OpenConstructionERP/issues)
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
-[![Version](https://img.shields.io/github/v/release/datadrivenconstruction/OpenConstructionERP?label=version&color=green&v=5.2.6)](https://github.com/datadrivenconstruction/OpenConstructionERP/releases/latest)
-[![PyPI](https://img.shields.io/pypi/v/openconstructionerp?color=informational&label=pypi&v=5.2.6)](https://pypi.org/project/openconstructionerp/)
+[![Version](https://img.shields.io/github/v/release/datadrivenconstruction/OpenConstructionERP?label=version&color=green&v=5.2.7)](https://github.com/datadrivenconstruction/OpenConstructionERP/releases/latest)
+[![PyPI](https://img.shields.io/pypi/v/openconstructionerp?color=informational&label=pypi&v=5.2.7)](https://pypi.org/project/openconstructionerp/)
 [![Downloads (pepy · per month)](https://static.pepy.tech/personalized-badge/openconstructionerp?period=month&units=international_system&left_color=grey&right_color=blue&left_text=downloads%20(pepy%20%C2%B7%20per%20month))](https://pepy.tech/project/openconstructionerp)
 [![Stars](https://img.shields.io/github/stars/datadrivenconstruction/OpenConstructionERP?style=flat&logo=github)](https://github.com/datadrivenconstruction/OpenConstructionERP/stargazers)
 <br/>
@@ -134,6 +134,12 @@ Star OpenConstructionERP on GitHub and be instantly notified of new releases.
   <img src="https://github.com/datadrivenconstruction/cad2data-Revit-IFC-DWG-DGN-pipeline-with-conversion-validation-qto/blob/main/DDC_in_additon/DDC_readme_content/OCE%20star%20GitHub.gif" width="100%"/>
   <br></br>
 </p>
+
+---
+
+## <picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/sparkle-fill-dark.svg"><img src="docs/readme-icons/sparkle-fill-light.svg" width="14" align="center" alt=""></picture> What's New in v5.2.7 — Project-detail widget grid
+
+**v5.2.7** is a UI hotfix on top of v5.2.6. The 13 widgets on `/projects/:id` (RFI inbox, Change orders pulse, Daily diary, HSE incidents, Variations, Quality NCRs, Compliance, Schedule, Budget burn, Recent files, Photo strip, AI insights, Activity feed) were rendered as a **single tall column** since the original `ec5aec1e` widget customizer landed — never wrapped in a responsive grid, so users on desktop saw an awkward narrow stack on otherwise-wide screens. v5.2.7 wraps the block in `grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4` with selective `lg:col-span-2` for widgets whose content (Schedule timeline, Budget burn history bars, Photo strip carousel) requires horizontal room and `sm:col-span-2 lg:col-span-3` for the full-width Activity feed. No backend changes; install is `pip install --upgrade openconstructionerp` with no migration needed.
 
 ---
 
