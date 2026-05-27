@@ -1346,61 +1346,181 @@ def create_app() -> FastAPI:
 
         return result
 
+    def _semver_tuple(v: str) -> tuple[int, ...]:
+        """Parse a dotted version (``"5.2.10"``) into a sortable int tuple.
+
+        Used by the version-check endpoint instead of raw string compare so
+        ``5.2.10 > 5.2.9`` evaluates correctly (string compare returns the
+        opposite because ``"1" < "9"``). Non-numeric trailing segments
+        (``"5.3.0rc1"`` etc.) coerce to 0 so they sort below the same
+        ``5.3.0`` release — pre-releases stay invisible to the
+        "update available" pill until the real release lands.
+        """
+        out: list[int] = []
+        for part in v.strip().lstrip("v").split("."):
+            num = ""
+            for ch in part:
+                if ch.isdigit():
+                    num += ch
+                else:
+                    break
+            out.append(int(num) if num else 0)
+        return tuple(out)
+
     @app.get("/api/system/version-check", tags=["System"])
     async def check_version() -> dict:
-        """Check if a newer version is available on GitHub."""
+        """Return current vs latest published version.
+
+        Source of truth is **PyPI** (more reliable than GitHub releases —
+        Trusted-Publisher OIDC always produces a wheel, GitHub release
+        creation is sometimes skipped on hotfixes). Falls back to GitHub
+        releases if PyPI is unreachable. Both lookups are cached on
+        ``app.state`` for 4 hours so the settings panel can poll cheaply
+        without burning the unauthenticated GitHub rate limit.
+        """
         import httpx
 
         current = settings.app_version
-        repo = "datadrivenconstruction/OpenConstructionEstimate-DDC-CWICR"
+        repo = "datadrivenconstruction/OpenConstructionERP"
         cache_key = "_version_check_cache"
 
-        # Simple in-memory cache (4 hours)
         cached = getattr(app.state, cache_key, None)
         if cached and (time.time() - cached["checked_at"]) < 14400:
             return cached["data"]
 
+        latest: str | None = None
+        release_url = f"https://github.com/{repo}/releases/latest"
+        release_notes = ""
+        published_at = ""
+
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
+                pypi = await client.get(
+                    "https://pypi.org/pypi/openconstructionerp/json",
+                )
+                if pypi.status_code == 200:
+                    latest = pypi.json().get("info", {}).get("version") or None
+        except Exception:  # noqa: BLE001 — graceful degradation
+            pass
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                gh = await client.get(
                     f"https://api.github.com/repos/{repo}/releases/latest",
                     headers={"Accept": "application/vnd.github.v3+json"},
                 )
-                if resp.status_code == 200:
-                    release = resp.json()
-                    latest = release.get("tag_name", "").lstrip("v")
-                    result = {
-                        "current_version": current,
-                        "latest_version": latest,
-                        "update_available": latest > current and latest != current,
-                        "release_url": release.get("html_url", ""),
-                        "release_notes": release.get("body", "")[:500],
-                        "published_at": release.get("published_at", ""),
-                        "download_url": next(
-                            (
-                                a["browser_download_url"]
-                                for a in release.get("assets", [])
-                                if a["name"].endswith(".zip")
-                            ),
-                            release.get("html_url", ""),
-                        ),
-                    }
-                else:
-                    result = {
-                        "current_version": current,
-                        "latest_version": current,
-                        "update_available": False,
-                    }
-        except Exception:
-            result = {
-                "current_version": current,
-                "latest_version": current,
-                "update_available": False,
-            }
+                if gh.status_code == 200:
+                    release = gh.json()
+                    gh_tag = release.get("tag_name", "").lstrip("v")
+                    if not latest:
+                        latest = gh_tag
+                    release_url = release.get("html_url", release_url)
+                    release_notes = (release.get("body") or "")[:500]
+                    published_at = release.get("published_at", "")
+        except Exception:  # noqa: BLE001
+            pass
 
-        # Cache result
+        if not latest:
+            latest = current
+
+        update_available = _semver_tuple(latest) > _semver_tuple(current)
+        result = {
+            "current_version": current,
+            "latest_version": latest,
+            "update_available": update_available,
+            "release_url": release_url,
+            "release_notes": release_notes,
+            "published_at": published_at,
+            "upgrade_command": "pip install --upgrade openconstructionerp",
+        }
         setattr(app.state, cache_key, {"data": result, "checked_at": time.time()})
         return result
+
+    @app.post("/api/system/upgrade", tags=["System"])
+    async def trigger_upgrade(
+        version: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Run ``pip install --upgrade openconstructionerp`` in this venv.
+
+        Best-effort one-click upgrade. We shell out to the **same**
+        interpreter that's serving the API so the upgrade lands in the
+        right venv (Issue #96 — Windows launcher uses
+        ``%LOCALAPPDATA%/OpenConstructionERP/venv``, not the user's
+        global Python). Captures stdout+stderr so the UI can show the
+        installer log.
+
+        **Important — the running process keeps the OLD wheel in memory.**
+        Python caches imports; pip can replace files on disk but cannot
+        swap modules already loaded. The response includes
+        ``restart_required=true`` and the new version pulled from
+        ``importlib.metadata`` so the UI can prompt the user to restart
+        their launcher (``openconstructionerp serve``) or, on managed
+        installs, the host's systemd unit.
+
+        Gated by ``ALLOW_RUNTIME_UPGRADE=true`` (default off in
+        production) — VPS / staging installs use a deploy pipeline, not
+        in-app upgrades. Localhost dev / Windows-installer installs ship
+        with the flag on so the Settings panel works out of the box.
+        """
+        import os
+        import subprocess
+        import sys
+
+        if os.environ.get("ALLOW_RUNTIME_UPGRADE", "true").lower() not in (
+            "true",
+            "1",
+            "yes",
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Runtime upgrade is disabled on this install. "
+                    "Run `pip install --upgrade openconstructionerp` from your "
+                    "shell, then restart the service."
+                ),
+            )
+
+        target = "openconstructionerp"
+        if version and version.replace(".", "").replace("-", "").isalnum():
+            target = f"openconstructionerp=={version}"
+
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", target]
+        if force:
+            cmd.insert(-1, "--force-reinstall")
+
+        proc = subprocess.run(  # noqa: S603 — args are sanitised above
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+
+        new_version = settings.app_version
+        try:
+            from importlib.metadata import version as _v
+
+            new_version = _v("openconstructionerp")
+        except Exception:  # noqa: BLE001
+            pass
+
+        if hasattr(app.state, "_version_check_cache"):
+            del app.state._version_check_cache
+
+        return {
+            "ok": proc.returncode == 0,
+            "exit_code": proc.returncode,
+            "command": " ".join(cmd),
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-2000:],
+            "installed_version": new_version,
+            "running_version": settings.app_version,
+            "restart_required": new_version != settings.app_version,
+            "restart_hint": (
+                "Restart your launcher (start.bat / `openconstructionerp serve`) "
+                "or the host's systemd unit to load the new version."
+            ),
+        }
 
     @app.get("/api/system/converters/version-check", tags=["System"])
     async def check_converter_versions() -> dict[str, Any]:
