@@ -53,6 +53,9 @@ import {
   Maximize2,
   Package,
   GitCompare,
+  Zap,
+  Palette,
+  Footprints,
 } from 'lucide-react';
 import { Badge, EmptyState, Breadcrumb, ConfirmDialog, ModuleHelpButton } from '@/shared/ui';
 import { useConfirm } from '@/shared/hooks/useConfirm';
@@ -1725,6 +1728,8 @@ export function BIMPage() {
   const setDimensionsVisible = useBIMViewerStore((s) => s.setDimensionsVisible);
   const assetCardEnabled = useBIMViewerStore((s) => s.assetCardEnabled);
   const setAssetCardEnabled = useBIMViewerStore((s) => s.setAssetCardEnabled);
+  const qualityMode = useBIMViewerStore((s) => s.qualityMode);
+  const setQualityMode = useBIMViewerStore((s) => s.setQualityMode);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [filterPredicate, setFilterPredicate] = useState<
     ((el: BIMElementData) => boolean) | null
@@ -2706,6 +2711,30 @@ export function BIMPage() {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Primary CTA cluster — moved to the START of the toolbar so the
+              "Add Model" / "Tour" / "Rules" trio is always visible on row 1
+              regardless of how many toggles wrap below. The rest of the
+              toolbar (toggles, color-by, quality, …) stays right-aligned
+              via the parent `justify-end`. */}
+          <button
+            onClick={() => setUploadOpen((p) => !p)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-oe-blue text-white hover:bg-oe-blue-dark transition-colors shadow-sm"
+            data-testid="bim-add-model-top"
+          >
+            <Plus size={13} /> {t('bim.add_model', { defaultValue: 'Add Model' })}
+          </button>
+          <ModuleHelpButton tourId="bim" />
+          {elements.length > 0 && (
+            <a
+              href="/bim/rules?mode=requirements"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="bim-rules-link-top"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-content-secondary bg-surface-secondary border border-border-light hover:bg-surface-tertiary transition-colors"
+            >
+              <SlidersHorizontal size={13} /> {t('bim.rules_button', { defaultValue: 'Rules' })}
+            </a>
+          )}
           {elements.length > 0 && (
             <>
               <button
@@ -2996,6 +3025,78 @@ export function BIMPage() {
                 </optgroup>
               </select>
 
+              {/* Render-quality segment — 4 presets controlling pixelRatio,
+                  lighting and per-material transparency. Persisted in
+                  localStorage via useBIMViewerStore. Fast/Walk strip
+                  alpha-blending; Visual keeps glass translucent but flips
+                  walls/slabs opaque (cleaner *and* faster than Default). */}
+              <div
+                role="radiogroup"
+                aria-label={t('bim.quality_mode', { defaultValue: 'Render quality' })}
+                className="inline-flex items-center rounded-lg border border-border-light bg-surface-secondary p-0.5 gap-0.5"
+                data-testid="bim-quality-mode"
+              >
+                {(
+                  [
+                    {
+                      mode: 'fast' as const,
+                      Icon: Zap,
+                      label: t('bim.quality_fast', { defaultValue: 'Fast' }),
+                      tooltip: t('bim.quality_fast_hint', {
+                        defaultValue: 'Fastest — opaque walls, low pixel ratio',
+                      }),
+                    },
+                    {
+                      mode: 'default' as const,
+                      Icon: Eye,
+                      label: t('bim.quality_default', { defaultValue: 'Default' }),
+                      tooltip: t('bim.quality_default_hint', {
+                        defaultValue: 'Translucent — full lighting',
+                      }),
+                    },
+                    {
+                      mode: 'visual' as const,
+                      Icon: Palette,
+                      label: t('bim.quality_visual', { defaultValue: 'Visual' }),
+                      tooltip: t('bim.quality_visual_hint', {
+                        defaultValue: 'Cleanest — opaque + glass transparency only',
+                      }),
+                    },
+                    {
+                      mode: 'walk' as const,
+                      Icon: Footprints,
+                      label: t('bim.quality_walk', { defaultValue: 'Walk' }),
+                      tooltip: t('bim.quality_walk_hint', {
+                        defaultValue: 'Smoothest for walk-mode navigation',
+                      }),
+                    },
+                  ]
+                ).map(({ mode, Icon, label, tooltip }) => {
+                  const isActive = qualityMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={isActive}
+                      aria-label={label}
+                      title={tooltip}
+                      onClick={() => setQualityMode(mode)}
+                      data-testid={`bim-quality-${mode}`}
+                      className={clsx(
+                        'flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
+                        isActive
+                          ? 'bg-oe-blue text-white shadow-sm'
+                          : 'text-content-secondary hover:bg-surface-tertiary',
+                      )}
+                    >
+                      <Icon size={12} />
+                      <span className="hidden lg:inline">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
               {/* Isolate toggle (when an element is selected) */}
               {selectedElementId && (
                 <button
@@ -3014,27 +3115,11 @@ export function BIMPage() {
                     : t('bim.isolate', { defaultValue: 'Isolate' })}
                 </button>
               )}
-              {/* Rules opens in a new tab so the user doesn't lose 3D state.
-                  Anchor (not button+navigate) so middle-click / Cmd+click work
-                  natively. RFC 19 §UX-2. */}
-              <a
-                href="/bim/rules?mode=requirements"
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid="bim-rules-link"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-content-secondary bg-surface-secondary border border-border-light hover:bg-surface-tertiary transition-colors"
-              >
-                <SlidersHorizontal size={13} /> {t('bim.rules_button', { defaultValue: 'Rules' })}
-              </a>
+              {/* Rules / Add Model / Tour moved to the top of this same
+                  flex row — see the "Primary CTA cluster" comment at the
+                  start of the toolbar. */}
             </>
           )}
-          <button onClick={() => setUploadOpen((p) => !p)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-oe-blue text-white hover:bg-oe-blue-dark transition-colors shadow-sm">
-            <Plus size={13} /> {t('bim.add_model', { defaultValue: 'Add Model' })}
-          </button>
-          {/* Per-module Tour CTA — launches the BIM-specific guided tour
-              via the registered TOUR_REGISTRY entry, independent of any
-              global / first-login tour state. */}
-          <ModuleHelpButton tourId="bim" />
         </div>
       </div>
 

@@ -22,7 +22,26 @@ export type BIMMeasureKind = 'distance' | 'area' | 'angle';
 /** Active section/clip mode. `none` = no cut applied. */
 export type BIMClipMode = 'none' | 'box' | 'plane';
 
+/**
+ * Render-quality preset. Controls renderer pixel ratio, lighting, tone-mapping
+ * and per-material transparency. Persisted to localStorage so the choice
+ * survives reloads.
+ *
+ *  fast    — opaque non-glass + dim ambient + 0.75 pixelRatio. Best fps on
+ *            large federations or weak laptops.
+ *  default — current behaviour (translucent everything, full 4-light setup).
+ *            Migration-safe default.
+ *  visual  — opaque non-glass, glass stays transparent, boosted exposure +
+ *            up to 1.5× pixelRatio. Cleaner picture *and* fewer alpha-sort
+ *            draws than `default`.
+ *  walk    — most aggressive cut (pixelRatio 0.5, two lights at zero) for
+ *            smooth first-person walk-mode navigation on phones / low-spec
+ *            machines.
+ */
+export type BIMQualityMode = 'fast' | 'default' | 'visual' | 'walk';
+
 const ASSET_CARD_KEY = 'oe_bim_asset_card_enabled';
+const QUALITY_MODE_KEY = 'oe_bim_quality_mode';
 
 function readAssetCardEnabled(): boolean {
   try {
@@ -37,6 +56,26 @@ function readAssetCardEnabled(): boolean {
 function writeAssetCardEnabled(enabled: boolean): void {
   try {
     localStorage.setItem(ASSET_CARD_KEY, enabled ? '1' : '0');
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+function readQualityMode(): BIMQualityMode {
+  try {
+    const raw = localStorage.getItem(QUALITY_MODE_KEY);
+    if (raw === 'fast' || raw === 'default' || raw === 'visual' || raw === 'walk') {
+      return raw;
+    }
+  } catch {
+    /* fall through to default */
+  }
+  return 'default';
+}
+
+function writeQualityMode(mode: BIMQualityMode): void {
+  try {
+    localStorage.setItem(QUALITY_MODE_KEY, mode);
   } catch {
     /* ignore quota errors */
   }
@@ -73,6 +112,8 @@ interface BIMViewerState {
    *  selected. Persisted to localStorage so the preference survives
    *  page reloads. */
   assetCardEnabled: boolean;
+  /** Active render-quality preset. Persisted to localStorage. */
+  qualityMode: BIMQualityMode;
 
   setCategoryOpacity: (category: string, opacity: number) => void;
   setCategoryHidden: (category: string, hidden: boolean) => void;
@@ -88,6 +129,7 @@ interface BIMViewerState {
   setSummaryPanelOpen: (open: boolean) => void;
   setDimensionsVisible: (visible: boolean) => void;
   setAssetCardEnabled: (enabled: boolean) => void;
+  setQualityMode: (mode: BIMQualityMode) => void;
 }
 
 export const useBIMViewerStore = create<BIMViewerState>((set) => ({
@@ -104,6 +146,7 @@ export const useBIMViewerStore = create<BIMViewerState>((set) => ({
   summaryPanelOpen: true,
   dimensionsVisible: true,
   assetCardEnabled: readAssetCardEnabled(),
+  qualityMode: readQualityMode(),
 
   setCategoryOpacity: (category, opacity) =>
     set((state) => ({
@@ -133,5 +176,9 @@ export const useBIMViewerStore = create<BIMViewerState>((set) => ({
   setAssetCardEnabled: (enabled) => {
     writeAssetCardEnabled(enabled);
     set({ assetCardEnabled: enabled });
+  },
+  setQualityMode: (mode) => {
+    writeQualityMode(mode);
+    set({ qualityMode: mode });
   },
 }));

@@ -538,6 +538,7 @@ export function BIMViewer({
   const setGhostActive = useBIMViewerStore((s) => s.setGhostActive);
   const summaryPanelOpen = useBIMViewerStore((s) => s.summaryPanelOpen);
   const setSummaryPanelOpen = useBIMViewerStore((s) => s.setSummaryPanelOpen);
+  const qualityMode = useBIMViewerStore((s) => s.qualityMode);
   const [measureCount, setMeasureCount] = useState(0);
   /** Local mirror of the live section-box / plane state for the popover. */
   const [clipBox, setClipBox] = useState({
@@ -1605,6 +1606,15 @@ export function BIMViewer({
       mgr.setCategoryOpacity(category, opacity);
     }
   }, [categoryOpacity, elements]);
+
+  // Apply the selected render-quality preset whenever the store value
+  // changes — or whenever the scene/element managers are (re)created so
+  // a freshly loaded model picks up the persisted localStorage choice
+  // without the user having to re-toggle the segment.
+  useEffect(() => {
+    sceneManagerReady?.applyQualityMode(qualityMode);
+    elementMgrRef.current?.applyQualityMode(qualityMode);
+  }, [qualityMode, sceneManagerReady, elements]);
 
   // Sync hidden-category toggles from the Layers tab.
   useEffect(() => {
