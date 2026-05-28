@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "nzs_3604_timber",
+  "name": "NZS 3604 — Timber-Framed Buildings",
+  "standard": "NZS 3604",
+  "jurisdiction": "NZ",
+  "description": "Enables OCERP built-in validation rules that enforce NZS 3604 timber-framed building requirements: wind and earthquake zones, bracing demand, foundation type, member selection and durability for New Zealand conditions.",
+  "enables_rule_ids": [
+    "nzs3604.wind_zone_set",
+    "nzs3604.earthquake_zone_set",
+    "nzs3604.bracing_demand_satisfied",
+    "nzs3604.foundation_type_compliant",
+    "nzs3604.subfloor_ventilation_adequate",
+    "nzs3604.member_selection_within_table",
+    "nzs3604.durability_class_specified",
+    "nzs3604.snow_load_zone_applied"
+  ]
+}

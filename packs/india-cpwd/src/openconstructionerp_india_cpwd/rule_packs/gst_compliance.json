@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "gst_compliance",
+  "name": "GST Compliance — Works Contracts",
+  "standard": "CGST/SGST/IGST Act",
+  "jurisdiction": "IN",
+  "description": "Enables OCERP built-in validation rules that check tender documents, invoices, and payment certificates for GST compliance — correct HSN/SAC codes, applicable tax rate, reverse-charge flag, place-of-supply rule, and TDS under Section 194C.",
+  "enables_rule_ids": [
+    "gst.sac_code_present_works_contract",
+    "gst.tax_rate_applicable_to_contract_type",
+    "gst.cgst_sgst_split_intra_state",
+    "gst.igst_inter_state_supply",
+    "gst.reverse_charge_flag_set",
+    "gst.place_of_supply_specified",
+    "gst.tds_194c_subcontractor_payment",
+    "gst.composition_scheme_consistency"
+  ]
+}

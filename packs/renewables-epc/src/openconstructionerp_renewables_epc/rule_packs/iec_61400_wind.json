@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "iec_61400_wind",
+  "name": "IEC 61400 — Wind energy generation systems",
+  "standard": "IEC 61400",
+  "jurisdiction": "INTL",
+  "description": "Enables OCERP built-in validation rules that align wind-farm EPC documentation with IEC 61400 series requirements (design loads, site assessment, turbine class, foundation, electrical).",
+  "enables_rule_ids": [
+    "iec61400.turbine_class_assigned",
+    "iec61400.site_wind_assessment_complete",
+    "iec61400.design_load_case_documented",
+    "iec61400.foundation_load_envelope_set",
+    "iec61400.lightning_protection_class_set",
+    "iec61400.grid_code_compliance_documented",
+    "iec61400.commissioning_protocol_attached"
+  ]
+}

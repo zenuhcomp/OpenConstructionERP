@@ -41,7 +41,7 @@ from app.modules.punchlist.schemas import (
 )
 from app.modules.punchlist.service import PunchListService
 
-router = APIRouter()
+router = APIRouter(tags=["punchlist"])
 logger = logging.getLogger(__name__)
 
 # Directory for storing uploaded punch list photos

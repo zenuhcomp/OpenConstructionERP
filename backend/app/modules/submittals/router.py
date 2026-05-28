@@ -47,7 +47,7 @@ from app.modules.submittals.schemas import (
 )
 from app.modules.submittals.service import SubmittalService
 
-router = APIRouter()
+router = APIRouter(tags=["submittals"])
 logger = logging.getLogger(__name__)
 
 # Magic-byte allow-list for direct submittal-attachment uploads.

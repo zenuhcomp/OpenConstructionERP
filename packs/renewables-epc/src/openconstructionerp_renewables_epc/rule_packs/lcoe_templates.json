@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "lcoe_templates",
+  "name": "LCOE — Levelised Cost of Energy templates",
+  "standard": "IEA / NREL LCOE methodology",
+  "jurisdiction": "INTL",
+  "description": "Enables OCERP built-in validation rules that ensure LCOE financial models attached to a renewables EPC project include all required inputs (CAPEX, OPEX, discount rate, energy yield, degradation, useful life) and produce a defensible levelised cost figure.",
+  "enables_rule_ids": [
+    "lcoe.capex_breakdown_present",
+    "lcoe.opex_present_per_year",
+    "lcoe.discount_rate_set",
+    "lcoe.energy_yield_p50_p90_documented",
+    "lcoe.degradation_rate_set",
+    "lcoe.useful_life_years_set",
+    "lcoe.sensitivity_analysis_attached"
+  ]
+}

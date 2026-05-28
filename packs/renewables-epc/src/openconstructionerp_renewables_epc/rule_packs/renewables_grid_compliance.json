@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "renewables_grid_compliance",
+  "name": "Renewables grid compliance — connection and protection",
+  "standard": "IEEE 1547 / EN 50549 / national grid codes",
+  "jurisdiction": "INTL",
+  "description": "Enables OCERP built-in validation rules that ensure the grid-connection package (POI study, protection settings, FRT, reactive-power capability, anti-islanding) is complete and signed off before commissioning.",
+  "enables_rule_ids": [
+    "grid.poi_study_attached",
+    "grid.protection_settings_signed_off",
+    "grid.frt_lvrt_curve_documented",
+    "grid.reactive_power_capability_set",
+    "grid.anti_islanding_test_recorded",
+    "grid.harmonics_thd_within_limit",
+    "grid.commissioning_witness_logged"
+  ]
+}

@@ -36,7 +36,7 @@ from app.modules.ai_agents.service import AgentService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["ai_agents"])
 
 
 # ── Idempotency cache ────────────────────────────────────────────────────

@@ -53,7 +53,7 @@ from app.modules.ai.schemas import (
 )
 from app.modules.ai.service import AIService
 
-router = APIRouter()
+router = APIRouter(tags=["ai"])
 
 # Maximum upload size for photos: 10 MB
 MAX_PHOTO_SIZE = 10 * 1024 * 1024

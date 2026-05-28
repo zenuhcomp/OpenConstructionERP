@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 50" width="260" height="50" role="img" aria-label="Brazil Construction Pack">
+  <title>Brazil Construction Pack</title>
+  <desc>Brazil Construction Pack wordmark in Brazilian green with a yellow accent.</desc>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="22" letter-spacing="-0.3">
+    <text x="6" y="32" fill="#009C3B">Brazil Construction</text>
+    <text x="208" y="32" fill="#FFDF00">Pack</text>
+  </g>
+  <rect x="240" y="10" width="14" height="14" rx="2" fill="#009C3B"/>
+  <rect x="244" y="14" width="6" height="6" fill="#FFDF00"/>
+</svg>

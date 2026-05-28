@@ -82,7 +82,7 @@ LIEN_WAIVER_MAX_BYTES: int = 10 * 1024 * 1024
 # convention used elsewhere (punchlist/photos, geo_hub/rasters, …).
 LIEN_WAIVERS_DIR: Path = Path("uploads/subcontractors/lien_waivers")
 
-router = APIRouter()
+router = APIRouter(tags=["subcontractors"])
 
 
 def _service(session: SessionDep) -> SubcontractorService:

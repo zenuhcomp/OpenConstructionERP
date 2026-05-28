@@ -53,7 +53,7 @@ from app.modules.requirements.schemas import (
 )
 from app.modules.requirements.service import RequirementsService
 
-router = APIRouter()
+router = APIRouter(tags=["requirements"])
 logger = logging.getLogger(__name__)
 
 
@@ -455,6 +455,31 @@ async def import_requirements_file(
         )
 
     name = (file.filename or "").lower()
+
+    # Magic-byte sniff — filename is hostile-supplied. Reject any payload
+    # whose first bytes don't match the declared format before we hand the
+    # buffer to openpyxl / csv.reader. Mirrors the contacts importer.
+    head = payload[:8]
+    if name.endswith(".xlsx"):
+        if not head.startswith(b"PK\x03\x04"):
+            raise HTTPException(
+                status_code=415,
+                detail="File does not look like a valid .xlsx (missing ZIP signature).",
+            )
+    elif name.endswith(".xls"):
+        if not head.startswith(b"\xd0\xcf\x11\xe0"):
+            raise HTTPException(
+                status_code=415,
+                detail="File does not look like a valid .xls (missing OLE signature).",
+            )
+    elif name.endswith(".csv"):
+        for sig in (b"MZ", b"\x7fELF", b"\xca\xfe\xba\xbe", b"PK\x03\x04", b"\xd0\xcf\x11\xe0"):
+            if head.startswith(sig):
+                raise HTTPException(
+                    status_code=415,
+                    detail="File does not look like CSV (binary signature detected).",
+                )
+
     if name.endswith(".csv"):
         rows, warnings = parse_csv(payload)
     elif name.endswith(".xlsx") or name.endswith(".xls"):

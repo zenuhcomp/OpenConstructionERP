@@ -1128,7 +1128,7 @@ export function ContactsPage() {
               setInfoDismissed(true);
               localStorage.setItem(LS_INFO_DISMISSED, '1');
             }}
-            className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded text-blue-400 hover:text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/40 dark:hover:text-blue-200 transition-colors"
+            className="absolute top-2 right-2 flex h-9 w-9 items-center justify-center rounded text-blue-400 hover:text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/40 dark:hover:text-blue-200 transition-colors"
             aria-label={t('common.dismiss', { defaultValue: 'Dismiss' })}
           >
             <X size={14} />

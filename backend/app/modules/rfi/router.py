@@ -46,7 +46,7 @@ from app.modules.rfi.schemas import (
 )
 from app.modules.rfi.service import RFIService
 
-router = APIRouter()
+router = APIRouter(tags=["rfi"])
 logger = logging.getLogger(__name__)
 
 # R5 / BUG-RFI-ATT: allow-list of magic-byte tokens accepted for RFI reply

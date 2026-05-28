@@ -35,7 +35,7 @@ from app.modules.dashboard.service import (
     compute_rollup,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["dashboard"])
 
 
 def _parse_csv_list(raw: str | None) -> list[str]:

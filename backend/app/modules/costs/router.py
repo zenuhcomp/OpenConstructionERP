@@ -91,7 +91,7 @@ _MAX_COST_UPLOAD_BYTES = 25 * 1024 * 1024
 # common delimiter (handled inline in the route).
 _ALLOWED_COST_IMPORT_SIGNATURES: frozenset[str] = frozenset({"zip", "ole"})
 
-router = APIRouter()
+router = APIRouter(tags=["costs"])
 logger = logging.getLogger(__name__)
 
 

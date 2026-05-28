@@ -1143,7 +1143,7 @@ function VectorDatabaseSection() {
         setLastResult({ region: 'all', indexed: data.indexed, duration: data.duration_seconds });
         addToast({
           type: 'success',
-          title: 'Vector index created',
+          title: t('costs.vector_index_created', { defaultValue: 'Vector index created' }),
           message: `${data.indexed.toLocaleString()} items indexed in ${data.duration_seconds}s`,
         });
         refetchStatus();

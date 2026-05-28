@@ -65,7 +65,7 @@ from app.modules.bi_dashboards.schemas import (
 from app.modules.bi_dashboards.service import BIDashboardsService
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["bi_dashboards"])
 
 
 def _service(session: SessionDep) -> BIDashboardsService:

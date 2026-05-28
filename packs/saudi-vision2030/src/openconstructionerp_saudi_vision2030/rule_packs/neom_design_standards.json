@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "neom_design_standards",
+  "name": "NEOM — Design Standards & Sustainability",
+  "standard": "NEOM Design Standards (THE LINE / Oxagon / Trojena / Sindalah)",
+  "jurisdiction": "SA",
+  "description": "Enables OCERP built-in validation rules that check submittals against the NEOM design-standards portfolio: net-zero embodied carbon targets, renewable-energy share, biodiversity protection, mobility-corridor setbacks, and the NEOM Authority approval chain for THE LINE, Oxagon, Trojena and Sindalah.",
+  "enables_rule_ids": [
+    "neom.subzone_assigned",
+    "neom.net_zero_carbon_target_set",
+    "neom.renewable_energy_share_minimum",
+    "neom.embodied_carbon_within_budget",
+    "neom.biodiversity_impact_assessed",
+    "neom.mobility_corridor_setback_respected",
+    "neom.water_reuse_strategy_present",
+    "neom.authority_approval_chain_configured"
+  ]
+}

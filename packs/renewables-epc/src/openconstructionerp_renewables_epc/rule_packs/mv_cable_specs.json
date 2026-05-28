@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "mv_cable_specs",
+  "name": "MV cable schedules — sizing and routing",
+  "standard": "IEC 60502 / IEC 60364-7-712",
+  "jurisdiction": "INTL",
+  "description": "Enables OCERP built-in validation rules that check medium-voltage cable schedules for renewables EPC projects: ampacity, voltage drop, short-circuit withstand, derating factors, conduit fill and trench routing.",
+  "enables_rule_ids": [
+    "mvcable.ampacity_meets_load",
+    "mvcable.voltage_drop_within_3pct",
+    "mvcable.short_circuit_withstand_sized",
+    "mvcable.derating_factor_applied",
+    "mvcable.conduit_fill_under_40pct",
+    "mvcable.trench_depth_meets_local_code",
+    "mvcable.joint_termination_kit_specified"
+  ]
+}

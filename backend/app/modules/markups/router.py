@@ -50,7 +50,7 @@ from app.modules.markups.schemas import (
 )
 from app.modules.markups.service import MarkupsService
 
-router = APIRouter()
+router = APIRouter(tags=["markups"])
 logger = logging.getLogger(__name__)
 
 

@@ -40,7 +40,7 @@ from app.modules.meetings.schemas import (
 )
 from app.modules.meetings.service import MeetingService
 
-router = APIRouter()
+router = APIRouter(tags=["meetings"])
 logger = logging.getLogger(__name__)
 
 
@@ -903,6 +903,34 @@ async def import_meeting_summary(
 
     if not content:
         raise HTTPException(status_code=400, detail="File is empty")
+
+    # Magic-byte sniff — filename is hostile-supplied. Reject any payload
+    # whose first bytes don't match the declared format before we hand
+    # the buffer to python-docx / PyMuPDF / VTT/SRT parsers. Plain-text
+    # transcripts (txt/vtt/srt) have no canonical signature, so we use a
+    # denylist of known-binary prefixes instead.
+    head = content[:8]
+    if ext == "pdf":
+        # Allow a few bytes of leading whitespace/BOM (some scanners).
+        stripped = head.lstrip(b"\x00\xef\xbb\xbf \t\r\n")
+        if not stripped.startswith(b"%PDF-"):
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="File does not look like a valid PDF (missing %PDF- signature).",
+            )
+    elif ext == "docx":
+        if not head.startswith(b"PK\x03\x04"):
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="File does not look like a valid .docx (missing ZIP signature).",
+            )
+    else:  # txt / vtt / srt — text-only formats
+        for sig in (b"MZ", b"\x7fELF", b"\xca\xfe\xba\xbe", b"PK\x03\x04", b"\xd0\xcf\x11\xe0", b"%PDF-"):
+            if head.startswith(sig):
+                raise HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail="File does not look like a plain-text transcript (binary signature detected).",
+                )
 
     # Extract text
     text_content = await _extract_text_from_file(content, file.filename)

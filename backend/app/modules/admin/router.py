@@ -21,7 +21,7 @@ from app.dependencies import SessionDep
 from app.modules.admin.permissions_router import router as permissions_router
 from app.modules.admin.service import GateError, check_gates, reset_demo_data
 
-router = APIRouter()
+router = APIRouter(tags=["admin"])
 logger = logging.getLogger(__name__)
 
 # Sub-router: GET /permissions/matrix (admin UI). Lives in a separate

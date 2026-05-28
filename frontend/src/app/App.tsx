@@ -16,14 +16,9 @@ import { BOQListPage } from '@/features/boq/BOQListPage';
 import { CreateBOQPage } from '@/features/boq/CreateBOQPage';
 import { TemplatesPage } from '@/features/boq/TemplatesPage';
 import { syncCustomUnitsFromServer } from '@/features/boq/boqHelpers';
-import { CostsPage } from '@/features/costs';
-import { ValidationPage } from '@/features/validation';
 import { NlRuleBuilderPanel } from '@/features/compliance';
-import { QuantitiesPage } from '@/features/quantities';
 import { useModuleRouteElements } from '@/modules/ModuleRoutes';
 import { DatabaseSetupPage } from '@/features/setup';
-import { IntegrationsPage } from '@/features/integrations';
-import { AboutPage } from '@/features/about/AboutPage';
 import { Logo, ShortcutsDialog, CommandPalette, ToastContainer, ErrorBoundary, NotFoundPage, ProductTour, OfflineBanner, PWAInstallPrompt } from '@/shared/ui';
 import { AdminOnly } from '@/shared/auth/AdminOnly';
 import GlobalSearchModal from '@/features/search/GlobalSearchModal';
@@ -423,6 +418,25 @@ const LoginPageNext = lazy(() =>
 );
 const QuickEstimatePage = lazy(() =>
   import('@/features/ai/QuickEstimatePage').then((m) => ({ default: m.QuickEstimatePage }))
+);
+
+// Rarely-visited or heavy secondary pages — moved out of the initial
+// `index` bundle (was eager via barrel imports, ~1.4 MB chunk; these
+// surfaces are not part of the post-login landing flow).
+const CostsPage = lazy(() =>
+  import('@/features/costs').then((m) => ({ default: m.CostsPage }))
+);
+const ValidationPage = lazy(() =>
+  import('@/features/validation').then((m) => ({ default: m.ValidationPage }))
+);
+const QuantitiesPage = lazy(() =>
+  import('@/features/quantities').then((m) => ({ default: m.QuantitiesPage }))
+);
+const IntegrationsPage = lazy(() =>
+  import('@/features/integrations').then((m) => ({ default: m.IntegrationsPage }))
+);
+const AboutPage = lazy(() =>
+  import('@/features/about/AboutPage').then((m) => ({ default: m.AboutPage }))
 );
 
 // CPMView is keyed by the schedule it analyses, so the route reads :id and

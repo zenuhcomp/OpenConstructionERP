@@ -35,7 +35,7 @@ from app.modules.safety.schemas import (
 )
 from app.modules.safety.service import SafetyService
 
-router = APIRouter()
+router = APIRouter(tags=["safety"])
 logger = logging.getLogger(__name__)
 
 

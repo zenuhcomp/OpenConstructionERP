@@ -48,7 +48,7 @@ from app.modules.approval_routes.schemas import (
 )
 from app.modules.approval_routes.service import ApprovalRouteService
 
-router = APIRouter()
+router = APIRouter(tags=["approval_routes"])
 
 
 def _get_service(session: SessionDep) -> ApprovalRouteService:
@@ -116,7 +116,14 @@ async def list_routes(
         await verify_project_access(project_id, user_id, session)
 
     rows = await service.list_routes(project_id=project_id, target_kind=target_kind)
-    return [await _route_to_response(r, service) for r in rows]
+    # Batched: one IN(...) Step fetch instead of N per-route round trips.
+    steps_by_route = await service.list_steps_for_routes([r.id for r in rows])
+    responses: list[RouteResponse] = []
+    for r in rows:
+        payload = RouteResponse.model_validate(r)
+        payload.steps = [StepResponse.model_validate(s) for s in steps_by_route.get(r.id, [])]
+        responses.append(payload)
+    return responses
 
 
 @router.post(

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 50" width="260" height="50" role="img" aria-label="Modular and Prefab Pack">
+  <title>Modular and Prefab Pack</title>
+  <desc>Modular and Prefab Pack wordmark in industrial blue with a modular yellow accent.</desc>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="22" letter-spacing="-0.3">
+    <text x="6" y="32" fill="#1F4E79">Modular &amp; Prefab</text>
+    <text x="194" y="32" fill="#FFB81C">Pack</text>
+  </g>
+  <rect x="234" y="10" width="14" height="14" rx="2" fill="#1F4E79"/>
+  <rect x="238" y="14" width="6" height="6" fill="#FFB81C"/>
+</svg>

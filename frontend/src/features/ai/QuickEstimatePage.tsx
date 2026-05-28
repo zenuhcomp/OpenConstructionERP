@@ -1086,7 +1086,11 @@ function CadConverterSection({
                 </p>
               </div>
               {(installResult || installError) && (
-                <button onClick={onDismissProgress} className="text-content-quaternary hover:text-content-secondary">
+                <button
+                  onClick={onDismissProgress}
+                  aria-label={t('common.dismiss', { defaultValue: 'Dismiss' })}
+                  className="text-content-quaternary hover:text-content-secondary"
+                >
                   <X size={16} />
                 </button>
               )}

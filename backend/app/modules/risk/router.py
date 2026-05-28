@@ -30,7 +30,7 @@ from app.modules.risk.schemas import (
 )
 from app.modules.risk.service import RiskService
 
-router = APIRouter()
+router = APIRouter(tags=["risk"])
 logger = logging.getLogger(__name__)
 
 

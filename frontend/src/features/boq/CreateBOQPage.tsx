@@ -93,6 +93,7 @@ export function CreateBOQModal({ open, onClose, defaultProjectId }: CreateBOQMod
           </div>
           <button
             onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
           >
             <X size={18} />

@@ -162,7 +162,8 @@ export function ApprovalInstancesList({
           />
         </div>
       ) : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-border-light bg-surface-secondary/30">
               <th className="px-3 py-2 text-left text-2xs font-semibold uppercase tracking-wider text-content-tertiary">
@@ -188,6 +189,7 @@ export function ApprovalInstancesList({
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </Card>
   );

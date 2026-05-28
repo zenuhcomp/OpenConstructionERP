@@ -84,7 +84,7 @@ from app.modules.collaboration_locks.service import (
     _resolve_user_name,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["collaboration_locks"])
 logger = logging.getLogger(__name__)
 
 

@@ -99,7 +99,7 @@ from app.modules.carbon.schemas import (
 )
 from app.modules.carbon.service import CarbonService
 
-router = APIRouter()
+router = APIRouter(tags=["carbon"])
 logger = logging.getLogger(__name__)
 
 

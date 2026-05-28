@@ -19,7 +19,7 @@ from app.modules.moc.schemas import (
 )
 from app.modules.moc.service import MoCService
 
-router = APIRouter()
+router = APIRouter(tags=["moc"])
 logger = logging.getLogger(__name__)
 
 

@@ -40,7 +40,7 @@ from app.modules.opencde_api.schemas import (
 )
 from app.modules.opencde_api.service import OpenCDEService
 
-router = APIRouter()
+router = APIRouter(tags=["opencde_api"])
 
 
 def _get_service(session: SessionDep) -> OpenCDEService:

@@ -46,7 +46,7 @@ from app.modules.file_tags.service import (
     update_tag,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["file_tags"])
 logger = logging.getLogger(__name__)
 
 

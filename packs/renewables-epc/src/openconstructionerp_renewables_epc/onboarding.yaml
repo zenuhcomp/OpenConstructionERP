@@ -1,0 +1,50 @@
+# Renewables EPC Pack — first-login onboarding wizard.
+# Streamed by /api/v1/partner-pack/onboarding-script and rendered by
+# the OnboardingWizard React component in place of the default steps.
+
+version: 1
+locale: en
+title: "Welcome to OpenConstructionERP — Renewables EPC Edition"
+subtitle: "Five quick steps to align your workspace with solar/wind EPC practice (IEC 61400, IEC 61730, LCOE)."
+
+steps:
+  - id: company_profile
+    title: "EPC company profile"
+    body: "Tell us about your firm so reports, tender documents and grid-connection packages are correctly attributed."
+    fields:
+      - { key: company_name, label: "Company name", type: text, required: true }
+      - { key: registration_number, label: "Company registration number", type: text, required: false }
+      - { key: primary_technology, label: "Primary technology", type: select, options: ["Utility-scale PV", "Distributed / C&I PV", "Onshore wind", "Offshore wind", "Hybrid (PV + storage)", "BESS standalone"], required: true }
+
+  - id: project_typology
+    title: "Project typology and capacity"
+    body: "Pick the typical project profile so the takeoff editor and BOM templates start with sensible defaults."
+    fields:
+      - { key: typical_capacity_mw, label: "Typical project capacity (MW)", type: select, options: ["< 1 MW", "1–10 MW", "10–50 MW", "50–250 MW", "250 MW – 1 GW", "> 1 GW"], required: true, default: "10–50 MW" }
+      - { key: enable_lcoe_module, label: "Enable LCOE financial model on every project", type: checkbox, default: true }
+      - { key: enable_mv_cable_scheduler, label: "Enable MV cable scheduler (sizing + routing)", type: checkbox, default: true }
+
+  - id: standards
+    title: "Compliance standards (IEC)"
+    body: "Select the IEC standards that should validate your project documentation automatically."
+    fields:
+      - { key: enable_iec_61400, label: "IEC 61400 — Wind turbine design", type: checkbox, default: true }
+      - { key: enable_iec_61730, label: "IEC 61730 — PV module safety qualification", type: checkbox, default: true }
+      - { key: enable_iec_62548, label: "IEC 62548 — PV array design", type: checkbox, default: true }
+      - { key: enable_grid_compliance, label: "Grid connection compliance pack (IEEE 1547 / EN 50549)", type: checkbox, default: true }
+
+  - id: regions
+    title: "Regions of operation"
+    body: "Renewables EPC is cross-region by design. Pick the cost regions you tender into most often — we'll preload labour and equipment rates."
+    fields:
+      - { key: target_regions, label: "Active regions", type: multiselect, options: ["Western Europe", "Southern Europe", "Central / Eastern Europe", "MENA", "Sub-Saharan Africa", "South Asia", "South-East Asia", "Australia / NZ", "North America", "Latin America"], required: true, default: ["Western Europe"] }
+      - { key: default_fx_currency, label: "Default reporting currency", type: select, options: ["EUR", "USD", "GBP", "AUD", "ZAR"], required: true, default: "EUR" }
+
+  - id: review
+    title: "Review and finish"
+    body: "We will create your first renewables EPC workspace with IEC 61400 + IEC 61730 validation, LCOE templates, MV cable scheduler and grid-compliance dashboards enabled. You can change everything later in Settings."
+    action:
+      label: "Create my Renewables EPC workspace"
+      apply:
+        - set_default_currency: EUR
+        - enable_rule_packs: [iec_61400_wind, iec_61730_pv, lcoe_templates, mv_cable_specs, renewables_grid_compliance]

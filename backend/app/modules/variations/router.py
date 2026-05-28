@@ -55,7 +55,7 @@ from app.modules.variations.service import (
     supported_contract_standards,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["variations"])
 logger = logging.getLogger(__name__)
 
 

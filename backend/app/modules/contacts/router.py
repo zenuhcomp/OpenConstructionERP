@@ -43,7 +43,7 @@ from app.modules.contacts.schemas import (
 )
 from app.modules.contacts.service import ContactService
 
-router = APIRouter()
+router = APIRouter(tags=["contacts"])
 logger = logging.getLogger(__name__)
 
 

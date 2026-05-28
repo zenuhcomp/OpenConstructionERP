@@ -99,7 +99,7 @@ from app.modules.equipment.schemas import (
 )
 from app.modules.equipment.service import EquipmentService
 
-router = APIRouter()
+router = APIRouter(tags=["equipment"])
 logger = logging.getLogger(__name__)
 
 

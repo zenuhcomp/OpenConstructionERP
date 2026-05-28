@@ -66,7 +66,7 @@ from app.modules.finance.schemas import (
 )
 from app.modules.finance.service import FinanceService
 
-router = APIRouter()
+router = APIRouter(tags=["finance"])
 logger = logging.getLogger(__name__)
 
 

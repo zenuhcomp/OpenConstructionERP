@@ -44,7 +44,7 @@ from app.modules.integrations.schemas import (
 )
 from app.modules.integrations.service import WebhookService
 
-router = APIRouter()
+router = APIRouter(tags=["integrations"])
 logger = logging.getLogger(__name__)
 
 

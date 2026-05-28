@@ -80,7 +80,7 @@ from app.modules.qms.schemas import (
 )
 from app.modules.qms.service import QMSService
 
-router = APIRouter()
+router = APIRouter(tags=["qms"])
 logger = logging.getLogger(__name__)
 
 

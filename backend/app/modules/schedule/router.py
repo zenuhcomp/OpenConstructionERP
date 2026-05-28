@@ -69,7 +69,7 @@ from app.modules.schedule.schemas import (
 )
 from app.modules.schedule.service import ScheduleService, _str_to_float, compute_duration
 
-router = APIRouter()
+router = APIRouter(tags=["schedule"])
 
 
 def _get_service(session: SessionDep) -> ScheduleService:

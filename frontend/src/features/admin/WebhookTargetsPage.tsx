@@ -157,7 +157,8 @@ export function WebhookTargetsPage() {
             </p>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-surface-secondary/40 text-xs uppercase tracking-wide text-content-tertiary">
               <tr>
                 <th className="text-left px-4 py-2">{t('common.name', { defaultValue: 'Name' })}</th>
@@ -217,6 +218,7 @@ export function WebhookTargetsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </div>

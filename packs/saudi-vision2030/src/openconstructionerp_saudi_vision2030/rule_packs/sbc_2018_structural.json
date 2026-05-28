@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "sbc_2018_structural",
+  "name": "SBC 2018 — Structural Requirements (SBC 301)",
+  "standard": "Saudi Building Code 2018 — SBC 301",
+  "jurisdiction": "SA",
+  "description": "Enables OCERP built-in validation rules that enforce the Saudi Building Code 2018 structural chapter (SBC 301): seismic zoning, wind loads for the Arabian Peninsula, concrete cover requirements for coastal/sabkha exposure, and reinforcement detailing.",
+  "enables_rule_ids": [
+    "sbc301.seismic_zone_assigned",
+    "sbc301.wind_load_design_basis_set",
+    "sbc301.coastal_exposure_concrete_cover",
+    "sbc301.sabkha_soil_treatment_documented",
+    "sbc301.reinforcement_detailing_present",
+    "sbc301.foundation_depth_below_frost_or_sabkha",
+    "sbc301.high_temperature_concrete_curing_plan"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "rps_pdf_generation",
+  "name": "RPS — Recibo Provisório de Serviços",
+  "standard": "RPS / NFS-e municipal",
+  "jurisdiction": "BR",
+  "description": "Enables OCERP built-in validation rules that ensure RPS (Recibo Provisório de Serviços) PDF generation contains all required fields for municipal NFS-e (Nota Fiscal de Serviços eletrônica) conversion: tomador, prestador, serviço, ISS, retenções.",
+  "enables_rule_ids": [
+    "rps.serie_numero_sequencial",
+    "rps.prestador_cnpj_valid",
+    "rps.tomador_documento_valid",
+    "rps.codigo_servico_municipal_set",
+    "rps.iss_aliquota_within_state_band",
+    "rps.retencoes_federais_documented",
+    "rps.discriminacao_servico_complete"
+  ]
+}

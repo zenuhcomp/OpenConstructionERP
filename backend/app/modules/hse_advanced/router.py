@@ -76,7 +76,7 @@ from app.modules.hse_advanced.service import (
     incident_escalation_matrix,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["hse_advanced"])
 
 
 def _get_service(session: SessionDep) -> HSEAdvancedService:

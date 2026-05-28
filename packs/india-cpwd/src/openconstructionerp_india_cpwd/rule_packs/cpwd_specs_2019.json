@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "cpwd_specs_2019",
+  "name": "CPWD Specifications 2019 — Compliance",
+  "standard": "CPWD 2019",
+  "jurisdiction": "IN",
+  "description": "Enables OCERP built-in validation rules that check BOQ items and tender documents against CPWD Specifications 2019 (Vols. I & II) — item nomenclature, units, mode of measurement, and mandatory subhead structure for central public works.",
+  "enables_rule_ids": [
+    "cpwd.subhead_structure_valid",
+    "cpwd.item_nomenclature_matches_2019",
+    "cpwd.unit_of_measurement_allowed",
+    "cpwd.mode_of_measurement_specified",
+    "cpwd.preliminary_section_present",
+    "cpwd.contingency_provision_present",
+    "cpwd.labour_cess_clause_present",
+    "cpwd.cost_index_applied_current_quarter"
+  ]
+}

@@ -116,6 +116,7 @@ class ReportTemplate(Base):
         GUID(),
         nullable=True,
         default=None,
+        index=True,
     )
     metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
         "metadata",

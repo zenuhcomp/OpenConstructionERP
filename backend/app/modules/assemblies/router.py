@@ -49,7 +49,7 @@ from app.modules.assemblies.service import AssemblyService, _str_to_float
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["assemblies"])
 
 
 def _get_service(session: SessionDep) -> AssemblyService:

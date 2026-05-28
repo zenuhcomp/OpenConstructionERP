@@ -81,7 +81,7 @@ from app.modules.schedule_advanced.service import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["schedule_advanced"])
 
 
 def _get_service(session: SessionDep) -> ScheduleAdvancedService:

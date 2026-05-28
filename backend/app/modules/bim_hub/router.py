@@ -116,7 +116,7 @@ from app.modules.bim_hub.service import BIMHubService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["bim_hub"])
 
 
 def _quick_validate_geometry_bytes(blob: bytes, ext: str) -> tuple[bool, str]:

@@ -43,7 +43,7 @@ from app.modules.pipelines.schemas import (
 )
 from app.modules.pipelines.service import PipelineService
 
-router = APIRouter()
+router = APIRouter(tags=["pipelines"])
 
 
 def _detail(p: Pipeline) -> PipelineDetail:
@@ -230,4 +230,6 @@ async def list_runs(pipeline_id: str, session: SessionDep, user_id: CurrentUserI
     service = PipelineService(session)
     pipeline = await _load(service, pipeline_id, user_id)
     runs = await service.list_runs(pipeline.id)
-    return [RunSummary(**await service.run_summary(r)) for r in runs]
+    # Batched: one IN(...) JobRun fetch instead of N session.get() calls.
+    summaries = await service.run_summaries(runs)
+    return [RunSummary(**s) for s in summaries]

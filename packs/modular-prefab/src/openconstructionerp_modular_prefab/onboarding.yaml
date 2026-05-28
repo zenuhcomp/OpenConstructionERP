@@ -1,0 +1,51 @@
+# Modular & Prefab Pack — first-login onboarding wizard.
+# Streamed by /api/v1/partner-pack/onboarding-script and rendered by
+# the OnboardingWizard React component in place of the default steps.
+
+version: 1
+locale: en
+title: "Welcome to OpenConstructionERP — Modular & Prefab Edition"
+subtitle: "Five quick steps to align your workspace with PMC practice (EN 1090, AS 5104, factory QC)."
+
+steps:
+  - id: company_profile
+    title: "PMC company profile"
+    body: "Tell us about your factory and PMC operation so dispatch notes and handover dossiers are correctly attributed."
+    fields:
+      - { key: company_name, label: "Company name", type: text, required: true }
+      - { key: factory_location, label: "Primary factory location", type: text, required: true }
+      - { key: factory_throughput, label: "Factory throughput", type: select, options: ["< 100 modules / year", "100–500 modules / year", "500–2 000 modules / year", "> 2 000 modules / year"], required: true }
+
+  - id: module_typology
+    title: "Module typology"
+    body: "Pick the dominant module type so takeoff templates and BOM starters match your product line."
+    fields:
+      - { key: module_type, label: "Module type", type: radio, options: ["Volumetric steel-frame", "Volumetric timber-frame", "Panelised (2D)", "Hybrid (panelised + pods)", "ISO 668 container conversion"], required: true, default: "Volumetric steel-frame" }
+      - { key: typical_module_lwh, label: "Typical module L × W × H (m)", type: text, required: false, default: "12.0 × 3.0 × 3.0" }
+      - { key: stack_levels_max, label: "Maximum stack height (storeys)", type: select, options: ["1", "2", "3", "4", "5", "6+"], required: true, default: "4" }
+
+  - id: standards
+    title: "Compliance standards"
+    body: "Select the standards that should validate your factory and site documentation automatically."
+    fields:
+      - { key: enable_en_1090, label: "EN 1090 — Execution of steel structures", type: checkbox, default: true }
+      - { key: enable_as_5104, label: "AS 5104 — Modular building construction", type: checkbox, default: true }
+      - { key: enable_iso_3834, label: "ISO 3834 — Welding quality requirements", type: checkbox, default: true }
+      - { key: enable_factory_qc, label: "Factory QC schedule (line inspection checkpoints)", type: checkbox, default: true }
+
+  - id: logistics
+    title: "Transport & logistics"
+    body: "Set defaults for how modules ship from factory to site so dispatch checks fire automatically."
+    fields:
+      - { key: default_transport_mode, label: "Default transport mode", type: select, options: ["Road — standard trailer", "Road — abnormal-load escort", "Rail", "Sea (RoRo)", "Sea (container)"], required: true, default: "Road — standard trailer" }
+      - { key: max_legal_width_m, label: "Maximum legal road width (m)", type: text, required: true, default: "3.0" }
+      - { key: enable_route_survey, label: "Require route survey on every shipment", type: checkbox, default: true }
+
+  - id: review
+    title: "Review and finish"
+    body: "We will create your first modular & prefab workspace with EN 1090 + AS 5104 validation, factory QC checkpoints, transport logistics checks and the module handover protocol enabled. You can change everything later in Settings."
+    action:
+      label: "Create my Modular & Prefab workspace"
+      apply:
+        - set_default_currency: EUR
+        - enable_rule_packs: [en_1090_steel, as_5104_modular, factory_qc_schedule, transport_logistics, module_handover_protocol]

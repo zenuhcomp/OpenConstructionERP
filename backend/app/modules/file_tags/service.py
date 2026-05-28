@@ -48,6 +48,10 @@ async def _to_response(session: AsyncSession, tag: FileTag) -> TagResponse:
     """Build a TagResponse including the assignment count."""
     count_stmt = select(func.count(FileTagAssignment.id)).where(FileTagAssignment.tag_id == tag.id)
     count = int((await session.execute(count_stmt)).scalar_one_or_none() or 0)
+    return _build_response(tag, count)
+
+
+def _build_response(tag: FileTag, count: int) -> TagResponse:
     return TagResponse(
         id=tag.id,
         project_id=tag.project_id,
@@ -60,6 +64,23 @@ async def _to_response(session: AsyncSession, tag: FileTag) -> TagResponse:
         created_by_id=tag.created_by_id,
         assignment_count=count,
     )
+
+
+async def _to_responses(session: AsyncSession, tags: list[FileTag]) -> list[TagResponse]:
+    """Batched variant of :func:`_to_response` — one GROUP BY query for the
+    counts instead of one COUNT(*) per tag (kills the N+1 in
+    :func:`list_tags`)."""
+    if not tags:
+        return []
+    tag_ids = [t.id for t in tags]
+    count_stmt = (
+        select(FileTagAssignment.tag_id, func.count(FileTagAssignment.id))
+        .where(FileTagAssignment.tag_id.in_(tag_ids))
+        .group_by(FileTagAssignment.tag_id)
+    )
+    rows = (await session.execute(count_stmt)).all()
+    count_by_tag = {row[0]: int(row[1]) for row in rows}
+    return [_build_response(t, count_by_tag.get(t.id, 0)) for t in tags]
 
 
 # ── CRUD ────────────────────────────────────────────────────────────
@@ -82,7 +103,7 @@ async def list_tags(
     stmt = stmt.order_by(FileTag.category.nullslast(), FileTag.display_name)
     result = await session.execute(stmt)
     tags = list(result.scalars().all())
-    return [await _to_response(session, t) for t in tags]
+    return await _to_responses(session, tags)
 
 
 async def get_tag(
@@ -302,8 +323,8 @@ async def tags_for_file(
         )
         .order_by(FileTag.category.nullslast(), FileTag.display_name)
     )
-    rows = (await session.execute(stmt)).scalars().all()
-    return [await _to_response(session, t) for t in rows]
+    rows = list((await session.execute(stmt)).scalars().all())
+    return await _to_responses(session, rows)
 
 
 async def tags_by_files(
@@ -400,7 +421,7 @@ async def seed_default_tags(
         created=created,
         existing=existing,
         total=len(seeded),
-        tags=[await _to_response(session, t) for t in seeded],
+        tags=await _to_responses(session, seeded),
     )
 
 

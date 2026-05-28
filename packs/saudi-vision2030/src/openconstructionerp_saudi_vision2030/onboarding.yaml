@@ -1,0 +1,68 @@
+# Saudi Vision 2030 Pack — first-login onboarding wizard.
+# Streamed by /api/v1/partner-pack/onboarding-script and rendered by
+# the OnboardingWizard React component in place of the default steps.
+#
+# Step titles are bilingual (Arabic + English) so reviewers on either
+# side of the bilingual workforce can read them. Body copy stays in
+# English by default; the UI swaps to the Arabic locale bundle when
+# default_locale=ar is active.
+
+version: 1
+locale: ar
+title: "أهلاً بكم في OpenConstructionERP — إصدار المملكة العربية السعودية / Welcome to OpenConstructionERP — Saudi Edition"
+subtitle: "ستة خطوات سريعة لمواءمة مساحة العمل مع معايير المملكة (SBC, MoMRAH, Aramco, NEOM). / Six quick steps to align your workspace with KSA practice."
+
+steps:
+  - id: company_profile
+    title: "الملف التعريفي للشركة / Company profile"
+    body: "Tell us about your firm so reports and tender documents are correctly attributed in both Arabic and English."
+    fields:
+      - { key: company_name_en, label: "Company name (English)", type: text, required: true }
+      - { key: company_name_ar, label: "اسم الشركة (عربي) / Company name (Arabic)", type: text, required: true }
+      - { key: cr_number, label: "Commercial Registration (CR) number", type: text, required: true }
+      - { key: vat_number, label: "VAT registration number (15-digit)", type: text, required: false }
+      - { key: head_office_region, label: "Head-office region", type: select, options: ["Riyadh", "Makkah", "Eastern Province", "Madinah", "Asir", "Tabuk (NEOM)", "Northern Borders", "Jazan", "Najran", "Al Bahah", "Al Jouf", "Hail", "Qassim"], required: true, default: "Riyadh" }
+
+  - id: building_code
+    title: "كود البناء السعودي / Saudi Building Code (SBC)"
+    body: "Confirm which SBC 2018 chapters apply to your typical scope. The BOQ editor and validation engine will enforce these."
+    fields:
+      - { key: sbc_structural, label: "SBC 301 — Structural requirements", type: checkbox, default: true }
+      - { key: sbc_thermal, label: "SBC 601/602 — Energy & thermal insulation", type: checkbox, default: true }
+      - { key: sbc_fire, label: "SBC 801 — Fire protection", type: checkbox, default: true }
+      - { key: sbc_electrical, label: "SBC 401 — Electrical", type: checkbox, default: false }
+      - { key: sbc_mechanical, label: "SBC 501 — Mechanical / HVAC", type: checkbox, default: false }
+
+  - id: project_owner
+    title: "جهة المالك الرئيسية / Primary project owner"
+    body: "Pre-select the owner type whose approval workflow you use most. You can override per project."
+    fields:
+      - { key: default_owner, label: "Default owner / authority", type: select, options: ["NEOM", "Red Sea Global", "Royal Commission for Jubail and Yanbu (RCJY)", "Saudi Aramco", "MoMRAH (municipal)", "Public Investment Fund (PIF) giga-project", "Private developer"], required: true, default: "MoMRAH (municipal)" }
+      - { key: enable_aramco_chain, label: "Enable Saudi Aramco approval chain (SAES, 9COM, MIRs)", type: checkbox, default: false }
+      - { key: enable_neom_standards, label: "Enable NEOM design-standards validation pack", type: checkbox, default: false }
+
+  - id: localization
+    title: "اللغة والاتجاه / Language and direction"
+    body: "Saudi tender packs and government submittals require Arabic. OCERP will run in right-to-left mode with bilingual exports."
+    fields:
+      - { key: primary_locale, label: "Primary UI language", type: radio, options: ["العربية / Arabic", "English", "Both side-by-side"], required: true, default: "العربية / Arabic" }
+      - { key: hijri_calendar, label: "Show Hijri dates alongside Gregorian on reports", type: checkbox, default: true }
+      - { key: bilingual_exports, label: "Generate BOQ/tender PDFs in bilingual (Arabic + English) layout", type: checkbox, default: true }
+
+  - id: cost_data
+    title: "بيانات التكاليف / Cost data sources"
+    body: "Confirm the cost region and pricing references to preload into your cost database."
+    fields:
+      - { key: cwicr_regions, label: "CWICR regions to preload", type: multiselect, options: ["Riyadh", "Jeddah", "Dammam / Eastern Province", "Madinah", "NEOM / Tabuk"], default: ["Riyadh"], required: true }
+      - { key: localization_iktva, label: "Track IKTVA (In-Kingdom Total Value Add) score on tenders", type: checkbox, default: true }
+
+  - id: review
+    title: "المراجعة والإنهاء / Review and finish"
+    body: "We will create your first Saudi project workspace with SBC + MoMRAH validation enabled, the owner approval chain you chose, SAR as the default currency, and Arabic as the primary UI language. You can change everything later in Settings."
+    action:
+      label: "إنشاء مساحة العمل / Create my Saudi workspace"
+      apply:
+        - set_default_currency: SAR
+        - set_tax_template: sa_vat_15
+        - set_default_locale: ar
+        - enable_rule_packs: [sbc_2018_structural, sbc_2018_thermal, momrah_urban_planning, aramco_approval_chain, neom_design_standards]

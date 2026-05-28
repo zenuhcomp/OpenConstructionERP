@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "as_4000_contracts",
+  "name": "AS 4000 Contract Framework — Clause Compliance",
+  "standard": "AS 4000",
+  "jurisdiction": "AU+NZ",
+  "description": "Enables OCERP built-in validation rules that check tender packs and contract documents for the mandatory AS 4000 general conditions (formal instrument of agreement, annexures, schedules and standard clauses) for the chosen contract variant.",
+  "enables_rule_ids": [
+    "as4000.formal_agreement_present",
+    "as4000.annexure_part_a_complete",
+    "as4000.annexure_part_b_complete",
+    "as4000.payment_clause_37_compliant",
+    "as4000.variations_clause_36_compliant",
+    "as4000.insurance_clause_16_set",
+    "as4000.security_clause_5_set",
+    "as4000.dispute_resolution_clause_42_set"
+  ]
+}

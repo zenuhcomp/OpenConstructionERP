@@ -1100,7 +1100,13 @@ function InspectionDrawer({
                       className="aspect-square rounded-md bg-surface-secondary overflow-hidden flex items-center justify-center text-content-tertiary text-2xs"
                     >
                       {url ? (
-                        <img src={url} alt="" className="h-full w-full object-cover" />
+                        <img
+                          src={url}
+                          alt={t('qms.inspection_photo', {
+                            defaultValue: 'Inspection photo',
+                          })}
+                          className="h-full w-full object-cover"
+                        />
                       ) : (
                         t('qms.photo', { defaultValue: 'Photo' })
                       )}

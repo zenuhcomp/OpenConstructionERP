@@ -1,0 +1,51 @@
+# India Construction Pack — first-login onboarding wizard.
+# Streamed by /api/v1/partner-pack/onboarding-script and rendered by
+# the OnboardingWizard React component in place of the default steps.
+
+version: 1
+locale: hi
+title: "Welcome to OpenConstructionERP — India Edition"
+subtitle: "Five quick steps to align your workspace with Indian practice (CPWD, IS codes, DSR, GST). पाँच सरल चरणों में अपना कार्यक्षेत्र भारतीय मानकों के अनुसार सेट करें।"
+
+steps:
+  - id: company_profile
+    title: "Company profile"
+    body: "Tell us about your firm so reports and tender documents are correctly attributed. अपनी कंपनी की जानकारी दें ताकि रिपोर्ट और निविदा दस्तावेज़ सही ढंग से तैयार हों।"
+    fields:
+      - { key: company_name, label: "Company name / कंपनी का नाम", type: text, required: true }
+      - { key: gstin, label: "GSTIN (15-digit GST registration)", type: text, required: false }
+      - { key: pan, label: "PAN (Permanent Account Number)", type: text, required: false }
+      - { key: head_office_state, label: "Head-office state / मुख्य कार्यालय राज्य", type: select, options: ["Delhi (NCR)", "Maharashtra", "Karnataka", "Tamil Nadu", "Telangana", "Gujarat", "Uttar Pradesh", "West Bengal", "Rajasthan", "Kerala", "Punjab", "Haryana", "Madhya Pradesh", "Andhra Pradesh", "Other"], required: true }
+
+  - id: specification_standard
+    title: "Specification standard (CPWD / IS codes)"
+    body: "Choose the technical specification you build to. The BOQ editor and validation engine will check against this. अपनी तकनीकी विशिष्टता चुनें — सत्यापन इंजन इसी के अनुसार जाँच करेगा।"
+    fields:
+      - { key: primary_spec, label: "Primary specification", type: radio, options: ["CPWD Specifications 2019 (Vol. I & II)", "MORTH (Roads & Bridges)", "Railway Works (RDSO)", "Private — IS codes only"], required: true, default: "CPWD Specifications 2019 (Vol. I & II)" }
+      - { key: enable_is_456, label: "Enable IS 456:2000 concrete validation rules", type: checkbox, default: true }
+      - { key: enable_is_800, label: "Enable IS 800:2007 steel validation rules", type: checkbox, default: true }
+
+  - id: rate_schedule
+    title: "Rate schedule / दर अनुसूची"
+    body: "Pre-load the official rate schedule you bid against. You can switch per project. आधिकारिक दर अनुसूची चुनें जिसके आधार पर आप निविदा करते हैं।"
+    fields:
+      - { key: default_rate_schedule, label: "Default rate schedule", type: select, options: ["DSR Delhi (Central Public Works)", "MSR Maharashtra", "KSR Karnataka", "TNSR Tamil Nadu", "Custom in-house rate library"], required: true, default: "DSR Delhi (Central Public Works)" }
+      - { key: cpwd_cost_index, label: "Apply CPWD Cost Index for current quarter", type: checkbox, default: true }
+
+  - id: tax_setup
+    title: "GST tax setup / जीएसटी कर सेटअप"
+    body: "Confirm the GST regime your firm operates under. Defaults to 18% (works contract services). अपनी जीएसटी व्यवस्था की पुष्टि करें — डिफ़ॉल्ट 18% (कार्य अनुबंध सेवाएँ)।"
+    fields:
+      - { key: default_gst_rate, label: "Default GST rate on works contracts", type: select, options: ["18% (most building & works contracts)", "12% (affordable housing, specified infrastructure)", "5% (specified PMAY / low-cost housing)"], required: true, default: "18% (most building & works contracts)" }
+      - { key: composition_scheme, label: "Registered under GST Composition Scheme", type: checkbox, default: false }
+      - { key: enable_tds, label: "Apply TDS under Section 194C on subcontractor payments", type: checkbox, default: true }
+
+  - id: review
+    title: "Review and finish / समीक्षा एवं समापन"
+    body: "We will create your first Indian project workspace with CPWD/IS validation, the DSR rate book you chose, and GST tax templates. You can change everything later in Settings. हम आपका पहला कार्यक्षेत्र CPWD/IS सत्यापन, चुनी गई DSR दर पुस्तिका, और GST कर टेम्पलेट के साथ बनाएँगे।"
+    action:
+      label: "Create my India workspace / मेरा कार्यक्षेत्र बनाएँ"
+      apply:
+        - set_default_currency: INR
+        - set_tax_template: in_gst_18
+        - enable_rule_packs: [cpwd_specs_2019, is_456_concrete, is_800_steel, dsr_delhi_rates, gst_compliance]

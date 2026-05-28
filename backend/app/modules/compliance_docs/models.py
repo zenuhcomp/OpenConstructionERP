@@ -114,6 +114,7 @@ class ComplianceDoc(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(36),
         nullable=True,
+        index=True,
     )
     # ``updated_by`` is recorded on every PATCH inside ``metadata_``
     # under the ``"updated_by"`` key — kept off the SQL schema so this

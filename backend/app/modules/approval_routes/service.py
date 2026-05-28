@@ -105,6 +105,13 @@ class ApprovalRouteService:
     async def list_steps(self, route_id: uuid.UUID) -> list[Step]:
         return await self.repo.list_steps(route_id)
 
+    async def list_steps_for_routes(
+        self,
+        route_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, list[Step]]:
+        """Batched accessor — kills the per-route N+1 in :get:`/routes`."""
+        return await self.repo.list_steps_for_routes(route_ids)
+
     async def create_route(
         self,
         payload: RouteCreate,

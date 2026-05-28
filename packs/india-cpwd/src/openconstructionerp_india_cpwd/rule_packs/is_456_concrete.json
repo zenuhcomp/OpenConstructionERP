@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "is_456_concrete",
+  "name": "IS 456:2000 — Plain & Reinforced Concrete (Code of Practice)",
+  "standard": "IS 456:2000",
+  "jurisdiction": "IN",
+  "description": "Enables OCERP built-in validation rules that check concrete BOQ items and structural details against IS 456:2000 — grade designation, minimum cement content, exposure class, cover, and durability requirements.",
+  "enables_rule_ids": [
+    "is456.concrete_grade_designation_valid",
+    "is456.minimum_cement_content_met",
+    "is456.exposure_class_specified",
+    "is456.nominal_cover_per_exposure",
+    "is456.max_water_cement_ratio_ok",
+    "is456.aggregate_size_specified",
+    "is456.workability_slump_specified",
+    "is456.curing_period_specified"
+  ]
+}

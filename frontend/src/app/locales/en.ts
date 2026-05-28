@@ -7918,6 +7918,16 @@ const resource = {
     "approvalRoutes.toast_route_updated": "Route updated",
     "approvalRoutes.toast_deleted": "Route deleted",
     // --- /Approval Routes ---
+
+    // --- i18n audit 2026-05-28 — high-traffic keys + replaced hardcoded strings ---
+    "common.download_failed": "Download failed",
+    "sidebar.main_navigation": "Main navigation",
+    "sidebar.github_repo": "GitHub repository",
+    "sidebar.telegram_community": "Telegram community",
+    "sidebar.join_telegram": "Join the Telegram community",
+    "boq.toasts.assembly_applied": "Assembly applied to BOQ",
+    "costs.vector_index_created": "Vector index created",
+    // --- /i18n audit 2026-05-28 ---
   }
 } as { translation: Record<string, string> };
 

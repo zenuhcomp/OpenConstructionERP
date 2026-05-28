@@ -58,7 +58,7 @@ from app.modules.catalog.schemas import (
 )
 from app.modules.catalog.service import CatalogResourceService
 
-router = APIRouter()
+router = APIRouter(tags=["catalog"])
 logger = logging.getLogger(__name__)
 
 

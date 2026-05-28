@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "momrah_urban_planning",
+  "name": "MoMRAH — Urban Planning & Municipal Approval",
+  "standard": "Ministry of Municipal, Rural Affairs and Housing — Urban Planning Regulations",
+  "jurisdiction": "SA",
+  "description": "Enables OCERP built-in validation rules that check submittals against MoMRAH municipal urban-planning requirements: zoning compliance, setbacks, FAR/built-up area ratios, parking provision per use class, and required attachments for the Balady building-permit portal.",
+  "enables_rule_ids": [
+    "momrah.zoning_classification_assigned",
+    "momrah.setback_compliance",
+    "momrah.far_within_zone_limit",
+    "momrah.built_up_area_ratio_compliant",
+    "momrah.parking_provision_minimum",
+    "momrah.green_area_minimum",
+    "momrah.balady_permit_attachments_complete",
+    "momrah.civil_defense_approval_referenced"
+  ]
+}

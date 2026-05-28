@@ -38,7 +38,7 @@ from app.modules.procurement.schemas import (
 )
 from app.modules.procurement.service import ProcurementService, _validate_3way_match
 
-router = APIRouter()
+router = APIRouter(tags=["procurement"])
 
 
 def _get_service(session: SessionDep) -> ProcurementService:

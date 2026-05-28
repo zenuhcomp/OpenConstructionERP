@@ -1548,7 +1548,11 @@ function AddToBOQModal({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
+          >
             <X size={16} />
           </button>
         </div>
@@ -1800,7 +1804,11 @@ function CreateAssemblyFromCostsModal({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
+          >
             <X size={16} />
           </button>
         </div>
@@ -1964,7 +1972,11 @@ function CreateCostItemModal({
               {t('costs.create_item_desc', { defaultValue: 'Create your own cost item for this project' })}
             </p>
           </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary"
+          >
             <X size={16} />
           </button>
         </div>

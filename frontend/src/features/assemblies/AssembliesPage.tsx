@@ -1167,7 +1167,11 @@ function BulkTagModal({
               {t('assemblies.bulk_tag_title', { defaultValue: `Add tag to ${count} assemblies`, count })}
             </h2>
           </div>
-          <button onClick={onClose} className="text-content-tertiary hover:text-content-primary">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="text-content-tertiary hover:text-content-primary"
+          >
             <X size={16} />
           </button>
         </div>
@@ -1362,7 +1366,11 @@ function AIGenerateModal({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
+          >
             <X size={16} />
           </button>
         </div>
@@ -1828,6 +1836,7 @@ function QuickPreview({
         </p>
         <button
           onClick={onClose}
+          aria-label={t('common.close', { defaultValue: 'Close' })}
           className="flex h-5 w-5 items-center justify-center rounded text-content-tertiary hover:text-content-primary transition-colors shrink-0"
         >
           <X size={12} />
@@ -1996,7 +2005,11 @@ function ImportAssemblyModal({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary hover:text-content-primary transition-colors"
+          >
             <X size={16} />
           </button>
         </div>

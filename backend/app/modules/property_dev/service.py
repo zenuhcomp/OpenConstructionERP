@@ -2117,6 +2117,67 @@ class PropertyDevService:
         payload.is_in_warranty = in_warranty
         return payload
 
+    async def warranty_responses(self, claims: list[WarrantyClaim]):
+        """Batched variant — kills the per-claim Handover SELECT (N+1).
+
+        Used by the warranty list endpoint where the per-row
+        ``warranty_response`` previously triggered one ``handovers.get_by_id``
+        per claim.
+        """
+        from app.modules.property_dev.schemas import WarrantyClaimResponse
+
+        if not claims:
+            return []
+
+        handover_ids = {c.handover_id for c in claims if c.handover_id}
+        handovers_by_id: dict = {}
+        if handover_ids:
+            from sqlalchemy import select
+
+            from app.modules.property_dev.models import Handover
+
+            try:
+                stmt = select(Handover).where(Handover.id.in_(handover_ids))
+                rows = (await self.session.execute(stmt)).scalars().all()
+                handovers_by_id = {h.id: h for h in rows}
+            except Exception:  # noqa: BLE001 — falls back to per-row path
+                handovers_by_id = {}
+
+        out = []
+        for claim in claims:
+            in_warranty = self._compute_in_warranty(
+                claim,
+                handovers_by_id.get(claim.handover_id) if claim.handover_id else None,
+            )
+            payload = WarrantyClaimResponse.model_validate(claim)
+            payload.is_in_warranty = in_warranty
+            out.append(payload)
+        return out
+
+    def _compute_in_warranty(self, claim: WarrantyClaim, handover) -> bool:  # noqa: ANN001
+        """Pure variant of :meth:`_is_in_warranty` — no I/O."""
+        if not claim.handover_id or not claim.raised_at:
+            return False
+        if handover is None or not handover.completed_at:
+            return False
+        from datetime import date as _date
+
+        try:
+            completed = _date.fromisoformat(handover.completed_at[:10])
+            raised = _date.fromisoformat(claim.raised_at[:10])
+        except ValueError:
+            return False
+        years = (
+            self._STRUCTURAL_WARRANTY_YEARS_DEFAULT
+            if claim.category in ("structural", "mep")
+            else self._FINISHING_WARRANTY_YEARS_DEFAULT
+        )
+        try:
+            cutoff = completed.replace(year=completed.year + years)
+        except ValueError:
+            cutoff = completed.replace(year=completed.year + years, day=28)
+        return raised <= cutoff
+
     async def get_warranty(self, w_id: uuid.UUID) -> WarrantyClaim:
         obj = await self.warranty.get_by_id(w_id)
         if obj is None:

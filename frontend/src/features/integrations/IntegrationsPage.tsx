@@ -697,7 +697,11 @@ function ConnectModal({
               })}
             </h2>
           </div>
-          <button onClick={onClose} className="text-secondary hover:text-primary">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="text-secondary hover:text-primary"
+          >
             <X size={20} />
           </button>
         </div>

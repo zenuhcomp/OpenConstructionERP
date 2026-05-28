@@ -34,7 +34,7 @@ from app.modules.bim_requirements.schemas import (
 )
 from app.modules.bim_requirements.service import BIMRequirementService
 
-router = APIRouter()
+router = APIRouter(tags=["bim_requirements"])
 logger = logging.getLogger(__name__)
 
 

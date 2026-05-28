@@ -50,7 +50,7 @@ from app.modules.dwg_takeoff.schemas import (
 )
 from app.modules.dwg_takeoff.service import DwgTakeoffService
 
-router = APIRouter()
+router = APIRouter(tags=["dwg_takeoff"])
 logger = logging.getLogger(__name__)
 
 

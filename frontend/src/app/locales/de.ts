@@ -7776,6 +7776,19 @@ const resource = {
     "approvalRoutes.toast_route_updated": "Route aktualisiert",
     "approvalRoutes.toast_deleted": "Route gelöscht",
     // --- /Approval Routes ---
+
+    // --- i18n audit 2026-05-28 — high-traffic keys + replaced hardcoded strings ---
+    "common.download_failed": "Download fehlgeschlagen",
+    "sidebar.main_navigation": "Hauptnavigation",
+    "sidebar.github_repo": "GitHub-Repository",
+    "sidebar.telegram_community": "Telegram-Community",
+    "sidebar.join_telegram": "Der Telegram-Community beitreten",
+    "boq.toasts.assembly_applied": "Baugruppe auf LV angewendet",
+    "costs.vector_index_created": "Vektor-Index erstellt",
+    "pwa.install_prompt_title": "App installieren",
+    "common.send": "Senden",
+    "common.preview": "Vorschau",
+    // --- /i18n audit 2026-05-28 ---
   }
 } as { translation: Record<string, string> };
 

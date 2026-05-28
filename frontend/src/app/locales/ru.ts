@@ -7771,6 +7771,19 @@ const resource = {
     "approvalRoutes.toast_route_updated": "Маршрут обновлён",
     "approvalRoutes.toast_deleted": "Маршрут удалён",
     // --- /Approval Routes ---
+
+    // --- i18n audit 2026-05-28 — high-traffic keys + replaced hardcoded strings ---
+    "common.download_failed": "Сбой загрузки",
+    "sidebar.main_navigation": "Основная навигация",
+    "sidebar.github_repo": "Репозиторий GitHub",
+    "sidebar.telegram_community": "Сообщество в Telegram",
+    "sidebar.join_telegram": "Присоединиться к сообществу в Telegram",
+    "boq.toasts.assembly_applied": "Сборка применена к смете",
+    "costs.vector_index_created": "Векторный индекс создан",
+    "pwa.install_prompt_title": "Установить приложение",
+    "common.send": "Отправить",
+    "common.preview": "Предпросмотр",
+    // --- /i18n audit 2026-05-28 ---
   }
 } as { translation: Record<string, string> };
 

@@ -31,7 +31,7 @@ from app.modules.match.service import (
     submit_feedback,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["match"])
 logger = logging.getLogger(__name__)
 
 

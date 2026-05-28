@@ -24,7 +24,7 @@ from app.modules.file_versions.schemas import (
 )
 from app.modules.file_versions.service import FileVersionService
 
-router = APIRouter()
+router = APIRouter(tags=["file_versions"])
 
 
 def _get_service(session: SessionDep) -> FileVersionService:

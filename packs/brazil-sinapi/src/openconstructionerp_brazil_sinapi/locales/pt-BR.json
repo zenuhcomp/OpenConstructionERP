@@ -1,0 +1,23 @@
+{
+  "_meta": {
+    "locale": "pt-BR",
+    "name": "Português (Brasil)",
+    "fallback": "en",
+    "coverage": "partial",
+    "notes": "Brazilian Portuguese overrides for ~12 high-traffic navigation and workflow keys. Uses Brazilian construction terminology (orçamento, métricas, RPS)."
+  },
+  "translation": {
+    "nav.dashboard": "Painel",
+    "nav.projects": "Projetos",
+    "nav.boq": "Orçamento",
+    "nav.costs": "Base de custos",
+    "nav.reports": "Relatórios",
+    "nav.settings": "Configurações",
+    "nav.modules": "Módulos",
+    "nav.resource_catalog": "Catálogo de recursos",
+    "nav.ai_estimate": "Estimativa por IA",
+    "nav.pdf_takeoff": "Quantitativo em PDF",
+    "common.save": "Salvar",
+    "common.cancel": "Cancelar"
+  }
+}

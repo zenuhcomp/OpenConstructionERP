@@ -356,6 +356,7 @@ function AddMarkupModal({
           </h2>
           <button
             onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
             className="p-1 rounded-md hover:bg-surface-secondary text-content-tertiary transition-colors"
           >
             <X size={16} />

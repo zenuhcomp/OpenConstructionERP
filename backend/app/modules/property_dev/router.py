@@ -181,7 +181,7 @@ from app.modules.property_dev.service import (
     supported_jurisdictions,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["property_dev"])
 
 
 def _svc(session: SessionDep) -> PropertyDevService:
@@ -1380,7 +1380,8 @@ async def list_warranty_claims(
         rows = await service.warranty.list_for_project(project_id, status=status)
     else:
         rows = []
-    return [await service.warranty_response(r) for r in rows]
+    # Batched: one IN(...) Handover fetch instead of N per-claim SELECTs.
+    return await service.warranty_responses(rows)
 
 
 @router.post(

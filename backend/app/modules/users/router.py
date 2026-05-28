@@ -138,7 +138,7 @@ class TourStatePayload(BaseModel):
     tours: dict[str, TourStateEntry]
 
 
-router = APIRouter()
+router = APIRouter(tags=["users"])
 
 
 def _get_service(session: SessionDep, settings: SettingsDep) -> UserService:

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 50" width="260" height="50" role="img" aria-label="Saudi Vision 2030 Pack">
+  <title>Saudi Vision 2030 Pack</title>
+  <desc>Saudi Vision 2030 Pack wordmark in Saudi flag green with a white accent block.</desc>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="20" letter-spacing="-0.3">
+    <text x="6" y="32" fill="#006C35">Saudi Vision 2030</text>
+    <text x="186" y="32" fill="#006C35">Pack</text>
+  </g>
+  <rect x="232" y="10" width="14" height="14" rx="2" fill="#006C35"/>
+  <rect x="236" y="14" width="6" height="6" fill="#FFFFFF"/>
+</svg>

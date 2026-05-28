@@ -431,7 +431,7 @@ function DataTableTab({ sessionId, describe }: { sessionId: string; describe: De
             />
           )}
           {filterCol && filterVal && (
-            <button onClick={applyFilter} className="h-7 px-2 rounded-md text-2xs font-medium bg-oe-blue text-white">OK</button>
+            <button onClick={applyFilter} className="h-9 px-3 rounded-md text-2xs font-medium bg-oe-blue text-white">OK</button>
           )}
         </div>
 
@@ -2276,6 +2276,7 @@ function DrillDownModal({
           <button
             onClick={onClose}
             data-testid="chart-drill-close"
+            aria-label={t('common.close', { defaultValue: 'Close' })}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover"
           >
             <X size={18} />
@@ -2355,7 +2356,12 @@ function ViewsDrawer({ open, onClose }: ViewsDrawerProps) {
           <h3 className="text-sm font-semibold text-content-primary">
             {t('explorer.saved_views', { defaultValue: 'Saved views' })}
           </h3>
-          <button onClick={onClose} className="h-7 w-7 rounded-lg hover:bg-surface-hover flex items-center justify-center" data-testid="views-drawer-close">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="h-7 w-7 rounded-lg hover:bg-surface-hover flex items-center justify-center"
+            data-testid="views-drawer-close"
+          >
             <X size={16} />
           </button>
         </div>
@@ -2726,7 +2732,11 @@ function CreateBOQFromPivotModal({ open, onClose, groups, groupByColumns, aggCol
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-hover transition-colors"
+          >
             <X size={18} />
           </button>
         </div>

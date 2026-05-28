@@ -38,7 +38,7 @@ from app.modules.file_search.service import (
     search_content,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["file_search"])
 logger = logging.getLogger(__name__)
 
 

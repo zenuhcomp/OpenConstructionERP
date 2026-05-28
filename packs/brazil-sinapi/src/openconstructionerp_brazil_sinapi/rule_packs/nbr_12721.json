@@ -1,0 +1,15 @@
+{
+  "rule_pack_id": "nbr_12721",
+  "name": "ABNT NBR 12721 — Avaliação de custos unitários de construção",
+  "standard": "NBR 12721",
+  "jurisdiction": "BR",
+  "description": "Enables OCERP built-in validation rules that enforce the ABNT NBR 12721 unit-cost evaluation method (CUB, areas, padrão, projeto-padrão) for residential and commercial construction.",
+  "enables_rule_ids": [
+    "nbr12721.cub_reference_present",
+    "nbr12721.area_equivalente_calculated",
+    "nbr12721.padrao_classification_set",
+    "nbr12721.projeto_padrao_assigned",
+    "nbr12721.fracao_ideal_consistent",
+    "nbr12721.memorial_descritivo_attached"
+  ]
+}

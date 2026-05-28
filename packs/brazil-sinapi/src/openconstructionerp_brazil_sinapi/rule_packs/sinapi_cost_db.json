@@ -1,0 +1,15 @@
+{
+  "rule_pack_id": "sinapi_cost_db",
+  "name": "SINAPI — Sistema Nacional de Pesquisa de Custos e Índices",
+  "standard": "SINAPI",
+  "jurisdiction": "BR",
+  "description": "Enables OCERP built-in validation rules that align project unit rates with the current SINAPI (Caixa Econômica Federal) reference cost index, by state and reference month.",
+  "enables_rule_ids": [
+    "sinapi.reference_month_current",
+    "sinapi.state_index_applied",
+    "sinapi.unit_rate_within_band",
+    "sinapi.composicao_code_valid",
+    "sinapi.bdi_present",
+    "sinapi.encargos_sociais_present"
+  ]
+}

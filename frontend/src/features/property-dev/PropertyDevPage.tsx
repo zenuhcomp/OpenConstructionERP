@@ -678,6 +678,7 @@ export function PropertyDevPage() {
               <input
                 type="text"
                 placeholder={t('common.search', { defaultValue: 'Search…' })}
+                aria-label={t('common.search', { defaultValue: 'Search' })}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className={clsx(inputCls, 'pl-8')}

@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "sbc_2018_thermal",
+  "name": "SBC 2018 — Energy & Thermal Insulation (SBC 601/602)",
+  "standard": "Saudi Building Code 2018 — SBC 601, SBC 602",
+  "jurisdiction": "SA",
+  "description": "Enables OCERP built-in validation rules that enforce the Saudi Building Code energy chapters (SBC 601 residential, SBC 602 commercial): U-values for walls/roofs/glazing in the three KSA climate zones, mandatory insulation thicknesses, and reflective roof coatings.",
+  "enables_rule_ids": [
+    "sbc601.climate_zone_assigned",
+    "sbc601.wall_u_value_within_band",
+    "sbc601.roof_u_value_within_band",
+    "sbc601.glazing_shgc_compliant",
+    "sbc601.insulation_thickness_min",
+    "sbc602.commercial_envelope_compliance",
+    "sbc602.hvac_efficiency_minimum",
+    "sbc602.reflective_roof_coating_present"
+  ]
+}

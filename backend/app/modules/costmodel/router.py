@@ -42,7 +42,7 @@ from app.modules.costmodel.schemas import (
 )
 from app.modules.costmodel.service import CostModelService
 
-router = APIRouter()
+router = APIRouter(tags=["costmodel"])
 
 
 def _get_service(session: SessionDep) -> CostModelService:

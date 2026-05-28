@@ -57,7 +57,7 @@ from app.modules.file_references.service import (
     validate_iso19650_name,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["file_references"])
 logger = logging.getLogger(__name__)
 
 

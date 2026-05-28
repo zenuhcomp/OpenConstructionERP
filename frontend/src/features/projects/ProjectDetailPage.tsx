@@ -861,6 +861,7 @@ function ImportDialog({
           </div>
           <button
             onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:bg-surface-secondary transition-colors"
           >
             <X size={18} />

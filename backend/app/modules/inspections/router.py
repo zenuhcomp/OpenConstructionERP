@@ -26,7 +26,7 @@ from app.modules.inspections.schemas import (
 )
 from app.modules.inspections.service import InspectionService
 
-router = APIRouter()
+router = APIRouter(tags=["inspections"])
 logger = logging.getLogger(__name__)
 
 

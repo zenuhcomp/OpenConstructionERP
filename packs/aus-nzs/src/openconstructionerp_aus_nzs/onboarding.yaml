@@ -1,0 +1,49 @@
+# AU/NZ Construction Pack — first-login onboarding wizard.
+# Streamed by /api/v1/partner-pack/onboarding-script and rendered by
+# the OnboardingWizard React component in place of the default steps.
+
+version: 1
+locale: en-AU
+title: "Welcome to OpenConstructionERP — AU/NZ Edition"
+subtitle: "Five quick steps to align your workspace with Australian and New Zealand practice (AS 1684, NZS 3604, Rawlinsons, AS 4000)."
+
+steps:
+  - id: company_profile
+    title: "Company profile"
+    body: "Tell us about your organisation so reports and tender documents are correctly attributed."
+    fields:
+      - { key: company_name, label: "Company name", type: text, required: true }
+      - { key: abn_nzbn, label: "ABN (Australia) or NZBN (New Zealand)", type: text, required: false }
+      - { key: gst_number, label: "GST registration number", type: text, required: false }
+      - { key: head_office_region, label: "Head-office region", type: select, options: ["New South Wales", "Victoria", "Queensland", "Western Australia", "South Australia", "Tasmania", "Australian Capital Territory", "Northern Territory", "Auckland", "Wellington", "Canterbury", "Other NZ region"], required: true }
+
+  - id: measurement_standard
+    title: "Measurement and framing standard"
+    body: "Choose which timber-framing standard you typically work to. The BOQ editor and BIM validator will check against this standard."
+    fields:
+      - { key: primary_standard, label: "Primary standard", type: radio, options: ["AS 1684 — Residential timber-framed construction (Australia)", "NZS 3604 — Timber-framed buildings (New Zealand)", "Both (choose per project)"], required: true, default: "Both (choose per project)" }
+      - { key: enable_rawlinsons_benchmarks, label: "Enable Rawlinsons cost-per-m² benchmarks on the dashboard", type: checkbox, default: true }
+
+  - id: contract_suite
+    title: "Default contract framework"
+    body: "Pre-select your usual AS 4000 contract variant. You can override on every project."
+    fields:
+      - { key: default_as4000_variant, label: "Default AS 4000 contract", type: select, options: ["AS 4000 — General conditions of contract", "AS 4902 — Design and construct", "AS 4905 — Minor works", "AS 4906 — Minor works (cost-plus)", "AS 2124 — General conditions (legacy)"], required: true, default: "AS 4000 — General conditions of contract" }
+      - { key: include_whs_templates, label: "Apply WHS Act 2011 (AU) / HSWA 2015 (NZ) safety document templates", type: checkbox, default: true }
+
+  - id: cost_data
+    title: "Cost data sources"
+    body: "Confirm which AU/NZ cost regions and indices should be loaded into your cost database."
+    fields:
+      - { key: cwicr_regions, label: "CWICR regions to preload", type: multiselect, options: ["Sydney", "Melbourne", "Brisbane", "Perth", "Adelaide", "Auckland", "Wellington"], default: ["Sydney"], required: true }
+      - { key: rawlinsons_subscription, label: "I have an active Rawlinsons Australian Construction Handbook subscription (enables live index pulls)", type: checkbox, default: false }
+
+  - id: review
+    title: "Review and finish"
+    body: "We will create your first AU/NZ project workspace with AS 1684 and NZS 3604 validation, the AS 4000 contract template you chose, and Rawlinsons benchmarks on the dashboard. You can change everything later in Settings."
+    action:
+      label: "Create my AU/NZ workspace"
+      apply:
+        - set_default_currency: AUD
+        - set_tax_template: au_gst_10
+        - enable_rule_packs: [as_1684_timber, nzs_3604_timber, rawlinsons_benchmarks, as_4000_contracts]

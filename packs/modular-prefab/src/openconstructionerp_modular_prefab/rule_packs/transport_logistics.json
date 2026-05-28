@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "transport_logistics",
+  "name": "Transport logistics — module shipment compliance",
+  "standard": "Abnormal-load transport regulations / ISO 668 container",
+  "jurisdiction": "INTL",
+  "description": "Enables OCERP built-in validation rules that check transport packages for each module (dimensions, weight, escort requirements, route survey, insurance) before factory dispatch.",
+  "enables_rule_ids": [
+    "transport.dimensions_within_legal_envelope",
+    "transport.gross_weight_within_axle_limits",
+    "transport.escort_requirement_evaluated",
+    "transport.route_survey_attached",
+    "transport.permit_obtained",
+    "transport.cargo_insurance_certificate_attached",
+    "transport.lashing_plan_documented"
+  ]
+}

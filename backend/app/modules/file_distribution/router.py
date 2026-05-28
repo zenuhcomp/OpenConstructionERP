@@ -47,7 +47,7 @@ from app.modules.file_distribution.service import (
     SubscriptionService,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["file_distribution"])
 logger = logging.getLogger(__name__)
 
 

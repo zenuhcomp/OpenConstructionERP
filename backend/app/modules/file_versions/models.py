@@ -76,7 +76,9 @@ class FileVersion(Base):
     canonical_name: Mapped[str] = mapped_column(String(255), nullable=False)
     previous_version_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
+        ForeignKey("oe_file_version.id", ondelete="SET NULL"),
         nullable=True,
+        index=True,
         default=None,
     )
     is_current: Mapped[bool] = mapped_column(
@@ -86,7 +88,13 @@ class FileVersion(Base):
         server_default="1",
     )
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
-    superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, default=None)
+    superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        ForeignKey("oe_file_version.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     uploaded_by_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),

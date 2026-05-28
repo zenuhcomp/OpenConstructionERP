@@ -328,6 +328,10 @@ class PipelineService:
         job: JobRun | None = None
         if run.job_run_id is not None:
             job = await self.session.get(JobRun, run.job_run_id)
+        return self._run_summary_from_job(run, job)
+
+    @staticmethod
+    def _run_summary_from_job(run: PipelineRun, job: Any) -> dict[str, Any]:
         return {
             "id": str(run.id),
             "status": job.status if job is not None else "pending",
@@ -336,3 +340,32 @@ class PipelineService:
             "finished_at": job.completed_at.isoformat() if job is not None and job.completed_at else None,
             "progress_percent": job.progress_percent if job is not None else 0,
         }
+
+    async def run_summaries(self, runs: list[PipelineRun]) -> list[dict[str, Any]]:
+        """Batched variant of :meth:`run_summary`.
+
+        Replaces the per-run ``session.get(JobRun, ...)`` (classic N+1 from
+        the ``/runs/`` endpoint) with a single ``IN (...)`` query, then
+        renders each row from the prefetched job map.
+        """
+        if not runs:
+            return []
+
+        from sqlalchemy import select
+
+        from app.core.job_run import JobRun
+
+        job_ids = [r.job_run_id for r in runs if r.job_run_id is not None]
+        jobs_by_id: dict[Any, Any] = {}
+        if job_ids:
+            stmt = select(JobRun).where(JobRun.id.in_(job_ids))
+            rows = (await self.session.execute(stmt)).scalars().all()
+            jobs_by_id = {j.id: j for j in rows}
+
+        return [
+            self._run_summary_from_job(
+                r,
+                jobs_by_id.get(r.job_run_id) if r.job_run_id is not None else None,
+            )
+            for r in runs
+        ]

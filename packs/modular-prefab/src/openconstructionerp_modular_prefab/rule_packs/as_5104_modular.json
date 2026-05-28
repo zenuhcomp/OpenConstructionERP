@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "as_5104_modular",
+  "name": "AS 5104 — Modular building construction",
+  "standard": "AS 5104",
+  "jurisdiction": "AU/NZ",
+  "description": "Enables OCERP built-in validation rules that align modular building construction with AS 5104 / NCC provisions: structural integration, fire separation between modules, services pass-through, and inter-module connection certification.",
+  "enables_rule_ids": [
+    "as5104.module_structural_class_set",
+    "as5104.inter_module_connection_certified",
+    "as5104.fire_separation_between_modules",
+    "as5104.services_pass_through_documented",
+    "as5104.transport_load_case_evaluated",
+    "as5104.installation_load_case_evaluated",
+    "as5104.ncc_volume_one_compliance"
+  ]
+}

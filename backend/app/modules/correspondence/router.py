@@ -38,7 +38,7 @@ from app.modules.correspondence.schemas import (
 )
 from app.modules.correspondence.service import CorrespondenceService
 
-router = APIRouter()
+router = APIRouter(tags=["correspondence"])
 logger = logging.getLogger(__name__)
 
 # On-disk storage for correspondence attachments. Path layout mirrors

@@ -23,7 +23,7 @@ from app.modules.ncr.schemas import (
 )
 from app.modules.ncr.service import NCRService
 
-router = APIRouter()
+router = APIRouter(tags=["ncr"])
 logger = logging.getLogger(__name__)
 
 

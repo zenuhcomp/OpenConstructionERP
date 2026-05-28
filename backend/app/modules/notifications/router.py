@@ -64,7 +64,7 @@ from app.modules.notifications.service import (
 )
 from app.modules.notifications.ws_hub import notifications_ws_hub
 
-router = APIRouter()
+router = APIRouter(tags=["notifications"])
 logger = logging.getLogger(__name__)
 
 

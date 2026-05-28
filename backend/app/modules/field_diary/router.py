@@ -59,7 +59,7 @@ from app.modules.field_diary.service import (
     FieldDiaryService,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["field_diary"])
 logger = logging.getLogger(__name__)
 
 _bearer = HTTPBearer(auto_error=False)

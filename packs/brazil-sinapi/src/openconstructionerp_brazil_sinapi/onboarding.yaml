@@ -1,0 +1,52 @@
+# Brazil Construction Pack — first-login onboarding wizard.
+# Streamed by /api/v1/partner-pack/onboarding-script and rendered by
+# the OnboardingWizard React component in place of the default steps.
+
+version: 1
+locale: pt
+title: "Bem-vindo ao OpenConstructionERP — Edição Brasil"
+subtitle: "Cinco passos rápidos para alinhar seu espaço de trabalho à prática brasileira (SINAPI, NBR, RPS)."
+
+steps:
+  - id: company_profile
+    title: "Perfil da empresa"
+    body: "Informe os dados da sua construtora para que relatórios e documentos de licitação sejam atribuídos corretamente."
+    fields:
+      - { key: company_name, label: "Razão social", type: text, required: true }
+      - { key: cnpj, label: "CNPJ", type: text, required: true }
+      - { key: inscricao_municipal, label: "Inscrição municipal", type: text, required: false }
+      - { key: state, label: "Estado-sede", type: select, options: ["SP", "RJ", "MG", "RS", "PR", "SC", "BA", "PE", "CE", "GO", "DF", "AM", "PA", "MT", "MS", "ES", "RN", "PB", "AL", "SE", "MA", "PI", "RO", "AC", "RR", "AP", "TO"], required: true }
+
+  - id: cost_standard
+    title: "Base de custos (SINAPI)"
+    body: "Escolha o estado e o mês de referência SINAPI usados para precificar suas composições."
+    fields:
+      - { key: sinapi_state, label: "Estado SINAPI", type: select, options: ["SP", "RJ", "MG", "DF", "RS", "PR", "SC", "BA", "PE", "CE"], required: true, default: "SP" }
+      - { key: sinapi_reference_month, label: "Mês de referência", type: text, required: true, default: "2026-04" }
+      - { key: enable_bdi_calculator, label: "Habilitar calculadora de BDI no orçamento", type: checkbox, default: true }
+
+  - id: tax_regime
+    title: "Regime tributário e ISS"
+    body: "Configure o regime tributário e a alíquota ISS municipal padrão para emissão de RPS."
+    fields:
+      - { key: regime_tributario, label: "Regime tributário", type: radio, options: ["Simples Nacional", "Lucro Presumido", "Lucro Real"], required: true, default: "Lucro Presumido" }
+      - { key: iss_aliquota, label: "Alíquota ISS padrão (%)", type: text, required: true, default: "3.0" }
+      - { key: codigo_servico_padrao, label: "Código de serviço municipal padrão", type: text, required: false, default: "7.02" }
+
+  - id: standards
+    title: "Normas técnicas (ABNT)"
+    body: "Selecione as normas ABNT que devem validar seus projetos automaticamente."
+    fields:
+      - { key: enable_nbr_12721, label: "NBR 12721 — Avaliação de custos unitários (CUB)", type: checkbox, default: true }
+      - { key: enable_nbr_6118, label: "NBR 6118 — Estruturas de concreto", type: checkbox, default: true }
+      - { key: enable_nbr_14931, label: "NBR 14931 — Execução de estruturas de concreto", type: checkbox, default: true }
+
+  - id: review
+    title: "Revisar e finalizar"
+    body: "Criaremos seu primeiro projeto brasileiro com validação SINAPI + NBR 12721, modelo tributário ISS estadual e geração de RPS habilitada. Você pode alterar tudo depois em Configurações."
+    action:
+      label: "Criar meu workspace brasileiro"
+      apply:
+        - set_default_currency: BRL
+        - set_tax_template: br_iss_state
+        - enable_rule_packs: [sinapi_cost_db, nbr_12721, abnt_concrete, rps_pdf_generation]

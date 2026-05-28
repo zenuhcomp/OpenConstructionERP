@@ -43,7 +43,7 @@ from app.modules.file_comments.service import (
     update_comment,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["file_comments"])
 logger = logging.getLogger(__name__)
 
 

@@ -42,7 +42,7 @@ from app.modules.cde.schemas import (
 from app.modules.cde.service import CDEService
 from app.modules.cde.suitability import SUITABILITY_CODES
 
-router = APIRouter()
+router = APIRouter(tags=["cde"])
 logger = logging.getLogger(__name__)
 
 

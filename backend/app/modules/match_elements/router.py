@@ -48,7 +48,7 @@ from app.modules.match_elements.excel_import import parse_boq_xlsx
 from app.modules.match_elements.models import MatchPromptTemplate, MatchSession
 from app.modules.match_elements.service import get_service
 
-router = APIRouter()
+router = APIRouter(tags=["match_elements"])
 
 
 def _u(s: str) -> uuid.UUID:

@@ -96,7 +96,7 @@ def _decorate_bookings(
     return out
 
 
-router = APIRouter()
+router = APIRouter(tags=["accommodation"])
 
 
 # ── Accommodation CRUD ────────────────────────────────────────────────────

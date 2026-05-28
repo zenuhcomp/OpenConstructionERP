@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "iec_61730_pv",
+  "name": "IEC 61730 — Photovoltaic (PV) module safety qualification",
+  "standard": "IEC 61730",
+  "jurisdiction": "INTL",
+  "description": "Enables OCERP built-in validation rules that check PV array BOMs and installation packages against IEC 61730 module safety qualification, IEC 61215 performance, and IEC 62548 array design requirements.",
+  "enables_rule_ids": [
+    "iec61730.module_class_a_certified",
+    "iec61730.module_iec_61215_certified",
+    "iec62548.string_voltage_within_limit",
+    "iec62548.array_overcurrent_protection_sized",
+    "iec62548.dc_isolation_documented",
+    "iec61730.module_application_class_set",
+    "iec61730.fire_class_documented"
+  ]
+}

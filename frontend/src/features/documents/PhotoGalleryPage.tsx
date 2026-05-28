@@ -385,6 +385,7 @@ function EditPhotoModal({
           </h3>
           <button
             onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-content-secondary hover:bg-surface-secondary transition-colors"
           >
             <X size={14} />

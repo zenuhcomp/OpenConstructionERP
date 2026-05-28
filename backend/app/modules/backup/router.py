@@ -40,7 +40,7 @@ from app.modules.backup.service import (
     spool_to_disk,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["backup"])
 logger = logging.getLogger(__name__)
 
 

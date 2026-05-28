@@ -65,7 +65,7 @@ from app.modules.service.schemas import (
 )
 from app.modules.service.service import ServiceService
 
-router = APIRouter()
+router = APIRouter(tags=["service"])
 logger = logging.getLogger(__name__)
 
 

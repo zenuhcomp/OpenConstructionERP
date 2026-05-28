@@ -33,7 +33,7 @@ from app.modules.file_trash.schemas import (
 )
 from app.modules.file_trash.service import FileTrashService, purge_expired_trash
 
-router = APIRouter()
+router = APIRouter(tags=["file_trash"])
 
 
 def _get_service(session: SessionDep) -> FileTrashService:

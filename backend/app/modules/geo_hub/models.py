@@ -397,6 +397,7 @@ class GeoViewpoint(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
         nullable=True,
+        index=True,
     )
     metadata_: Mapped[dict] = mapped_column(  # type: ignore[assignment]
         "metadata",
@@ -649,6 +650,7 @@ class GeoRasterOverlay(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
         nullable=True,
+        index=True,
     )
     # Soft-delete sentinel. Endpoints filter out non-null rows; a
     # purge sweep can later hard-delete after a grace period.

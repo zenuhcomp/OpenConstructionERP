@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "locale": "hi",
+    "name_native": "हिन्दी",
+    "name_english": "Hindi",
+    "direction": "ltr",
+    "pack": "india-cpwd",
+    "note": "Partial override — only the highest-traffic UI keys are translated here. The core 'hi' bundle (if present) supplies the long-tail; missing keys fall back to English."
+  },
+  "common.dashboard": "डैशबोर्ड",
+  "common.projects": "परियोजनाएं",
+  "common.costs": "लागत",
+  "common.boq": "मात्रा बिल",
+  "common.takeoff": "मात्रा निकालना",
+  "common.tendering": "निविदा",
+  "common.reports": "रिपोर्ट",
+  "common.settings": "सेटिंग्स",
+  "common.search": "खोजें",
+  "common.save": "सहेजें",
+  "common.cancel": "रद्द करें",
+  "common.delete": "हटाएं",
+  "common.export": "निर्यात",
+  "common.import": "आयात",
+  "common.validate": "सत्यापित करें"
+}

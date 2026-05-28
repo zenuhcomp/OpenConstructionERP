@@ -1698,6 +1698,7 @@ const BimLinkPopover = forwardRef<
           </button>
           <button
             onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
             className="h-6 w-6 flex items-center justify-center rounded text-content-tertiary
                        hover:text-content-primary hover:bg-surface-tertiary transition-colors"
           >

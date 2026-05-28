@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "dsr_delhi_rates",
+  "name": "DSR — Delhi Schedule of Rates (CPWD)",
+  "standard": "DSR",
+  "jurisdiction": "IN",
+  "description": "Enables OCERP built-in validation rules that align BOQ unit rates and item references with the CPWD Delhi Schedule of Rates (DSR), apply the current cost index, and flag positions that deviate beyond an acceptable variance band.",
+  "enables_rule_ids": [
+    "dsr.item_code_exists_in_book",
+    "dsr.unit_matches_book",
+    "dsr.unit_rate_within_variance_band",
+    "dsr.cost_index_applied",
+    "dsr.non_dsr_items_justified",
+    "dsr.market_rate_analysis_attached",
+    "dsr.labour_component_extracted"
+  ]
+}

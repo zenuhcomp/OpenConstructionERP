@@ -54,7 +54,7 @@ from app.modules.supplier_catalogs.schemas import (
 )
 from app.modules.supplier_catalogs.service import SupplierCatalogsService
 
-router = APIRouter()
+router = APIRouter(tags=["supplier_catalogs"])
 
 
 def _svc(session: SessionDep) -> SupplierCatalogsService:

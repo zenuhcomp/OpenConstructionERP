@@ -7090,6 +7090,19 @@ const resource = {
     "property_dev.doc_templates.doctype_placeholder": "pick or type any slug",
     "property_dev.doc_templates.entity_placeholder": "pick or type any slug",
     "property_dev.doc_templates.regulator_hint": "Pick a preset or type any compliance authority code.",
+
+    // --- i18n audit 2026-05-28 — high-traffic keys + replaced hardcoded strings ---
+    "common.download_failed": "Error en la descarga",
+    "sidebar.main_navigation": "Navegación principal",
+    "sidebar.github_repo": "Repositorio GitHub",
+    "sidebar.telegram_community": "Comunidad de Telegram",
+    "sidebar.join_telegram": "Unirse a la comunidad de Telegram",
+    "boq.toasts.assembly_applied": "Conjunto aplicado al presupuesto",
+    "costs.vector_index_created": "Índice vectorial creado",
+    "pwa.install_prompt_title": "Instalar la aplicación",
+    "common.send": "Enviar",
+    "common.preview": "Vista previa",
+    // --- /i18n audit 2026-05-28 ---
   }
 } as { translation: Record<string, string> };
 

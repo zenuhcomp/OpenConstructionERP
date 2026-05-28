@@ -66,7 +66,7 @@ from app.modules.portal.schemas import (
 )
 from app.modules.portal.service import PortalService
 
-router = APIRouter()
+router = APIRouter(tags=["portal"])
 logger = logging.getLogger(__name__)
 
 

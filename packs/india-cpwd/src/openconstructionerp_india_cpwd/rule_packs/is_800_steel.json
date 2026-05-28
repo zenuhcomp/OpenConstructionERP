@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "is_800_steel",
+  "name": "IS 800:2007 — General Construction in Steel (Code of Practice)",
+  "standard": "IS 800:2007",
+  "jurisdiction": "IN",
+  "description": "Enables OCERP built-in validation rules that check structural-steel BOQ items and design documents against IS 800:2007 — section designation, steel grade, connection type, and corrosion-protection requirements.",
+  "enables_rule_ids": [
+    "is800.steel_grade_specified",
+    "is800.section_designation_valid",
+    "is800.connection_type_specified",
+    "is800.weld_specification_present",
+    "is800.bolt_grade_specified",
+    "is800.corrosion_protection_clause",
+    "is800.fire_protection_rating_specified",
+    "is800.limit_state_design_basis"
+  ]
+}

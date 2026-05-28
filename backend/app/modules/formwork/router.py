@@ -38,7 +38,7 @@ from app.modules.formwork.schemas import (
 )
 from app.modules.formwork.service import FormworkService
 
-router = APIRouter()
+router = APIRouter(tags=["formwork"])
 
 
 def _system_to_response(item: FormworkSystem) -> FormworkSystemResponse:

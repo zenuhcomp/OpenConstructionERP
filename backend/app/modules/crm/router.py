@@ -60,7 +60,7 @@ from app.modules.crm.service import (
     redact_lead_pii,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["crm"])
 
 
 def _get_service(session: SessionDep) -> CrmService:

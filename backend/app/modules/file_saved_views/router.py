@@ -34,7 +34,7 @@ from app.modules.file_saved_views.service import (
     SavedViewService,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["file_saved_views"])
 logger = logging.getLogger(__name__)
 
 

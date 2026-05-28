@@ -1040,7 +1040,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           the nav region (WCAG 2.4.1 + 1.3.1, Round 2 Wave D audit). */}
       <nav
         role="navigation"
-        aria-label="Main navigation"
+        aria-label={t('sidebar.main_navigation', { defaultValue: 'Main navigation' })}
         className={clsx(
           'flex-1 overflow-y-auto pt-2 pb-3',
           iconified ? 'px-2' : 'px-3',
@@ -1404,8 +1404,8 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               href="https://github.com/datadrivenconstruction/OpenConstructionERP"
               target="_blank"
               rel="noopener noreferrer"
-              title={`GitHub repository (v${APP_VERSION})`}
-              aria-label="GitHub repository"
+              title={`${t('sidebar.github_repo', { defaultValue: 'GitHub repository' })} (v${APP_VERSION})`}
+              aria-label={t('sidebar.github_repo', { defaultValue: 'GitHub repository' })}
               className="flex h-8 w-8 items-center justify-center rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated transition-all"
             >
               <Github size={13} strokeWidth={1.75} className="text-content-secondary" />
@@ -1415,7 +1415,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               target="_blank"
               rel="noopener noreferrer"
               title={t('sidebar.community_title', { defaultValue: 'Community' })}
-              aria-label="Telegram community"
+              aria-label={t('sidebar.telegram_community', { defaultValue: 'Telegram community' })}
               className="flex h-8 w-8 items-center justify-center rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated transition-all"
             >
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-[13px] w-[13px] text-content-secondary" aria-hidden>
@@ -1439,8 +1439,8 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                 href="https://github.com/datadrivenconstruction/OpenConstructionERP"
                 target="_blank"
                 rel="noopener noreferrer"
-                title="GitHub repository"
-                aria-label="GitHub repository"
+                title={t('sidebar.github_repo', { defaultValue: 'GitHub repository' })}
+                aria-label={t('sidebar.github_repo', { defaultValue: 'GitHub repository' })}
                 className="flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
               >
                 <Github size={13} strokeWidth={1.75} className="text-content-secondary" />
@@ -1450,8 +1450,8 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                 href="https://t.me/datadrivenconstruction"
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Join the Telegram community"
-                aria-label="Telegram community"
+                title={t('sidebar.join_telegram', { defaultValue: 'Join the Telegram community' })}
+                aria-label={t('sidebar.telegram_community', { defaultValue: 'Telegram community' })}
                 className="flex items-center justify-center gap-1.5 rounded-md border border-border-light bg-surface-primary hover:bg-surface-elevated hover:border-border-medium px-2 py-1.5 transition-all"
               >
                 <svg viewBox="0 0 24 24" fill="currentColor" className="h-[13px] w-[13px] text-content-secondary" aria-hidden>

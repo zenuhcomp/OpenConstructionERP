@@ -30,7 +30,7 @@ from app.modules.webhook_leads.schemas import (
 )
 from app.modules.webhook_leads.service import WebhookLeadsService
 
-router = APIRouter()
+router = APIRouter(tags=["webhook_leads"])
 
 
 def _get_service(session: SessionDep) -> WebhookLeadsService:

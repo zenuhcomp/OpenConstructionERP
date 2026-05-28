@@ -90,7 +90,7 @@ from app.modules.projects.service import (
     update_match_settings,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["projects"])
 logger = logging.getLogger(__name__)
 
 

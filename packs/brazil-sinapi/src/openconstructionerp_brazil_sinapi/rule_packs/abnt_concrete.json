@@ -1,0 +1,15 @@
+{
+  "rule_pack_id": "abnt_concrete",
+  "name": "ABNT NBR 6118 / 14931 — Estruturas de concreto",
+  "standard": "ABNT NBR 6118",
+  "jurisdiction": "BR",
+  "description": "Enables OCERP built-in validation rules that enforce ABNT NBR 6118 (concrete structure design) and NBR 14931 (execution) requirements: concrete class, cover, durability class, control category.",
+  "enables_rule_ids": [
+    "abnt.concrete_class_min_c25",
+    "abnt.cover_meets_environmental_class",
+    "abnt.durability_class_assigned",
+    "abnt.control_category_set",
+    "abnt.rebar_specification_compliant",
+    "abnt.slump_target_documented"
+  ]
+}

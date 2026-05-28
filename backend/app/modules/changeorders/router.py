@@ -37,7 +37,7 @@ from app.modules.changeorders.schemas import (
 )
 from app.modules.changeorders.service import ChangeOrderService
 
-router = APIRouter()
+router = APIRouter(tags=["changeorders"])
 logger = logging.getLogger(__name__)
 
 

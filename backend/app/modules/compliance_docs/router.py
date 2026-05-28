@@ -54,7 +54,7 @@ _MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024
 _ATTACHMENTS_DIR = Path("data") / "compliance_docs" / "attachments"
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["compliance_docs"])
 
 
 def _get_service(session: SessionDep) -> ComplianceDocService:

@@ -1129,6 +1129,7 @@ function TextPinPopup({
           <button
             type="button"
             onClick={onCancel}
+            aria-label={t('common.cancel', { defaultValue: 'Cancel' })}
             className="flex h-5 w-5 items-center justify-center rounded-md
                        text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors"
           >

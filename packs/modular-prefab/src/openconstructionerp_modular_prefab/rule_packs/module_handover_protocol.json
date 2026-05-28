@@ -1,0 +1,16 @@
+{
+  "rule_pack_id": "module_handover_protocol",
+  "name": "Module handover protocol — site installation acceptance",
+  "standard": "PMC site handover (internal best practice)",
+  "jurisdiction": "INTL",
+  "description": "Enables OCERP built-in validation rules that enforce a complete handover dossier between factory and site for each module: as-built drawings, QC certificates, commissioning records, defect list and warranty.",
+  "enables_rule_ids": [
+    "handover.as_built_attached",
+    "handover.qc_certificates_attached",
+    "handover.commissioning_record_attached",
+    "handover.defect_list_zero_or_signed_off",
+    "handover.warranty_document_attached",
+    "handover.client_acceptance_signed",
+    "handover.snagging_window_logged"
+  ]
+}

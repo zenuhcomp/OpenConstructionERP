@@ -55,7 +55,7 @@ from app.modules.i18n_foundation.schemas import (
 )
 from app.modules.i18n_foundation.service import I18nFoundationService
 
-router = APIRouter()
+router = APIRouter(tags=["i18n_foundation"])
 logger = logging.getLogger(__name__)
 
 

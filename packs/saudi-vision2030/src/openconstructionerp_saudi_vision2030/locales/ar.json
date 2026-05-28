@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "locale": "ar",
+    "name_en": "Arabic",
+    "name_native": "العربية",
+    "direction": "rtl",
+    "source": "saudi-vision2030 partner pack",
+    "coverage": "high-traffic overrides only — fall back to base locale for the rest"
+  },
+  "common.dashboard": "لوحة القيادة",
+  "common.projects": "مشاريع",
+  "common.boq": "جدول الكميات",
+  "common.takeoff": "حصر الكميات",
+  "common.costs": "قاعدة بيانات التكاليف",
+  "common.validation": "التحقق من الصحة",
+  "common.tendering": "المناقصات",
+  "common.reports": "التقارير",
+  "common.settings": "الإعدادات",
+  "common.users": "المستخدمون",
+  "common.documents": "المستندات",
+  "common.schedule": "الجدول الزمني",
+  "common.contracts": "العقود",
+  "common.save": "حفظ",
+  "common.cancel": "إلغاء"
+}

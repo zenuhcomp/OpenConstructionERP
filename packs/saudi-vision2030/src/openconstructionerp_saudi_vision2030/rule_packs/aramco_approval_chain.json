@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "aramco_approval_chain",
+  "name": "Saudi Aramco — Engineering Approval Chain",
+  "standard": "Saudi Aramco Engineering Standards (SAES) + 9COM + Inspection Procedures",
+  "jurisdiction": "SA",
+  "description": "Enables OCERP built-in validation rules that check tender packs and project documents against the Saudi Aramco engineering approval workflow: SAES citations, 9COM Schedule Q, Material Inspection Reports (MIRs), and Proponent / PMT / Inspection sign-off chain.",
+  "enables_rule_ids": [
+    "aramco.saes_citations_present",
+    "aramco.9com_schedule_q_complete",
+    "aramco.iktva_score_disclosed",
+    "aramco.mir_workflow_configured",
+    "aramco.proponent_approval_present",
+    "aramco.pmt_approval_present",
+    "aramco.inspection_sign_off_chain_complete",
+    "aramco.deviation_request_format_compliant"
+  ]
+}

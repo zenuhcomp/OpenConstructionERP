@@ -36,7 +36,7 @@ from app.modules.tendering.schemas import (
 )
 from app.modules.tendering.service import TenderingService
 
-router = APIRouter()
+router = APIRouter(tags=["tendering"])
 logger = logging.getLogger(__name__)
 
 

@@ -1104,6 +1104,7 @@ export function InlinePdfAnnotator({
                 />
                 <button
                   onClick={handleTextSubmit}
+                  aria-label={t('common.save', { defaultValue: 'Save' })}
                   className="p-1 rounded text-oe-blue hover:bg-surface-secondary"
                 >
                   <Save size={12} />

@@ -177,7 +177,7 @@ from app.modules.boq.schemas import (
 from app.modules.boq.service import MAX_NESTING_DEPTH, BOQService
 from app.modules.costs.repository import CostItemRepository
 
-router = APIRouter()
+router = APIRouter(tags=["boq"])
 _log = logging.getLogger(__name__)
 
 

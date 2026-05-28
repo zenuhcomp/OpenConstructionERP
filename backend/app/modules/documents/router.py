@@ -64,7 +64,7 @@ from app.modules.documents.service import (
     _sanitize_filename,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["documents"])
 logger = logging.getLogger(__name__)
 
 

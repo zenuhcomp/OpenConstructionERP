@@ -3747,6 +3747,7 @@ export function DwgTakeoffPage() {
               </div>
               <button
                 onClick={closeUploadModal}
+                aria-label={t('common.close', { defaultValue: 'Close' })}
                 className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-secondary transition-colors"
               >
                 <X size={16} className="text-content-tertiary hover:text-content-primary transition-colors" />

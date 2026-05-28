@@ -58,7 +58,7 @@ from app.modules.geo_hub.schemas import (
 )
 from app.modules.geo_hub.service import GeoHubService
 
-router = APIRouter()
+router = APIRouter(tags=["geo_hub"])
 
 
 def _svc(session: SessionDep) -> GeoHubService:

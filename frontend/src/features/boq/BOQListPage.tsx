@@ -186,7 +186,11 @@ function CompareModal({ boqIdA, boqIdB, currencyA, currencyB, onClose }: Compare
             </div>
             <h2 className="text-lg font-bold text-content-primary">{t('boq.compare_title', { defaultValue: 'BOQ Comparison' })}</h2>
           </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-secondary transition-colors">
+          <button
+            onClick={onClose}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-content-tertiary hover:text-content-primary hover:bg-surface-secondary transition-colors"
+          >
             <X size={18} />
           </button>
         </div>

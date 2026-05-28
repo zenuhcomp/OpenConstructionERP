@@ -39,7 +39,7 @@ from app.modules.tasks.schemas import (
 )
 from app.modules.tasks.service import TaskService
 
-router = APIRouter()
+router = APIRouter(tags=["tasks"])
 logger = logging.getLogger(__name__)
 
 
@@ -594,6 +594,32 @@ async def import_tasks_file(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file is empty.",
         )
+
+    # Magic-byte sniff — the extension is hostile-supplied, so reject any
+    # payload whose first bytes don't match the declared format before we
+    # hand the buffer to openpyxl / csv.reader. Mirrors the contacts
+    # importer (R7 audit pattern). CSV has no canonical signature; reject
+    # an obvious-binary leading byte instead.
+    head = content[:8]
+    if filename.endswith(".xlsx"):
+        if not head.startswith(b"PK\x03\x04"):
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="File does not look like a valid .xlsx (missing ZIP signature).",
+            )
+    elif filename.endswith(".xls"):
+        if not head.startswith(b"\xd0\xcf\x11\xe0"):
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="File does not look like a valid .xls (missing OLE signature).",
+            )
+    else:  # .csv
+        for sig in (b"MZ", b"\x7fELF", b"\xca\xfe\xba\xbe", b"PK\x03\x04", b"\xd0\xcf\x11\xe0"):
+            if head.startswith(sig):
+                raise HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail="File does not look like CSV (binary signature detected).",
+                )
 
     try:
         if filename.endswith(".xlsx") or filename.endswith(".xls"):

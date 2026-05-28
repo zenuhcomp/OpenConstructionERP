@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 50" width="260" height="50" role="img" aria-label="India Construction Pack">
+  <title>India Construction</title>
+  <desc>India Construction wordmark in saffron with a green accent stripe.</desc>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="22" letter-spacing="-0.3">
+    <text x="6" y="32" fill="#FF9933">India Construction</text>
+  </g>
+  <rect x="232" y="10" width="14" height="14" rx="2" fill="#FF9933"/>
+  <rect x="232" y="18" width="14" height="6" fill="#FFFFFF" stroke="#CCCCCC" stroke-width="0.5"/>
+  <rect x="232" y="22" width="14" height="2" rx="0" fill="#138808"/>
+  <circle cx="239" cy="19" r="1.4" fill="none" stroke="#000080" stroke-width="0.5"/>
+</svg>

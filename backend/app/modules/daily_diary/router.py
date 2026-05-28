@@ -83,7 +83,7 @@ from app.modules.daily_diary.weather import (
     list_supported_trades,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["daily_diary"])
 
 
 def _get_service(session: SessionDep) -> DailyDiaryService:

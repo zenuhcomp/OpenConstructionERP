@@ -404,7 +404,7 @@ class ClashIssue(Base):
     # to drive the archive transition (≥ ``_ARCHIVE_AFTER_MISSING`` →
     # archived). Reset to 0 whenever the signature shows up again.
     missing_run_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    assignee_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True, index=True)
     due_date: Mapped[datetime | None] = mapped_column(Date, nullable=True)
     priority: Mapped[str] = mapped_column(String(16), nullable=False, default="medium", server_default="medium")
     # Project-local human readable id ("CLASH-042"). Monotonic per project.

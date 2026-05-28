@@ -89,7 +89,7 @@ from app.modules.bid_management.schemas import (
 )
 from app.modules.bid_management.service import BidManagementService
 
-router = APIRouter()
+router = APIRouter(tags=["bid_management"])
 logger = logging.getLogger(__name__)
 
 

@@ -32,7 +32,7 @@ from app.modules.reporting.schemas import (
 )
 from app.modules.reporting.service import ReportingService
 
-router = APIRouter()
+router = APIRouter(tags=["reporting"])
 logger = logging.getLogger(__name__)
 
 

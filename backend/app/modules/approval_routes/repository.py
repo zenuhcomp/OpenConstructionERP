@@ -58,6 +58,29 @@ class ApprovalRouteRepository:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_steps_for_routes(
+        self,
+        route_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, list[Step]]:
+        """Batched fetch of steps for many routes — kills the N+1 in /routes.
+
+        Returns a dict keyed by ``route_id``; missing keys mean no steps.
+        Steps within each bucket are ordered by ``ordinal``, matching the
+        per-route accessor's contract.
+        """
+        if not route_ids:
+            return {}
+        stmt = (
+            select(Step)
+            .where(Step.route_id.in_(route_ids))
+            .order_by(Step.route_id, Step.ordinal.asc())
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        out: dict[uuid.UUID, list[Step]] = {rid: [] for rid in route_ids}
+        for step in rows:
+            out.setdefault(step.route_id, []).append(step)
+        return out
+
     async def get_step(self, step_id: uuid.UUID) -> Step | None:
         return await self.session.get(Step, step_id)
 

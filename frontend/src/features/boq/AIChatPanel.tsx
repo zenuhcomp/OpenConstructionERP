@@ -432,6 +432,7 @@ export function AIChatPanel({
           <button
             onClick={handleSend}
             disabled={!inputValue.trim() || chatMutation.isPending}
+            aria-label={t('common.send', { defaultValue: 'Send' })}
             className="flex h-9 w-9 items-center justify-center rounded-lg bg-oe-blue text-white hover:bg-oe-blue-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Send size={16} />

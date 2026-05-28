@@ -26,7 +26,7 @@ from app.modules.collaboration.schemas import (
 )
 from app.modules.collaboration.service import CollaborationService
 
-router = APIRouter()
+router = APIRouter(tags=["collaboration"])
 logger = logging.getLogger(__name__)
 
 

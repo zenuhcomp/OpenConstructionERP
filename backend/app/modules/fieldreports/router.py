@@ -50,7 +50,7 @@ from app.modules.fieldreports.schemas import (
 )
 from app.modules.fieldreports.service import FieldReportService, FieldReportTemplateService
 
-router = APIRouter()
+router = APIRouter(tags=["fieldreports"])
 logger = logging.getLogger(__name__)
 
 

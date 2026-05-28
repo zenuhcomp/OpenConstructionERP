@@ -4223,7 +4223,7 @@ export function BOQEditorPage() {
           onApplied={() => {
             setAssemblyModalOpen(false);
             invalidateAll();
-            addToast({ type: 'success', title: 'Assembly applied to BOQ' });
+            addToast({ type: 'success', title: t('boq.toasts.assembly_applied', { defaultValue: 'Assembly applied to BOQ' }) });
           }}
         />
       )}

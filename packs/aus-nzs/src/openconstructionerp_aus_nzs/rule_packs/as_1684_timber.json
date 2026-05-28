@@ -1,0 +1,17 @@
+{
+  "rule_pack_id": "as_1684_timber",
+  "name": "AS 1684 — Residential Timber-Framed Construction",
+  "standard": "AS 1684",
+  "jurisdiction": "AU",
+  "description": "Enables OCERP built-in validation rules that enforce AS 1684 residential timber-framing requirements: wind classification, member sizing tables, bracing schedules, tie-down compliance and span tables for Australian conditions.",
+  "enables_rule_ids": [
+    "as1684.wind_classification_set",
+    "as1684.member_size_within_span_table",
+    "as1684.bracing_schedule_present",
+    "as1684.tie_down_compliance",
+    "as1684.stud_spacing_valid",
+    "as1684.roof_pitch_within_range",
+    "as1684.timber_stress_grade_specified",
+    "as1684.bushfire_attack_level_set"
+  ]
+}

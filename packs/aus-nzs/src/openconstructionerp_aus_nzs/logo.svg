@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 50" width="260" height="50" role="img" aria-label="AU/NZ Construction">
+  <title>AU/NZ Construction</title>
+  <desc>AU/NZ Construction wordmark in AU/NZ blue with a red accent.</desc>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="22" letter-spacing="-0.3">
+    <text x="6" y="32" fill="#012169">AU/NZ Construction</text>
+  </g>
+  <rect x="232" y="10" width="14" height="14" rx="2" fill="#012169"/>
+  <rect x="236" y="14" width="6" height="6" fill="#E4002B"/>
+</svg>

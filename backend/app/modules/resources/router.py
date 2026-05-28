@@ -55,7 +55,7 @@ from app.modules.resources.service import (
     SkillMismatchError,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["resources"])
 logger = logging.getLogger(__name__)
 
 

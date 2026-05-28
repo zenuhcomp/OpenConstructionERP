@@ -92,7 +92,7 @@ from app.modules.contracts.schemas import (
 )
 from app.modules.contracts.service import ContractsService
 
-router = APIRouter()
+router = APIRouter(tags=["contracts"])
 logger = logging.getLogger(__name__)
 
 
