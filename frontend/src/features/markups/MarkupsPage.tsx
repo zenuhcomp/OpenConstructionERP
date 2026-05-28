@@ -9,6 +9,7 @@ import {
   Download,
   GitCompare,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Trash2,
   Cloud,
@@ -554,14 +555,78 @@ function MarkupDetail({
   markup,
   documentName,
   onEdit,
+  siblings,
+  onNavigate,
 }: {
   markup: Markup;
   documentName?: string;
   onEdit?: () => void;
+  /**
+   * Other markups on the same document, sorted by created_at ASC.
+   * Used to compute prev/next for chevron navigation. When the current
+   * markup has no document, only itself is provided so chevrons are
+   * disabled at both ends.
+   */
+  siblings?: Markup[];
+  onNavigate?: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const idx = siblings ? siblings.findIndex((m) => m.id === markup.id) : -1;
+  const total = siblings?.length ?? 0;
+  const prevId = idx > 0 ? siblings![idx - 1]!.id : null;
+  const nextId = idx >= 0 && idx < total - 1 ? siblings![idx + 1]!.id : null;
+  const showNav = !!siblings && total > 1 && idx >= 0;
+
   return (
     <div className="px-6 py-3 bg-surface-secondary/40 border-t border-border-light">
+      {showNav && (
+        <div className="flex items-center justify-between mb-3 pb-2 border-b border-border-light/60">
+          <button
+            type="button"
+            onClick={() => prevId && onNavigate?.(prevId)}
+            disabled={!prevId}
+            data-testid="markup-prev"
+            aria-label={t('markups.previous', { defaultValue: 'Previous markup' })}
+            title={t('markups.previous', { defaultValue: 'Previous' }) + ' (←)'}
+            className={clsx(
+              'inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors',
+              prevId
+                ? 'text-content-primary hover:bg-surface-primary'
+                : 'text-content-tertiary opacity-50 cursor-not-allowed',
+            )}
+          >
+            <ChevronLeft size={14} />
+            {t('markups.previous', { defaultValue: 'Prev' })}
+          </button>
+          <span
+            className="text-xs text-content-tertiary tabular-nums"
+            data-testid="markup-position"
+          >
+            {t('markups.position_n_of_m', {
+              defaultValue: '{{n}} of {{total}}',
+              n: idx + 1,
+              total,
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={() => nextId && onNavigate?.(nextId)}
+            disabled={!nextId}
+            data-testid="markup-next"
+            aria-label={t('markups.next', { defaultValue: 'Next markup' })}
+            title={t('markups.next', { defaultValue: 'Next' }) + ' (→)'}
+            className={clsx(
+              'inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors',
+              nextId
+                ? 'text-content-primary hover:bg-surface-primary'
+                : 'text-content-tertiary opacity-50 cursor-not-allowed',
+            )}
+          >
+            {t('markups.next', { defaultValue: 'Next' })}
+            <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
       {onEdit && (
         <div className="flex items-center justify-end mb-2">
           <Button
@@ -751,6 +816,8 @@ function MarkupTableRow({
   onDelete,
   onEdit,
   documentName,
+  siblings,
+  onNavigate,
 }: {
   markup: Markup;
   isExpanded: boolean;
@@ -759,6 +826,8 @@ function MarkupTableRow({
   onDelete: () => void;
   onEdit: () => void;
   documentName?: string;
+  siblings?: Markup[];
+  onNavigate?: (id: string) => void;
 }) {
   const { t } = useTranslation();
   const TypeIcon = TYPE_ICONS[markup.type] ?? PenTool;
@@ -885,7 +954,13 @@ function MarkupTableRow({
       {isExpanded && (
         <tr>
           <td colSpan={8}>
-            <MarkupDetail markup={markup} documentName={documentName} onEdit={onEdit} />
+            <MarkupDetail
+              markup={markup}
+              documentName={documentName}
+              onEdit={onEdit}
+              siblings={siblings}
+              onNavigate={onNavigate}
+            />
           </td>
         </tr>
       )}
@@ -989,6 +1064,70 @@ export function MarkupsPage() {
     for (const d of documents) map.set(d.id, d.name);
     return map;
   }, [documents]);
+
+  // Siblings of the currently-expanded markup (same document_id),
+  // sorted oldest-first by created_at. Used for ‹ / › chevron nav and
+  // ArrowLeft / ArrowRight keyboard shortcuts. Project-level markups
+  // (no document_id) share a sibling group keyed on `null`.
+  const expandedMarkup = useMemo(
+    () => markups.find((m) => m.id === expandedRowId) ?? null,
+    [markups, expandedRowId],
+  );
+  const siblingsForExpanded = useMemo(() => {
+    if (!expandedMarkup) return [] as Markup[];
+    const docKey = expandedMarkup.document_id ?? null;
+    return markups
+      .filter((m) => (m.document_id ?? null) === docKey)
+      .slice()
+      .sort((a, b) => {
+        const da = new Date(a.created_at).getTime();
+        const db = new Date(b.created_at).getTime();
+        return da - db;
+      });
+  }, [markups, expandedMarkup]);
+
+  // Navigate prev/next inside the expanded detail. We swap
+  // ``expandedRowId`` rather than ``navigate('/markups/{id}')`` because
+  // this page is single-route — the "detail" is the expanded row pane.
+  // Keeps the surrounding scroll position because we never unmount the
+  // row.
+  const goToMarkup = useCallback(
+    (id: string) => {
+      setExpandedRowId(id);
+    },
+    [],
+  );
+
+  // Keyboard shortcuts: ← / → step through siblings while a row is
+  // expanded. Suppressed when an input/textarea/select/contenteditable
+  // owns the focus so typing in the search box keeps working.
+  useEffect(() => {
+    if (!expandedRowId || siblingsForExpanded.length < 2) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const ae = document.activeElement as HTMLElement | null;
+      const tag = ae?.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        ae?.isContentEditable
+      ) {
+        return;
+      }
+      const idx = siblingsForExpanded.findIndex((m) => m.id === expandedRowId);
+      if (idx < 0) return;
+      if (e.key === 'ArrowLeft' && idx > 0) {
+        e.preventDefault();
+        goToMarkup(siblingsForExpanded[idx - 1]!.id);
+      } else if (e.key === 'ArrowRight' && idx < siblingsForExpanded.length - 1) {
+        e.preventDefault();
+        goToMarkup(siblingsForExpanded[idx + 1]!.id);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [expandedRowId, siblingsForExpanded, goToMarkup]);
 
   // Client-side search filter
   const filteredMarkups = useMemo(() => {
@@ -1504,6 +1643,12 @@ export function MarkupsPage() {
                           }
                           onDelete={() => setDeleteTarget(markup.id)}
                           onEdit={() => setEditTarget(markup)}
+                          siblings={
+                            expandedRowId === markup.id
+                              ? siblingsForExpanded
+                              : undefined
+                          }
+                          onNavigate={goToMarkup}
                         />
                       ))}
                     </tbody>
