@@ -52,13 +52,31 @@ import { bulkAutoAnchorFromAddress, fetchAnchoredProjects } from './api';
 import type {
   GeoCameraState,
   GeoCursorCoords,
+  GeoSceneMode,
   GeoSearchPin,
 } from './CesiumViewer';
 import { GeoModePicker } from './GeoModePicker';
 import { GeoOverlayHud } from './GeoOverlayHud';
+import { GeoSceneModePicker } from './GeoSceneModePicker';
 import { OverlayLayer } from './OverlayLayer';
 import { OverlayPanel, type OverlayEditMode } from './OverlayPanel';
 import type { AnchoredProject, GeoPinBundle } from './types';
+
+// Persisted scene-mode preference — restored synchronously at mount so
+// the initial Cesium paint already matches the user's choice (no
+// flash-of-3D when they previously selected 2D).
+const SCENE_MODE_LS_KEY = 'geoHub.sceneMode';
+
+function readSceneMode(): GeoSceneMode {
+  if (typeof window === 'undefined') return '3d';
+  try {
+    const v = window.localStorage.getItem(SCENE_MODE_LS_KEY);
+    if (v === '2d' || v === '3d' || v === 'columbus') return v;
+  } catch {
+    /* localStorage disabled / quota — fall through to default */
+  }
+  return '3d';
+}
 
 const CesiumViewer = lazy(() =>
   import('./CesiumViewer').then((m) => ({ default: m.CesiumViewer })),
@@ -680,6 +698,10 @@ export function GeoHubPage() {
   // Transient address-search pin. Replaced wholesale on each search and
   // cleared via the inline dismiss button in the overlay.
   const [searchPin, setSearchPin] = useState<GeoSearchPin | null>(null);
+  // Scene-mode (2D / 3D / Columbus) — read lazily so SSR + tests don't
+  // blow up on ``window``. Persisted under ``geoHub.sceneMode`` so the
+  // user's projection choice survives reloads.
+  const [sceneMode, setSceneMode] = useState<GeoSceneMode>(readSceneMode);
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -691,6 +713,14 @@ export function GeoHubPage() {
       /* localStorage disabled / quota full — UX still works in-memory */
     }
   }, [panelCollapsed]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(SCENE_MODE_LS_KEY, sceneMode);
+    } catch {
+      /* localStorage disabled / quota full — UX still works in-memory */
+    }
+  }, [sceneMode]);
 
   // One pin per anchored project the user can access — degrades to an
   // empty list on backend failure so the globe still renders. The
@@ -761,6 +791,7 @@ export function GeoHubPage() {
           })}
         </p>
         <div className="ml-auto flex items-center gap-2">
+          <GeoSceneModePicker current={sceneMode} onChange={setSceneMode} />
           <GeoModePicker current="global" projectId={activeProjectId} />
           {/* Per-module Tour CTA — launches the Geo Hub-specific tour. */}
           <ModuleHelpButton tourId="geo" />
@@ -867,6 +898,7 @@ export function GeoHubPage() {
           <CesiumViewer
             mode="global"
             pins={pins}
+            sceneMode={sceneMode}
             focusedProject={
               focusedProjectId
                 ? projects.find((p) => p.project_id === focusedProjectId) ?? null

@@ -36,6 +36,14 @@ import type { TilesetOverlayState } from './hooks/useTilesetOverlayState';
 
 type ViewerMode = 'global' | 'project' | 'development';
 
+/**
+ * Cesium scene-mode toggle — controls the projection used to render the
+ * globe. Mapped 1:1 to Cesium's ``SceneMode`` enum values at runtime by
+ * the viewer effect. Exposed as a string union so the page can persist
+ * the user's choice to localStorage without leaking Cesium constants.
+ */
+export type GeoSceneMode = '2d' | '3d' | 'columbus';
+
 /** Live cursor coordinates lifted from a ScreenSpaceEventHandler pick. */
 export interface GeoCursorCoords {
   /** Latitude in degrees (-90..90). */
@@ -139,6 +147,14 @@ interface CesiumViewerProps {
    * so unaware callers see the legacy behaviour.
    */
   tilesetOverlayState?: TilesetOverlayState;
+  /**
+   * Scene projection — ``'3d'`` (globe), ``'2d'`` (flat top-down map) or
+   * ``'columbus'`` (2.5-D oblique). Applied at viewer construction so
+   * the initial paint matches the user's saved preference (no jarring
+   * morph on mount), and re-applied via ``scene.morphTo*`` whenever the
+   * prop value changes after mount. Undefined falls back to ``'3d'``.
+   */
+  sceneMode?: GeoSceneMode;
 }
 
 /** Stable signature for the viewer effect: rebuild only when the
@@ -230,6 +246,14 @@ type CesiumViewerInstance = {
     globe?: {
       pick?: (ray: unknown, scene: unknown) => CesiumCartesian3Like | undefined;
     };
+    /** Current scene projection — one of the ``SceneMode`` enum values. */
+    mode?: number;
+    /** Animate transition to top-down 2D scene over ``duration`` seconds. */
+    morphTo2D?: (duration?: number) => void;
+    /** Animate transition to globe 3D scene over ``duration`` seconds. */
+    morphTo3D?: (duration?: number) => void;
+    /** Animate transition to 2.5-D oblique Columbus View scene. */
+    morphToColumbusView?: (duration?: number) => void;
   };
   camera_changedFrustum?: unknown;
   entities: CesiumEntityCollectionLike;
@@ -276,6 +300,18 @@ interface CesiumLike {
     toDegrees: (radians: number) => number;
     TWO_PI: number;
   };
+  /**
+   * Cesium's ``SceneMode`` enum — used both to bootstrap the viewer's
+   * initial projection (so restoring a saved ``'2d'`` from localStorage
+   * doesn't morph from 3D on every page load) and to compare against
+   * ``scene.mode`` before issuing a redundant morph.
+   */
+  SceneMode?: {
+    MORPHING?: number;
+    COLUMBUS_VIEW: number;
+    SCENE2D: number;
+    SCENE3D: number;
+  };
 }
 
 async function loadCesium(): Promise<CesiumLike | null> {
@@ -315,6 +351,25 @@ async function loadCesium(): Promise<CesiumLike | null> {
   }
 }
 
+/**
+ * Resolve a {@link GeoSceneMode} string to the matching Cesium
+ * ``SceneMode`` enum value. Falls back to ``SCENE3D`` when the runtime
+ * doesn't expose the enum (defensive — every shipped Cesium does).
+ */
+function _sceneModeEnum(cesium: CesiumLike, mode: GeoSceneMode): number {
+  const sm = cesium.SceneMode;
+  if (!sm) return 3; // SCENE3D
+  switch (mode) {
+    case '2d':
+      return sm.SCENE2D;
+    case 'columbus':
+      return sm.COLUMBUS_VIEW;
+    case '3d':
+    default:
+      return sm.SCENE3D;
+  }
+}
+
 export function CesiumViewer({
   mode,
   mapConfig,
@@ -327,6 +382,7 @@ export function CesiumViewer({
   onCameraChange,
   onViewerReady,
   tilesetOverlayState,
+  sceneMode,
 }: CesiumViewerProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -356,6 +412,12 @@ export function CesiumViewer({
   // ref only matters for the boot-time snapshot.
   const tilesetOverlayStateRef = useRef(tilesetOverlayState);
   tilesetOverlayStateRef.current = tilesetOverlayState;
+  // Latest scene-mode ref so the viewer effect can read the user's
+  // restored preference at construction time WITHOUT being added to the
+  // dependency array (changing scene mode must morph in place, not
+  // rebuild the entire 3 MB Cesium runtime).
+  const sceneModeRef = useRef<GeoSceneMode>(sceneMode ?? '3d');
+  sceneModeRef.current = sceneMode ?? '3d';
   // ``absent`` = ``import('cesium')`` itself failed (community build w/o
   //   the optional dep — actionable hint: ``npm install cesium``).
   // ``init_failed`` = module loaded but ``new Viewer()`` threw — most
@@ -434,6 +496,12 @@ export function CesiumViewer({
         hiddenCreditContainer.style.display = 'none';
         hiddenCreditContainer.setAttribute('aria-hidden', 'true');
 
+        // Resolve the user's saved scene-mode preference BEFORE viewer
+        // construction. Passing ``sceneMode`` into the Viewer options means
+        // the very first frame already paints in 2D/Columbus when the
+        // user previously chose that — no jarring globe→2D morph on
+        // every page reload.
+        const initialSceneMode = _sceneModeEnum(cesium, sceneModeRef.current);
         const v = new cesium.Viewer(container, {
           terrainProvider: new cesium.EllipsoidTerrainProvider(),
           baseLayer: new cesium.ImageryLayer(
@@ -452,14 +520,17 @@ export function CesiumViewer({
           // Cesium's built-in widgets are useful but used to be invisible
           // because we didn't ship ``widgets.css``. We now inline the
           // minimum CSS for them (see ``<style>`` block below), so the
-          // three toolbar buttons that give the user "go home", "2D / 2.5D
-          // / 3D scene mode", and "navigation help" can be turned back on.
-          // The 2D/3D toggle in particular was the explicit user ask —
-          // a single tap to switch between flat-map and globe view.
+          // remaining toolbar buttons ("go home", "navigation help") can
+          // be turned back on. The scene-mode picker is intentionally
+          // disabled here because the Geo Hub toolbar renders its own
+          // 2D / 3D / Columbus segmented control with localStorage
+          // persistence — leaving Cesium's built-in picker on would
+          // produce two competing controls.
           homeButton: true,
           navigationHelpButton: true,
           navigationInstructionsInitiallyVisible: false,
-          sceneModePicker: true,
+          sceneModePicker: false,
+          sceneMode: initialSceneMode,
           creditContainer: hiddenCreditContainer,
         });
         viewer = v;
@@ -1035,6 +1106,41 @@ export function CesiumViewer({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedTilesetId, cesiumStatus, signature]);
+
+  // ── Scene-mode morph ─────────────────────────────────────────────────
+  //
+  // Runtime toggle between 3D globe / 2D top-down / Columbus 2.5-D. The
+  // initial mode is wired through the Viewer constructor (above) so the
+  // first paint already matches the user's saved preference; this effect
+  // handles every subsequent change without rebuilding the viewer.
+  //
+  // ``scene.mode`` is compared against the target enum before issuing a
+  // morph so rapidly toggling back to the current mode doesn't trigger a
+  // 1.5-second redundant animation.
+  useEffect(() => {
+    if (cesiumStatus !== 'loaded') return;
+    const v = viewerRef.current;
+    const cesium = cesiumRef.current;
+    if (!v || !cesium) return;
+    const target = sceneMode ?? '3d';
+    const targetEnum = _sceneModeEnum(cesium, target);
+    try {
+      if (v.scene?.mode === targetEnum) return;
+      if (target === '2d' && typeof v.scene.morphTo2D === 'function') {
+        v.scene.morphTo2D(1.5);
+      } else if (
+        target === 'columbus' &&
+        typeof v.scene.morphToColumbusView === 'function'
+      ) {
+        v.scene.morphToColumbusView(1.5);
+      } else if (typeof v.scene.morphTo3D === 'function') {
+        v.scene.morphTo3D(1.5);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[geo_hub] sceneMode morph failed', target, err);
+    }
+  }, [sceneMode, cesiumStatus]);
 
   // ── Focused-project flyTo (global view only) ─────────────────────────
   //
