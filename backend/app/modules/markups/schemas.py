@@ -42,6 +42,8 @@ class MarkupCreate(BaseModel):
     line_width: int = Field(default=2, ge=1, le=50)
     opacity: float = Field(default=1.0, ge=0.0, le=1.0, allow_inf_nan=False)
     author_id: str | None = Field(default=None, max_length=255)
+    # M3: optional follow-up owner.
+    assignee_id: UUID | None = None
     status: str = Field(
         default="active",
         pattern=r"^(active|resolved|archived)$",
@@ -87,6 +89,11 @@ class MarkupUpdate(BaseModel):
     linked_boq_position_id: str | None = Field(default=None, max_length=255)
     layer: str | None = Field(default=None, max_length=100)
     metadata: dict[str, Any] | None = None
+    # M3: re-assign / unassign. ``None`` here means "not in the patch";
+    # to clear an assignee explicitly the client sends an empty string,
+    # which the router translates to None on the model. Bare ``None``
+    # default keeps PATCH semantics intact.
+    assignee_id: UUID | None = None
 
 
 class MarkupResponse(BaseModel):
@@ -106,6 +113,7 @@ class MarkupResponse(BaseModel):
     line_width: int = 2
     opacity: float = 1.0
     author_id: str
+    assignee_id: UUID | None = None
     status: str = "active"
     label: str | None = None
     measurement_value: float | None = None

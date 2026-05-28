@@ -147,6 +147,7 @@ class MarkupsService:
             line_width=data.line_width,
             opacity=data.opacity,
             author_id=data.author_id or user_id,
+            assignee_id=data.assignee_id,
             status=data.status,
             label=data.label,
             measurement_value=data.measurement_value,
@@ -222,6 +223,8 @@ class MarkupsService:
         document_id: str | None = None,
         page: int | None = None,
         layer: str | None = None,
+        assignee_id: uuid.UUID | None = None,
+        unassigned: bool = False,
     ) -> tuple[list[Markup], int]:
         """List markups for a project with pagination and filters."""
         return await self.markup_repo.list_for_project(
@@ -233,6 +236,8 @@ class MarkupsService:
             document_id=document_id,
             page=page,
             layer=layer,
+            assignee_id=assignee_id,
+            unassigned=unassigned,
         )
 
     async def update_markup(
@@ -333,6 +338,7 @@ class MarkupsService:
                 line_width=data.line_width,
                 opacity=data.opacity,
                 author_id=data.author_id or user_id,
+                assignee_id=data.assignee_id,
                 status=data.status,
                 label=data.label,
                 measurement_value=data.measurement_value,

@@ -54,8 +54,15 @@ class MarkupRepository:
         document_id: str | None = None,
         page: int | None = None,
         layer: str | None = None,
+        assignee_id: uuid.UUID | None = None,
+        unassigned: bool = False,
     ) -> tuple[list[Markup], int]:
-        """List markups for a project with pagination and filters."""
+        """List markups for a project with pagination and filters.
+
+        ``assignee_id`` filters to markups assigned to the given user.
+        ``unassigned=True`` filters to markups with NULL ``assignee_id``;
+        the two flags are mutually exclusive — pass only one.
+        """
         base = select(Markup).where(Markup.project_id == project_id)
         if document_id is not None:
             base = base.where(Markup.document_id == document_id)
@@ -67,6 +74,10 @@ class MarkupRepository:
             base = base.where(Markup.status == status_filter)
         if layer is not None:
             base = base.where(Markup.layer == layer)
+        if unassigned:
+            base = base.where(Markup.assignee_id.is_(None))
+        elif assignee_id is not None:
+            base = base.where(Markup.assignee_id == assignee_id)
 
         count_stmt = select(func.count()).select_from(base.subquery())
         total = (await self.session.execute(count_stmt)).scalar_one()

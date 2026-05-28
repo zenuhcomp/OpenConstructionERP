@@ -37,6 +37,7 @@ import { RequiresProject } from '@/shared/auth/RequiresProject';
 import { apiGet } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
+import { fetchUsers, type User as AssigneeUser } from '@/features/users/api';
 import {
   fetchMarkups,
   fetchMarkupsSummary,
@@ -178,6 +179,51 @@ const inputCls =
 
 const selectCls = inputCls + ' pr-7 appearance-none cursor-pointer';
 
+/* ── Assignee filter sentinels ────────────────────────────────────────── */
+// "" = no filter, "__unassigned__" = NULL assignee, otherwise user UUID.
+const ASSIGNEE_UNASSIGNED = '__unassigned__';
+
+/* ── Assignee chip ────────────────────────────────────────────────────── */
+
+function AssigneeChip({
+  assigneeId,
+  userMap,
+}: {
+  assigneeId: string | null | undefined;
+  userMap: Map<string, AssigneeUser>;
+}) {
+  const { t } = useTranslation();
+  if (!assigneeId) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-surface-secondary text-2xs text-content-tertiary border border-border-light"
+        title={t('markups.unassigned', { defaultValue: 'Unassigned' })}
+      >
+        {t('markups.unassigned', { defaultValue: 'Unassigned' })}
+      </span>
+    );
+  }
+  const user = userMap.get(assigneeId);
+  const display = user?.full_name?.trim() || user?.email || assigneeId.slice(0, 8);
+  const initials = (user?.full_name || user?.email || '?')
+    .split(/[\s@.]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]?.toUpperCase() ?? '')
+    .join('') || '?';
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-oe-blue-subtle text-2xs text-oe-blue-text border border-oe-blue/30 max-w-[150px]"
+      title={display}
+    >
+      <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-oe-blue text-content-inverse text-[8px] font-semibold shrink-0">
+        {initials}
+      </span>
+      <span className="truncate">{display}</span>
+    </span>
+  );
+}
+
 /* ── Add Markup Modal ─────────────────────────────────────────────────── */
 
 function AddMarkupModal({
@@ -185,12 +231,14 @@ function AddMarkupModal({
   onClose,
   projectId,
   documents,
+  users,
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   projectId: string;
   documents: DocItem[];
+  users: AssigneeUser[];
   onCreated: () => void;
 }) {
   const { t } = useTranslation();
@@ -205,6 +253,7 @@ function AddMarkupModal({
   const [color, setColor] = useState(PRESET_COLORS[1]!.value);
   const [measurementValue, setMeasurementValue] = useState('');
   const [measurementUnit, setMeasurementUnit] = useState('m');
+  const [assigneeId, setAssigneeId] = useState('');
 
   // Reset form on open
   useEffect(() => {
@@ -217,6 +266,7 @@ function AddMarkupModal({
       setColor(PRESET_COLORS[1]!.value);
       setMeasurementValue('');
       setMeasurementUnit('m');
+      setAssigneeId('');
     }
   }, [open, documents]);
 
@@ -272,6 +322,7 @@ function AddMarkupModal({
       ...(page > 0 && { page }),
       ...(label.trim() && { label: label.trim() }),
       ...(text.trim() && { text: text.trim() }),
+      ...(assigneeId && { assignee_id: assigneeId }),
       ...(MEASUREMENT_TYPES.includes(selectedType) &&
         measurementValue && {
           measurement_value: parseFloat(measurementValue),
@@ -426,6 +477,26 @@ function AddMarkupModal({
                 />
               ))}
             </div>
+          </div>
+
+          {/* Assignee dropdown */}
+          <div>
+            <label className="block text-xs font-medium text-content-secondary mb-1.5">
+              {t('markups.assignee', { defaultValue: 'Assignee' })}
+            </label>
+            <select
+              value={assigneeId}
+              onChange={(e) => setAssigneeId(e.target.value)}
+              className={selectCls + ' w-full'}
+              data-testid="markup-form-assignee"
+            >
+              <option value="">{t('markups.unassigned', { defaultValue: 'Unassigned' })}</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name?.trim() || u.email}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Measurement fields (only for distance/area/count) */}
@@ -700,11 +771,13 @@ function MarkupGridCard({
   onChangeStatus,
   onDelete,
   onEdit,
+  userMap,
 }: {
   markup: Markup;
   onChangeStatus: (status: MarkupStatus) => void;
   onDelete: () => void;
   onEdit: () => void;
+  userMap: Map<string, AssigneeUser>;
 }) {
   const { t } = useTranslation();
   const Icon = TYPE_ICONS[markup.type] ?? PenTool;
@@ -764,6 +837,11 @@ function MarkupGridCard({
         </p>
       )}
 
+      {/* Assignee chip */}
+      <div className="mt-2">
+        <AssigneeChip assigneeId={markup.assignee_id} userMap={userMap} />
+      </div>
+
       {/* Footer: date + actions */}
       <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-border-light/50">
         <span className="text-2xs text-content-tertiary">{formattedDate}</span>
@@ -818,6 +896,7 @@ function MarkupTableRow({
   documentName,
   siblings,
   onNavigate,
+  userMap,
 }: {
   markup: Markup;
   isExpanded: boolean;
@@ -828,6 +907,7 @@ function MarkupTableRow({
   documentName?: string;
   siblings?: Markup[];
   onNavigate?: (id: string) => void;
+  userMap: Map<string, AssigneeUser>;
 }) {
   const { t } = useTranslation();
   const TypeIcon = TYPE_ICONS[markup.type] ?? PenTool;
@@ -904,6 +984,10 @@ function MarkupTableRow({
             })}
           </Badge>
         </td>
+        {/* Assignee */}
+        <td className="px-3 py-2.5">
+          <AssigneeChip assigneeId={markup.assignee_id} userMap={userMap} />
+        </td>
         {/* Measurement */}
         <td className="px-3 py-2.5 text-xs text-content-secondary tabular-nums">
           {measurementDisplay}
@@ -953,7 +1037,7 @@ function MarkupTableRow({
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan={8}>
+          <td colSpan={9}>
             <MarkupDetail
               markup={markup}
               documentName={documentName}
@@ -982,6 +1066,9 @@ export function MarkupsPage() {
   const [filterType, setFilterType] = useState<MarkupType | ''>('');
   const [filterStatus, setFilterStatus] = useState<MarkupStatus | ''>('');
   const [filterDocumentId, setFilterDocumentId] = useState('');
+  // M3 — assignee filter: "" = no filter, "__unassigned__" = NULL,
+  // anything else = user id.
+  const [filterAssignee, setFilterAssignee] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -1013,6 +1100,21 @@ export function MarkupsPage() {
 
   const projectId = activeProjectId || projects[0]?.id || '';
 
+  // M3 — fetch users for the assignee dropdown + row chip.
+  // Failures degrade silently to an empty list (the chip falls back to
+  // showing the raw user-id slice) so the page still works without
+  // /v1/users/ read access (e.g. project viewers without users.read).
+  const { data: users = [] } = useQuery({
+    queryKey: ['markups', 'users'],
+    queryFn: () => fetchUsers({ is_active: true, limit: 200 }).catch(() => [] as AssigneeUser[]),
+    staleTime: 5 * 60_000,
+  });
+  const userMap = useMemo(() => {
+    const m = new Map<string, AssigneeUser>();
+    for (const u of users) m.set(u.id, u);
+    return m;
+  }, [users]);
+
   const { data: documents = [] } = useQuery({
     // Share the queryKey with ``useUnifiedMarkups`` (mounted by the
     // ``UnifiedMarkupsList`` tab on this same page) so React Query dedupes
@@ -1030,16 +1132,21 @@ export function MarkupsPage() {
   // Share the queryKey in that case so React Query dedupes the fetch —
   // otherwise both queries fire their own copy of GET /v1/markups/ on
   // every page open.
-  const noFilters = !filterType && !filterStatus && !filterDocumentId;
+  const noFilters = !filterType && !filterStatus && !filterDocumentId && !filterAssignee;
+  const isUnassignedFilter = filterAssignee === ASSIGNEE_UNASSIGNED;
+  const assigneeIdFilter =
+    filterAssignee && !isUnassignedFilter ? filterAssignee : undefined;
   const { data: markups = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: noFilters
       ? ['unified-markups', projectId, 'hub']
-      : ['markups', projectId, filterType, filterStatus, filterDocumentId],
+      : ['markups', projectId, filterType, filterStatus, filterDocumentId, filterAssignee],
     queryFn: () =>
       fetchMarkups(projectId, {
         type: filterType || undefined,
         status: filterStatus || undefined,
         document_id: filterDocumentId || undefined,
+        assignee_id: assigneeIdFilter,
+        unassigned: isUnassignedFilter,
       }),
     enabled: !!projectId,
     staleTime: noFilters ? 30_000 : 0,
@@ -1542,11 +1649,33 @@ export function MarkupsPage() {
                 ))}
               </select>
 
-              {(filterType || filterStatus) && (
+              {/* M3: assignee filter */}
+              <select
+                value={filterAssignee}
+                onChange={(e) => setFilterAssignee(e.target.value)}
+                className={selectCls + ' max-w-[180px]'}
+                aria-label={t('markups.filterByAssignee', { defaultValue: 'Filter by assignee' })}
+                data-testid="markups-filter-assignee"
+              >
+                <option value="">
+                  {t('markups.all_assignees', { defaultValue: 'All Assignees' })}
+                </option>
+                <option value={ASSIGNEE_UNASSIGNED}>
+                  {t('markups.unassigned', { defaultValue: 'Unassigned' })}
+                </option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name?.trim() || u.email}
+                  </option>
+                ))}
+              </select>
+
+              {(filterType || filterStatus || filterAssignee) && (
                 <button
                   onClick={() => {
                     setFilterType('');
                     setFilterStatus('');
+                    setFilterAssignee('');
                   }}
                   className="text-xs text-oe-blue hover:underline"
                 >
@@ -1611,6 +1740,9 @@ export function MarkupsPage() {
                         <th className="px-3 py-2 text-left text-2xs font-semibold uppercase tracking-wider text-content-tertiary w-[90px]">
                           {t('markups.col_status', { defaultValue: 'Status' })}
                         </th>
+                        <th className="px-3 py-2 text-left text-2xs font-semibold uppercase tracking-wider text-content-tertiary w-[140px]">
+                          {t('markups.col_assignee', { defaultValue: 'Assignee' })}
+                        </th>
                         <th className="px-3 py-2 text-left text-2xs font-semibold uppercase tracking-wider text-content-tertiary w-[100px]">
                           {t('markups.col_measurement', { defaultValue: 'Measure' })}
                         </th>
@@ -1649,6 +1781,7 @@ export function MarkupsPage() {
                               : undefined
                           }
                           onNavigate={goToMarkup}
+                          userMap={userMap}
                         />
                       ))}
                     </tbody>
@@ -1667,6 +1800,7 @@ export function MarkupsPage() {
                     }
                     onDelete={() => setDeleteTarget(markup.id)}
                     onEdit={() => setEditTarget(markup)}
+                    userMap={userMap}
                   />
                 ))}
               </div>
@@ -1728,6 +1862,7 @@ export function MarkupsPage() {
         onClose={() => setShowAddModal(false)}
         projectId={projectId}
         documents={documents}
+        users={users}
         onCreated={invalidateAll}
       />
 

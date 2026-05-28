@@ -72,6 +72,7 @@ def _markup_to_response(item: object) -> MarkupResponse:
         line_width=item.line_width,  # type: ignore[attr-defined]
         opacity=item.opacity,  # type: ignore[attr-defined]
         author_id=item.author_id,  # type: ignore[attr-defined]
+        assignee_id=getattr(item, "assignee_id", None),  # type: ignore[attr-defined]
         status=item.status,  # type: ignore[attr-defined]
         label=item.label,  # type: ignore[attr-defined]
         measurement_value=item.measurement_value,  # type: ignore[attr-defined]
@@ -233,6 +234,16 @@ async def list_markups(
     type: str | None = Query(default=None, alias="type"),
     status_filter: str | None = Query(default=None, alias="status"),
     layer: str | None = Query(default=None),
+    assignee_id: uuid.UUID | None = Query(
+        default=None,
+        description="Filter to markups assigned to this user. Pass with empty value via "
+        "'unassigned=true' to fetch markups with no assignee.",
+    ),
+    unassigned: bool = Query(
+        default=False,
+        description="When true, return only markups with NULL assignee_id. "
+        "Mutually exclusive with assignee_id (assignee_id wins if both supplied).",
+    ),
     query: str | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
@@ -268,6 +279,8 @@ async def list_markups(
         document_id=document_id,
         page=page_filter,
         layer=layer,
+        assignee_id=assignee_id,
+        unassigned=unassigned and assignee_id is None,
     )
     return [_markup_to_response(i) for i in items]
 
