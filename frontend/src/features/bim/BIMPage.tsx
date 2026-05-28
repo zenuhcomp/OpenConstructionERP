@@ -2188,6 +2188,17 @@ export function BIMPage() {
         bridge.setViewpoint(state.camera.position, state.camera.target);
       }
       if (state.selection.length > 0) {
+        // ``?sel=<id>`` is a focus-and-select deep-link, NOT an isolate
+        // deep-link (the explicit isolate flow uses the dedicated
+        // ``?isolate=...`` param handled below). Defensively clear any
+        // residual isolation set so the user lands on the FULL geometry
+        // with just the requested element highlighted + camera framed.
+        // The dedicated colour-mode reset (line ~1946) already runs on
+        // ``activeModelId`` change, but we re-assert "default" here too so
+        // a stale localStorage-persisted mode from any future build can
+        // never override the deep-link's "show full model" intent.
+        setIsolatedIds(null);
+        setColorByMode('default');
         setMultiSelectedIds(state.selection);
         setSelectedElementId(state.selection[state.selection.length - 1] ?? null);
       }
