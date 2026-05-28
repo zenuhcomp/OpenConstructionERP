@@ -4,7 +4,7 @@
  * Backed by /api/v1/property-dev/ — see backend/app/modules/property_dev/router.py
  */
 
-import { apiGet, apiPost, apiPatch, apiDelete } from '@/shared/lib/api';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '@/shared/lib/api';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 
@@ -2760,9 +2760,31 @@ export interface DocumentTemplateUploadConfig {
   max_size_mb: number;
 }
 
+/**
+ * Per-locale translation status surfaced by the settings UI so the user
+ * sees which codes are fully translated (bundled JSON or tenant
+ * override) versus which silently fall back to English at render time.
+ */
+export interface DocumentTemplateLocaleStatus {
+  code: string;
+  native_name: string;
+  english_name: string;
+  rtl: boolean;
+  is_translated: boolean;
+  /** ``override`` = tenant upload; ``bundled`` = ships with the app;
+   *  ``none`` = no JSON, renderer falls back to English. */
+  source: 'override' | 'bundled' | 'none';
+  key_count: number;
+  en_key_count: number;
+}
+
 export interface DocumentTemplateCatalogue {
   templates: DocumentTemplateEntry[];
   locales: string[];
+  /** New (v5.5.2+) — structured locale entries with translation status.
+   *  Older API responses without this field fall back to the bare
+   *  ``locales`` string list in the UI. */
+  locale_status?: DocumentTemplateLocaleStatus[];
   regulators: string[];
   /**
    * Suggested doc_type slugs the upload + editor combobox surfaces as
@@ -2946,6 +2968,46 @@ export function getCustomDocumentTemplateContent(
 ): Promise<CustomTemplateContent> {
   return apiGet<CustomTemplateContent>(
     `${BASE}/document-templates/custom/${encodeURIComponent(templateId)}/content`,
+  );
+}
+
+/* ── Document-templates locale management ─────────────────────────────── */
+
+export interface DocumentTemplateLocalePayload {
+  code: string;
+  source: string;
+  data: Record<string, unknown>;
+}
+
+/** Fetch the merged locale JSON used by PDF rendering. Falls back to
+ *  English when no override / bundled JSON exists. UI uses this both to
+ *  download English as a starter and to preview what's currently active. */
+export function getDocumentTemplateLocale(
+  code: string,
+): Promise<DocumentTemplateLocalePayload> {
+  return apiGet<DocumentTemplateLocalePayload>(
+    `${BASE}/document-templates/locales/${encodeURIComponent(code)}`,
+  );
+}
+
+/** Upload a tenant-owned locale override JSON. Replaces the bundled
+ *  copy at render time until the override is deleted. */
+export function putDocumentTemplateLocale(
+  code: string,
+  data: Record<string, unknown>,
+): Promise<{ code: string; status: string }> {
+  return apiPut<{ code: string; status: string }>(
+    `${BASE}/document-templates/locales/${encodeURIComponent(code)}`,
+    { data },
+  );
+}
+
+/** Remove the tenant override and revert to the bundled translation. */
+export function deleteDocumentTemplateLocaleOverride(
+  code: string,
+): Promise<void> {
+  return apiDelete<void>(
+    `${BASE}/document-templates/locales/${encodeURIComponent(code)}`,
   );
 }
 

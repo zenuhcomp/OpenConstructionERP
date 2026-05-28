@@ -4695,6 +4695,7 @@ async def list_document_templates(
     from app.modules.property_dev.document_templates import (
         SUPPORTED_LOCALES,
         SUPPORTED_REGULATORS,
+        list_locale_status,
     )
     from app.modules.property_dev.models import PropertyDevCustomTemplate
 
@@ -4740,7 +4741,11 @@ async def list_document_templates(
 
     return {
         "templates": builtin_entries + custom_entries,
+        # Bare list kept for legacy callers; the new ``locale_status`` is
+        # what the settings UI uses to render the native names + the
+        # "translated / falls back to English" badge.
         "locales": list(SUPPORTED_LOCALES),
+        "locale_status": list_locale_status(),
         "regulators": list(SUPPORTED_REGULATORS),
         # Combobox suggestions for the upload + editor forms. The forms
         # accept any reasonably-shaped slug (see
@@ -4819,6 +4824,80 @@ def _validate_custom_template_metadata(
     if len(trigger) > 200:
         trigger = trigger[:200]
     return name, doc_type, entity, trigger
+
+
+@router.get("/document-templates/locales/{code}")
+async def get_document_template_locale(
+    code: str,
+    _perm: None = Depends(RequirePermission("property_dev.read")),
+) -> dict[str, Any]:
+    """Return the merged locale JSON used by PDF rendering for ``code``.
+
+    Resolution order: tenant override > bundled JSON > English fallback.
+    The UI uses this to (a) download EN as a starter template, and
+    (b) preview what strings are currently in effect for a given locale
+    before uploading an override.
+    """
+    from app.modules.property_dev.document_templates import (
+        SUPPORTED_LOCALES,
+        _load_locale,
+        locale_override_exists,
+    )
+
+    if code not in SUPPORTED_LOCALES:
+        raise HTTPException(status_code=404, detail=f"Unsupported locale: {code}")
+    blob = _load_locale(code)
+    return {
+        "code": code,
+        "source": "override" if locale_override_exists(code) else "bundled-or-fallback",
+        "data": blob,
+    }
+
+
+@router.put("/document-templates/locales/{code}")
+async def put_document_template_locale(
+    code: str,
+    payload: dict[str, Any],
+    _perm: None = Depends(RequirePermission("property_dev.create")),
+) -> dict[str, Any]:
+    """Upload an override JSON for ``code`` (replaces the bundled file).
+
+    Body shape: ``{"data": {... nested locale strings ...}}``. The
+    handler validates that ``data`` is a JSON object and writes it under
+    ``uploads/property_dev/document_locales/{code}.json``. The next PDF
+    render automatically picks up the new copy (cache invalidated).
+    """
+    from app.modules.property_dev.document_templates import (
+        SUPPORTED_LOCALES,
+        write_locale_override,
+    )
+
+    if code not in SUPPORTED_LOCALES:
+        raise HTTPException(status_code=404, detail=f"Unsupported locale: {code}")
+    blob = payload.get("data")
+    if not isinstance(blob, dict):
+        raise HTTPException(status_code=422, detail="Expected `data` to be a JSON object")
+    try:
+        write_locale_override(code, blob)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"code": code, "status": "ok"}
+
+
+@router.delete("/document-templates/locales/{code}", status_code=204)
+async def delete_document_template_locale_override(
+    code: str,
+    _perm: None = Depends(RequirePermission("property_dev.delete")),
+) -> None:
+    """Remove the tenant override and revert to the bundled translation."""
+    from app.modules.property_dev.document_templates import (
+        SUPPORTED_LOCALES,
+        delete_locale_override,
+    )
+
+    if code not in SUPPORTED_LOCALES:
+        raise HTTPException(status_code=404, detail=f"Unsupported locale: {code}")
+    delete_locale_override(code)
 
 
 @router.post("/document-templates/upload", status_code=201)

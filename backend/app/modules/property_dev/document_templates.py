@@ -116,6 +116,96 @@ SUPPORTED_LOCALES: tuple[str, ...] = (
 #: RTL locales — paragraph wordWrap set to ``RTL`` and alignment flipped.
 RTL_LOCALES: frozenset[str] = frozenset({"ar", "he", "fa", "ur"})
 
+#: Native + English display names for every supported locale. Used by
+#: the locale picker on the document-templates settings page so the
+#: dropdown shows "Deutsch (de)" instead of a bare "DE" — without this
+#: the picker reads like an ISO code dump.
+LOCALE_DISPLAY_NAMES: dict[str, tuple[str, str]] = {
+    "en": ("English", "English"),
+    "de": ("Deutsch", "German"),
+    "ru": ("Русский", "Russian"),
+    "fr": ("Français", "French"),
+    "ar": ("العربية", "Arabic"),
+    "es": ("Español", "Spanish"),
+    "it": ("Italiano", "Italian"),
+    "pt": ("Português", "Portuguese"),
+    "pl": ("Polski", "Polish"),
+    "nl": ("Nederlands", "Dutch"),
+    "tr": ("Türkçe", "Turkish"),
+    "zh": ("中文", "Chinese"),
+    "ja": ("日本語", "Japanese"),
+    "ko": ("한국어", "Korean"),
+    "cs": ("Čeština", "Czech"),
+    "da": ("Dansk", "Danish"),
+    "fi": ("Suomi", "Finnish"),
+    "no": ("Norsk", "Norwegian"),
+    "sv": ("Svenska", "Swedish"),
+    "hi": ("हिन्दी", "Hindi"),
+    "vi": ("Tiếng Việt", "Vietnamese"),
+    "th": ("ไทย", "Thai"),
+    "id": ("Bahasa Indonesia", "Indonesian"),
+    "ro": ("Română", "Romanian"),
+    "bg": ("Български", "Bulgarian"),
+    "hr": ("Hrvatski", "Croatian"),
+    "mn": ("Монгол", "Mongolian"),
+}
+
+
+def list_locale_status() -> list[dict[str, Any]]:
+    """Locale entries with translation status for the settings UI.
+
+    Returns one entry per locale in ``SUPPORTED_LOCALES``:
+        {code, native_name, english_name, rtl, is_translated, key_count}
+
+    ``is_translated`` is the honest signal — true iff the locale has a
+    dedicated JSON file in ``data/document_locales/``. Untranslated
+    locales are still listed (the renderer falls back to English so the
+    PDF still renders), but the UI can mark them clearly so users don't
+    pick a locale and get an English PDF without knowing why.
+
+    ``key_count`` is the number of top-level + nested string leaves in
+    that locale's JSON — used by the UI to flag partial translations
+    (e.g. de.json with 12 keys when en.json has 80).
+    """
+    en_keys = _count_leaf_keys(_load_locale("en"))
+    out: list[dict[str, Any]] = []
+    for code in SUPPORTED_LOCALES:
+        native, english = LOCALE_DISPLAY_NAMES.get(code, (code.upper(), code.upper()))
+        bundled_fp = _LOCALE_DIR / f"{code}.json"
+        bundled_exists = bundled_fp.exists()
+        override_exists = locale_override_exists(code)
+        # Translation source priority: override > bundled > none (EN
+        # fallback). The UI shows a distinct badge for each.
+        if override_exists:
+            source: str = "override"
+            key_count = _count_leaf_keys(_load_locale(code))
+        elif bundled_exists:
+            source = "bundled"
+            key_count = _count_leaf_keys(_load_locale(code))
+        else:
+            source = "none"
+            key_count = 0
+        out.append({
+            "code": code,
+            "native_name": native,
+            "english_name": english,
+            "rtl": code in RTL_LOCALES,
+            "is_translated": override_exists or bundled_exists,
+            "source": source,
+            "key_count": key_count,
+            "en_key_count": en_keys,
+        })
+    return out
+
+
+def _count_leaf_keys(blob: Any) -> int:
+    """Recursive leaf count for translation-coverage progress bars."""
+    if isinstance(blob, dict):
+        return sum(_count_leaf_keys(v) for v in blob.values())
+    if isinstance(blob, list):
+        return sum(_count_leaf_keys(v) for v in blob)
+    return 1 if isinstance(blob, str) else 0
+
 #: Regulators we ship clause-blocks for. Anything else uses ``NONE``.
 SUPPORTED_REGULATORS: tuple[str, ...] = (
     "RERA",
@@ -135,13 +225,40 @@ _DATA_DIR = Path(__file__).resolve().parent / "data"
 _LOCALE_DIR = _DATA_DIR / "document_locales"
 _CLAUSE_DIR = _DATA_DIR / "jurisdiction_clauses"
 
+#: User-uploaded locale overrides live here so a tenant can ship a fully
+#: translated ``de.json`` without re-deploying the codebase. The
+#: directory is created on first write. Override JSON is preferred over
+#: the bundled one (see ``_load_locale``); the bundled version is the
+#: read-only fallback.
+_LOCALE_OVERRIDE_DIR = Path("uploads") / "property_dev" / "document_locales"
+
+
+def _override_locale_path(locale: str) -> Path:
+    """Resolve the absolute path of an override locale JSON.
+
+    The directory is created lazily — calling this never auto-writes a
+    file, only computes where one would live.
+    """
+    return (_LOCALE_OVERRIDE_DIR / f"{locale}.json").resolve()
+
+
+def locale_override_exists(locale: str) -> bool:
+    """True iff a writable override file shadows the bundled locale."""
+    return _override_locale_path(locale).exists()
+
 
 # ── Locale loader ───────────────────────────────────────────────────────
 
 
 @lru_cache(maxsize=32)
 def _load_locale(locale: str) -> dict[str, Any]:
-    """Load the locale JSON; falls back to ``en`` on missing files."""
+    """Load the locale JSON; user override > bundled > English fallback."""
+    override = _override_locale_path(locale)
+    if override.exists():
+        try:
+            return json.loads(override.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass  # fall through to bundled
     fp = _LOCALE_DIR / f"{locale}.json"
     if not fp.exists():
         fp = _LOCALE_DIR / "en.json"
@@ -150,6 +267,34 @@ def _load_locale(locale: str) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         # Never crash a PDF render on a locale-load failure.
         return {}
+
+
+def write_locale_override(locale: str, blob: dict[str, Any]) -> None:
+    """Persist a user-uploaded override JSON for ``locale``.
+
+    Creates the override directory if needed. Invalidates the
+    ``_load_locale`` cache so the next PDF render picks up the new copy.
+    """
+    if locale not in SUPPORTED_LOCALES:
+        msg = f"Unsupported locale: {locale}"
+        raise ValueError(msg)
+    _LOCALE_OVERRIDE_DIR.mkdir(parents=True, exist_ok=True)
+    path = _override_locale_path(locale)
+    path.write_text(json.dumps(blob, ensure_ascii=False, indent=2), encoding="utf-8")
+    _load_locale.cache_clear()
+
+
+def delete_locale_override(locale: str) -> bool:
+    """Remove the override and revert to the bundled translation.
+
+    Returns True if a file was removed.
+    """
+    path = _override_locale_path(locale)
+    if not path.exists():
+        return False
+    path.unlink()
+    _load_locale.cache_clear()
+    return True
 
 
 def _t(locale: str, dotted_key: str, fallback: str = "") -> str:
