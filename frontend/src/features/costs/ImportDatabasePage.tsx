@@ -21,6 +21,7 @@ import { useConfirm } from '@/shared/hooks/useConfirm';
 import { useToastStore } from '@/stores/useToastStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { apiGet, apiPost, apiDelete, triggerDownload, extractErrorMessageFromBody } from '@/shared/lib/api';
+import { formatFileSize } from '@/shared/lib/formatters';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -146,11 +147,8 @@ interface FilePreview {
   type: 'excel' | 'csv';
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+// `formatFileSize` lives in `@/shared/lib/formatters` — same implementation,
+// shared with the AI and Takeoff surfaces. Imported above.
 
 function getFileType(name: string): 'excel' | 'csv' | null {
   const lower = name.toLowerCase();

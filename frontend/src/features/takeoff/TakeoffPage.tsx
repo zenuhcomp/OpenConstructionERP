@@ -29,6 +29,7 @@ import {
 
 import { Button, Card, Badge, Input, Skeleton } from '@/shared/ui';
 import { apiGet, apiPost } from '@/shared/lib/api';
+import { formatFileSize } from '@/shared/lib/formatters';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -104,11 +105,8 @@ const MAX_FILE_SIZE_BYTES = Number.POSITIVE_INFINITY;
 
 /* ── Helpers ───────────────────────────────────────────────────────────── */
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+// `formatFileSize` lives in `@/shared/lib/formatters` — same implementation,
+// shared with the AI and Costs surfaces. Imported above.
 
 function formatTimeAgo(isoDate: string, t: (key: string, fallback: string) => string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
