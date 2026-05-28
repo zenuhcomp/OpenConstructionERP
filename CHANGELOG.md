@@ -5,6 +5,22 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.5.3] - 2026-05-28
+
+**Build-unblock patch — re-ships v5.5.2 with the PyPI workflow green.**
+The v5.5.2 tag passed `tsc --noEmit` in dev mode but failed
+`tsc -b` in CI on a pre-existing type mismatch in the markups
+aggregator test factory (the factory was not updated when alembic
+v3146 added `assignee_id` to the Markup interface). Adding the
+missing field unblocks the wheel build so v5.5.3 ships the same
+v5.5.2 surface area to PyPI.
+
+### Fixed
+- **`aggregator.test.ts` factory missing `assignee_id`** — failed
+  `tsc -b` in the PyPI publish workflow's wheel-build step; the dev
+  `tsc --noEmit` had ignored the test files. Adds `assignee_id: null`
+  to the factory so the build is green.
+
 ## [5.5.2] - 2026-05-28
 
 **Quality wave on v5.5.1.** Closes the FX-popover UX gap from issue #157
