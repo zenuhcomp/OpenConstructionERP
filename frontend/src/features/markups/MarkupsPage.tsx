@@ -58,6 +58,7 @@ import type {
 import { InlinePdfAnnotator } from './InlinePdfAnnotator';
 import { UnifiedMarkupsList } from './UnifiedMarkupsList';
 import { EditMarkupModal } from './EditMarkupModal';
+import { ApprovalInstanceCard } from '@/features/approval-routes';
 
 /* ── Constants ─────────────────────────────────────────────────────────── */
 
@@ -789,6 +790,15 @@ function MarkupDetail({
           </pre>
         </div>
       )}
+      {/* Wave-2 Epic A — approval workflow drop-in. The card no-ops
+          gracefully when no instance exists and no route is configured. */}
+      <div className="mt-3">
+        <ApprovalInstanceCard
+          targetKind="markup"
+          targetId={markup.id}
+          projectId={markup.project_id}
+        />
+      </div>
     </div>
   );
 }

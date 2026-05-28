@@ -483,6 +483,12 @@ const adminGridItems: NavItem[] = [
     to: '/admin/validation-rules',
     icon: ShieldCheck,
   },
+  {
+    labelKey: 'sidebar.admin_grid.approval_routes',
+    to: '/approval-routes',
+    icon: BadgeCheck,
+    roleGate: ['admin', 'manager'],
+  },
   { labelKey: 'sidebar.admin_grid.modules', to: '/modules', icon: Package },
   { labelKey: 'sidebar.admin_grid.integrations', to: '/integrations', icon: Plug },
   { labelKey: 'sidebar.admin_grid.settings', to: '/settings', icon: Settings },

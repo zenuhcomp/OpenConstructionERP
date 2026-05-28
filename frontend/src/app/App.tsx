@@ -191,6 +191,12 @@ const WebhookTargetsPage = lazy(() =>
     default: m.WebhookTargetsPage,
   })),
 );
+// Admin: Wave-2 Epic A — approval route templates + running instances.
+const ApprovalRoutesPage = lazy(() =>
+  import('@/features/approval-routes').then((m) => ({
+    default: m.ApprovalRoutesPage,
+  })),
+);
 const ArchitectureMapPage = lazy(() =>
   import('@/features/architecture/ArchitectureMapPage').then((m) => ({ default: m.ArchitectureMapPage }))
 );
@@ -839,6 +845,7 @@ export default function App() {
         <Route path="/admin/permissions" element={<P title="Permissions Matrix"><PermissionsMatrixPage /></P>} />
         <Route path="/admin/webhook-targets" element={<P title="Webhook Targets"><WebhookTargetsPage /></P>} />
         <Route path="/admin/validation-rules" element={<P title="Validation Rules"><ValidationRulesSettingsPage /></P>} />
+        <Route path="/approval-routes" element={<P title="Approval Routes"><ApprovalRoutesPage /></P>} />
         {/* Legacy redirect — moved 2026-05-23 from PropDev settings to platform-wide admin. */}
         <Route path="/property-dev/settings/validation-rules" element={<Navigate to="/admin/validation-rules" replace />} />
         <Route path="/modules" element={<P title="Modules"><ModulesPage /></P>} />
