@@ -57,7 +57,6 @@ import {
   Github,
   HardDrive,
   Link2,
-  Plug,
   // 18-Modules Wave icons
   Wrench,
   Truck,
@@ -464,23 +463,26 @@ const navGroups: NavGroup[] = [
 // flow. Role-gated items (audit log, permissions matrix) only render
 // for admin/manager JWTs — backend `RequirePermission` remains
 // authoritative; the client gate just keeps the grid tidy.
+// Ordered most-important → least-important (the user-facing setup hub
+// first, governance/role-gated surfaces after, the static About tile
+// last). Integrations is intentionally NOT here — it lives under
+// Settings → Integrations, so a top-level tile would be a duplicate.
 const adminGridItems: NavItem[] = [
+  { labelKey: 'sidebar.admin_grid.settings', to: '/settings', icon: Settings },
   { labelKey: 'sidebar.admin_grid.users', to: '/users', icon: Users },
-  {
-    labelKey: 'sidebar.admin_grid.audit',
-    to: '/admin/audit-log',
-    icon: ScrollText,
-    roleGate: ['admin', 'manager'],
-  },
+  { labelKey: 'sidebar.admin_grid.modules', to: '/modules', icon: Package },
   {
     labelKey: 'sidebar.admin_grid.permissions',
     to: '/admin/permissions',
     icon: ShieldCheck,
     roleGate: ['admin', 'manager'],
   },
-  { labelKey: 'sidebar.admin_grid.modules', to: '/modules', icon: Package },
-  { labelKey: 'sidebar.admin_grid.integrations', to: '/integrations', icon: Plug },
-  { labelKey: 'sidebar.admin_grid.settings', to: '/settings', icon: Settings },
+  {
+    labelKey: 'sidebar.admin_grid.audit',
+    to: '/admin/audit-log',
+    icon: ScrollText,
+    roleGate: ['admin', 'manager'],
+  },
   { labelKey: 'sidebar.admin_grid.about', to: '/about', icon: Info },
 ];
 
