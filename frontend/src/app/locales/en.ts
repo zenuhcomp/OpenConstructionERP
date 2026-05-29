@@ -2543,6 +2543,7 @@ const resource = {
     "sidebar.admin_grid.audit": "Audit",
     "sidebar.admin_grid.permissions": "Roles",
     "sidebar.admin_grid.validation_rules": "Rules",
+    "sidebar.admin_grid.approvals_rules": "Approvals & Rules",
     "sidebar.admin_grid.modules": "Modules",
     "sidebar.admin_grid.integrations": "Integrations",
     "sidebar.admin_grid.settings": "Settings",

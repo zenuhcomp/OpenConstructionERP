@@ -3441,6 +3441,7 @@ const resource = {
     "sidebar.admin_grid.integrations": "Интеграции",
     "sidebar.admin_grid.settings": "Настройки",
     "sidebar.admin_grid.about": "О ПО",
+    "sidebar.admin_grid.approvals_rules": "Согласования и правила",
     "admin.audit_log_title": "Журнал аудита",
     "admin.audit_log_subtitle": "Журнал всех зафиксированных изменений только для чтения. Фильтруйте по пользователю, модулю, действию или дате — откройте строку, чтобы увидеть полный набор данных.",
     "audit.filter_user": "Пользователь",
@@ -7780,8 +7781,6 @@ const resource = {
     "sidebar.join_telegram": "Присоединиться к сообществу в Telegram",
     "boq.toasts.assembly_applied": "Сборка применена к смете",
     "costs.vector_index_created": "Векторный индекс создан",
-    "pwa.install_prompt_title": "Установить приложение",
-    "common.send": "Отправить",
     "common.preview": "Предпросмотр",
     // --- /i18n audit 2026-05-28 ---
   }

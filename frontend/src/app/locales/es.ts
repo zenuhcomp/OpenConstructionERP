@@ -7100,7 +7100,6 @@ const resource = {
     "boq.toasts.assembly_applied": "Conjunto aplicado al presupuesto",
     "costs.vector_index_created": "Índice vectorial creado",
     "pwa.install_prompt_title": "Instalar la aplicación",
-    "common.send": "Enviar",
     "common.preview": "Vista previa",
     // --- /i18n audit 2026-05-28 ---
   }

@@ -478,21 +478,28 @@ const adminGridItems: NavItem[] = [
     icon: ShieldCheck,
     roleGate: ['admin', 'manager'],
   },
-  {
-    labelKey: 'sidebar.admin_grid.validation_rules',
-    to: '/admin/validation-rules',
-    icon: ShieldCheck,
-  },
+  { labelKey: 'sidebar.admin_grid.modules', to: '/modules', icon: Package },
+  { labelKey: 'sidebar.admin_grid.integrations', to: '/integrations', icon: Plug },
+  { labelKey: 'sidebar.admin_grid.settings', to: '/settings', icon: Settings },
+  { labelKey: 'sidebar.admin_grid.about', to: '/about', icon: Info },
+];
+
+// Governance — Approvals (approval routes) + Rules (validation rules)
+// presented together under one labeled sub-section in the admin area so
+// the two compliance surfaces read as a single, obvious group rather
+// than two loose tiles scattered among the other admin shortcuts.
+const governanceGridItems: NavItem[] = [
   {
     labelKey: 'sidebar.admin_grid.approval_routes',
     to: '/approval-routes',
     icon: BadgeCheck,
     roleGate: ['admin', 'manager'],
   },
-  { labelKey: 'sidebar.admin_grid.modules', to: '/modules', icon: Package },
-  { labelKey: 'sidebar.admin_grid.integrations', to: '/integrations', icon: Plug },
-  { labelKey: 'sidebar.admin_grid.settings', to: '/settings', icon: Settings },
-  { labelKey: 'sidebar.admin_grid.about', to: '/about', icon: Info },
+  {
+    labelKey: 'sidebar.admin_grid.validation_rules',
+    to: '/admin/validation-rules',
+    icon: ShieldCheck,
+  },
 ];
 
 /** Flat lookup of every NavItem in the sidebar, keyed by `to`. The
@@ -503,6 +510,7 @@ const ALL_NAV_ITEMS: Record<string, NavItem> = (() => {
   const map: Record<string, NavItem> = {};
   for (const group of navGroups) for (const item of group.items) map[item.to] = item;
   for (const item of adminGridItems) map[item.to] = item;
+  for (const item of governanceGridItems) map[item.to] = item;
   return map;
 })();
 
@@ -667,6 +675,9 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   // backend `RequirePermission` decorator still enforces real access —
   // this is just to keep the sidebar tidy for non-admin users.
   const visibleAdminGridItems = adminGridItems.filter(
+    (item) => !item.roleGate || (userRole && (item.roleGate as string[]).includes(userRole)),
+  );
+  const visibleGovernanceItems = governanceGridItems.filter(
     (item) => !item.roleGate || (userRole && (item.roleGate as string[]).includes(userRole)),
   );
 
@@ -1371,6 +1382,21 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             iconified ? 'left-2 right-2' : 'left-3 right-3',
           )}
         />
+        {visibleGovernanceItems.length > 0 && (
+          <div className="mb-2">
+            {!iconified && (
+              <p className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-content-tertiary">
+                {t('sidebar.admin_grid.approvals_rules', { defaultValue: 'Approvals & Rules' })}
+              </p>
+            )}
+            <AdminGrid
+              items={visibleGovernanceItems}
+              activeRoute={activeRoute}
+              iconified={iconified}
+              onNavigate={onClose}
+            />
+          </div>
+        )}
         <AdminGrid
           items={visibleAdminGridItems}
           activeRoute={activeRoute}

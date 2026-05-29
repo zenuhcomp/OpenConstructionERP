@@ -7100,7 +7100,6 @@ const resource = {
     "boq.toasts.assembly_applied": "Assemblage appliqué au BPU",
     "costs.vector_index_created": "Index vectoriel créé",
     "pwa.install_prompt_title": "Installer l'application",
-    "common.send": "Envoyer",
     "common.preview": "Aperçu",
     // --- /i18n audit 2026-05-28 ---
   }

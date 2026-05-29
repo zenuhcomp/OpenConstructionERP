@@ -7785,8 +7785,6 @@ const resource = {
     "sidebar.join_telegram": "Der Telegram-Community beitreten",
     "boq.toasts.assembly_applied": "Baugruppe auf LV angewendet",
     "costs.vector_index_created": "Vektor-Index erstellt",
-    "pwa.install_prompt_title": "App installieren",
-    "common.send": "Senden",
     "common.preview": "Vorschau",
     // --- /i18n audit 2026-05-28 ---
   }
