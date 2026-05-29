@@ -16,7 +16,7 @@
 #   3. Save. Next tag push to this repo publishes automatically.
 #
 # Manual fallback (no Trusted Publisher set up): see
-#   internal-notes/PYPI_PUBLISH.md
+#   the internal publish guide
 # for the local twine upload procedure.
 
 name: PyPI Publish

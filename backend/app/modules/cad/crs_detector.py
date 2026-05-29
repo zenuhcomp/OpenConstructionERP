@@ -102,7 +102,7 @@ class CRSGuess(BaseModel):
 # Each entry: (name, epsg, xmin, ymin, xmax, ymax, units).
 # The bbox is the *coordinate-valid window* in that CRS — not the
 # country bbox. We use it to score how likely an incoming model belongs
-# in this CRS. See internal-notes/research/crs_detection.md §1 for sources.
+# in this CRS. See the internal CRS-detection research notes §1 for sources.
 
 _REGION_TABLE: list[tuple[str, int, float, float, float, float, str]] = [
     # ── India — UTM 42N..46N. Y window matches Indian latitude band

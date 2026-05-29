@@ -1634,7 +1634,7 @@ tier 5269 passing, frontend type-check clean, zero regressions.
 
 ### Housekeeping
 
-- **All 7 stale Dependabot PRs closed** (#117 minor group, #112 cargo openssl, #125 Mongolian, #118 typescript major, #119 i18next-http-backend major, #120 react-is major, #121 eslint major). All were based on pre-filter-repo main; merging would have resurrected the removed `internal-notes/qa_parts_*` tree. Equivalent safe patches applied directly to main; majors deferred to a separate validation cycle.
+- **All 7 stale Dependabot PRs closed** (#117 minor group, #112 cargo openssl, #125 Mongolian, #118 typescript major, #119 i18next-http-backend major, #120 react-is major, #121 eslint major). All were based on an older main; merging would have resurrected a removed internal qa-scratch tree. Equivalent safe patches applied directly to main; majors deferred to a separate validation cycle.
 - Pre-existing frontend vitest debt documented: 31 failing tests across 9 files (share-link, visual-regression snapshots, ClassificationPicker, NotFoundPage, BOQGrid, CostCategoryTree, _registry, boqResourceTypes, CostDatabaseSearchModal). None caused by v3.0.4 changes — slated for v3.0.5 cleanup.
 
 ## [3.0.3] — 2026-05-13 · Deep correctness pass + UX & supply-chain hardening

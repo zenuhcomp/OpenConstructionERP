@@ -2,7 +2,7 @@
 
 **Status:** accepted
 **Date:** 2026-04-25
-**Supersedes:** confirms the existing ban in `internal-notes/the architecture guide` §"Важные ограничения" #1
+**Supersedes:** confirms the existing ban in the architecture guide §"Важные ограничения" #1
 **Related:** RFC 34 (OCE global spec integration)
 
 ## Context

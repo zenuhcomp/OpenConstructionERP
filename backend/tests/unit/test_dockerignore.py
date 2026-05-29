@@ -82,7 +82,6 @@ def backend_spec() -> pathspec.PathSpec:
         # VCS / scratch / OS.
         ".git/HEAD",
         ".github/workflows/ci.yml",
-        "internal-notes/worktrees/foo/file.py",
         ".vscode/settings.json",
         ".DS_Store",
         "frontend/Thumbs.db",
@@ -218,7 +217,7 @@ def test_no_env_file_could_leak_into_image(root_spec: pathspec.PathSpec) -> None
     the question we're answering is "does the .dockerignore excludes
     every secret-bearing file the build context could see?".
     """
-    skipped_dirs = {".git", "node_modules", ".venv", ".claude", ".next"}
+    skipped_dirs = {".git", "node_modules", ".venv", ".next"}
     leaks: list[str] = []
     for env_file in REPO_ROOT.rglob(".env*"):
         if not env_file.is_file():
