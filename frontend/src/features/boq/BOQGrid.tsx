@@ -315,6 +315,15 @@ export interface BOQGridProps {
    */
   fxRates?: { currency: string; rate: number; label?: string }[];
   /**
+   * Issue #157 — persist an FX rate the estimator types into the resource
+   * currency popover straight into the PROJECT ``fx_rates`` so the section
+   * subtotal, backend rollup and exports all convert the currency. ``code``
+   * is the foreign currency, ``rate`` is "1 unit of code = rate units of
+   * base". Wired by BOQEditorPage; omitted ⇒ the popover edit only updates
+   * the device-local global store (read-only viewers).
+   */
+  onUpsertProjectFxRate?: (code: string, rate: number) => void;
+  /**
    * ── Display-currency override (Issue #88 follow-up).
    * When set, all monetary aggregates rendered by the grid (per-position
    * total, section subtotals, footer rows) are formatted in `code` using
@@ -464,6 +473,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
   currencySymbol,
   currencyCode,
   fxRates,
+  onUpsertProjectFxRate,
   displayCurrency,
   onOpenFxRateSettings,
   locale,
@@ -956,6 +966,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
       currencySymbol,
       currencyCode,
       fxRates: fxRates ?? [],
+      onUpsertProjectFxRate,
       // Issue #88 — display-currency view-only override. The
       // `totalFormatter` in columnDefs reads this and reformats every
       // aggregate (footer rows, section subtotals, per-position totals)
@@ -1014,7 +1025,7 @@ const BOQGrid = forwardRef<BOQGridHandle, BOQGridProps>(function BOQGrid({
       positions,
       customColumns,
     }) as FullGridContext,
-    [currencySymbol, currencyCode, fxRates, displayCurrency, onOpenFxRateSettings, locale, fmt, t, collapsedSections, onToggleSection, onAddPosition, onAddSubSection,
+    [currencySymbol, currencyCode, fxRates, onUpsertProjectFxRate, displayCurrency, onOpenFxRateSettings, locale, fmt, t, collapsedSections, onToggleSection, onAddPosition, onAddSubSection,
      expandedPositions, toggleResources, onRemoveResource, onUpdateResource, onUpdateResourceFields,
      onSaveResourceToCatalog, onSaveVariantHeaderToCatalog, onOpenCostDbForPosition, onOpenCatalogForPosition, onRepickResourceVariant,
      openVariantPickerSignal, openVariantPickerFor, clearOpenVariantPicker, openPositionVariantPicker, onUpdateVariantHeader,

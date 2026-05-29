@@ -560,6 +560,15 @@ export type FullGridContext = ActionsContext & ResourceGridContext & SectionGrou
    */
   fxRates?: { currency: string; rate: number; label?: string }[];
   /**
+   * Issue #157 (skolodi) — persist an FX rate the estimator types in the
+   * resource currency popover straight into the PROJECT ``fx_rates`` so the
+   * section subtotal (which converts only via project rates), the backend
+   * rollup, and every export agree. ``code`` is the foreign currency,
+   * ``rate`` is "1 unit of code = rate units of base". When omitted the
+   * popover edit only updates the device-local global FX store.
+   */
+  onUpsertProjectFxRate?: (code: string, rate: number) => void;
+  /**
    * Live BOQ positions — used by full-width resource rows to render
    * per-resource custom-field values (read-only) without a separate
    * round-trip. Optional; when omitted, custom-column slots on resource
@@ -3035,17 +3044,16 @@ function ResourceCurrencyCombobox({
     const next = raw.trim().toUpperCase().slice(0, 6);
     if (next === '' || next === value) { setOpen(false); return; }
     onCommit(next);
-    // Issue #157 follow-up — when the user picks a foreign currency that
-    // has no FX rate configured, keep the popover open so the inline FX
-    // rate input gets the next interaction. Without this the section
-    // subtotal looks broken: the math falls back to the unconverted value
-    // (silent identity), so the screen shows no change even though the
-    // currency dropdown updated. We close the popover only when the
-    // committed code is base, or when an FX rate already exists.
+    // Issue #157 — when the user picks a foreign currency, keep the popover
+    // open so the inline FX-rate row (which persists into the project) is
+    // the next thing they touch. Only auto-close when they pick the base
+    // currency (no rate needed). The previous check read the PREVIOUS
+    // currency's ``fxRate`` (a stale prop — the parent hasn't re-rendered
+    // with the new currency's rate yet), so it closed on some foreign picks
+    // that actually still needed a project rate, hiding the input and
+    // leaving the section subtotal looking "stuck".
     const nextIsForeign = !!baseCode && next !== baseCode;
-    const hasRate =
-      typeof fxRate === 'number' && Number.isFinite(fxRate) && fxRate > 0;
-    if (!nextIsForeign || hasRate) {
+    if (!nextIsForeign) {
       setOpen(false);
     }
   };
@@ -3140,17 +3148,16 @@ function ResourceCurrencyCombobox({
               <div className="mt-2 pt-2 border-t border-border-light/60">
                 <div className="text-[9px] uppercase tracking-wider text-content-tertiary mb-1">
                   {t('boq.fx_rate_label', { defaultValue: 'FX rate' })}
-                  {fxSource === 'project' && (
+                  {fxSource === 'project' ? (
                     <span className="ml-1 px-1 rounded bg-oe-blue-subtle text-oe-blue-text text-[8px] font-bold">
                       {t('boq.fx_rate_project_badge', { defaultValue: 'PROJECT' })}
                     </span>
-                  )}
-                  {fxSource === 'global' && (
-                    <span className="ml-1 px-1 rounded bg-surface-secondary text-content-tertiary text-[8px] font-bold">
-                      {t('boq.fx_rate_global_badge', { defaultValue: 'GLOBAL' })}
-                    </span>
-                  )}
-                  {(fxSource === 'none' || fxRate == null) && (
+                  ) : (
+                    // Issue #157 — a 'global' (device/seed) rate converts the
+                    // resource ROW but NOT the section subtotal, which only
+                    // reads project rates. So anything that isn't a project
+                    // rate must prompt the estimator to set one, otherwise the
+                    // section sum silently stays unconverted.
                     <span className="ml-1 px-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-[8px] font-bold">
                       {t('boq.fx_rate_missing_badge', { defaultValue: 'SET RATE' })}
                     </span>
@@ -3161,15 +3168,22 @@ function ResourceCurrencyCombobox({
                   baseCode={baseCode}
                   rate={fxRate}
                   readOnly={fxSource === 'project'}
+                  isProjectRate={fxSource === 'project'}
                   onCommit={onCommitFxRate}
                   t={t}
-                  autoFocus={fxSource !== 'project' && (fxRate == null || fxRate <= 0)}
+                  autoFocus={fxSource !== 'project'}
                 />
-                {(fxSource === 'none' || fxRate == null) && (
+                {fxSource !== 'project' && (
                   <p className="mt-1 text-[9px] text-amber-700 dark:text-amber-300 leading-tight">
-                    {t('boq.fx_rate_required_hint', {
-                      defaultValue: 'Enter the exchange rate so the section subtotal recomputes.',
-                    })}
+                    {fxSource === 'global'
+                      ? t('boq.fx_rate_confirm_hint', {
+                          defaultValue:
+                            'Default rate filled in — press Enter to apply it to this project so the section subtotal converts, or type your own.',
+                        })
+                      : t('boq.fx_rate_required_hint', {
+                          defaultValue:
+                            'Enter the exchange rate so the section subtotal recomputes.',
+                        })}
                   </p>
                 )}
               </div>
@@ -3244,6 +3258,7 @@ function PopoverFxRateRow({
   baseCode,
   rate,
   readOnly,
+  isProjectRate,
   onCommit,
   t,
   autoFocus,
@@ -3252,15 +3267,25 @@ function PopoverFxRateRow({
   baseCode: string;
   rate: number | undefined;
   readOnly: boolean;
+  /** True when ``rate`` is already a PROJECT fx_rate (vs a device/seed
+   *  suggestion). When false, committing the pre-filled value — even
+   *  unchanged — persists it to the project so the section subtotal
+   *  converts (Issue #157). */
+  isProjectRate?: boolean;
   onCommit: (next: number) => void;
   t: (key: string, opts?: Record<string, string>) => string;
   /** Focus the input when the popover opens with a foreign currency that
-   *  has no FX rate yet — issue #157 follow-up so the section subtotal
-   *  recompute is visibly tied to the rate the user must enter. */
+   *  has no project FX rate yet — issue #157 follow-up so the section
+   *  subtotal recompute is visibly tied to the rate the user must confirm. */
   autoFocus?: boolean;
 }) {
   const [draft, setDraft] = useState(rate != null ? String(Number(rate.toFixed(6))) : '');
   const inputRef = useRef<HTMLInputElement>(null);
+  // Only commit on blur when the field was actually edited, so navigating
+  // away from a pre-filled seed rate doesn't silently persist it. An
+  // explicit Enter forces the commit (the "press Enter to apply" flow).
+  const dirtyRef = useRef(false);
+  const lastCommittedRef = useRef<number | null>(null);
   useEffect(() => {
     setDraft(rate != null ? String(Number(rate.toFixed(6))) : '');
   }, [rate]);
@@ -3271,10 +3296,28 @@ function PopoverFxRateRow({
     }
   }, [autoFocus, readOnly]);
 
-  const commit = () => {
+  const reset = () => setDraft(rate != null ? String(Number(rate.toFixed(6))) : '');
+
+  const commit = (force: boolean) => {
+    if (readOnly) return;
     const n = parseFloat(draft.replace(',', '.'));
-    if (Number.isFinite(n) && n > 0 && rate !== n) onCommit(n);
-    else setDraft(rate != null ? String(Number(rate.toFixed(6))) : '');
+    if (!Number.isFinite(n) || n <= 0) {
+      reset();
+      dirtyRef.current = false;
+      return;
+    }
+    // Commit when: the user edited the value (dirty), OR an explicit Enter
+    // forced it. Skip a value we just committed to avoid a double write
+    // from the Enter→blur sequence. For a non-project (seed) rate the
+    // committed value can equal ``rate`` — that's the whole point: it
+    // promotes the seed into the project so the section converts.
+    const changedVsRate = n !== rate;
+    const alreadyCommitted = lastCommittedRef.current === n;
+    if ((force || dirtyRef.current || (!isProjectRate && changedVsRate)) && !alreadyCommitted) {
+      lastCommittedRef.current = n;
+      onCommit(n);
+    }
+    dirtyRef.current = false;
   };
 
   return (
@@ -3284,12 +3327,13 @@ function PopoverFxRateRow({
         ref={inputRef}
         type="text"
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onChange={(e) => { setDraft(e.target.value); dirtyRef.current = true; }}
+        onBlur={() => commit(false)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          if (e.key === 'Enter') { e.preventDefault(); commit(true); (e.target as HTMLInputElement).blur(); }
           if (e.key === 'Escape') {
-            setDraft(rate != null ? String(Number(rate.toFixed(6))) : '');
+            reset();
+            dirtyRef.current = false;
             (e.target as HTMLInputElement).blur();
           }
         }}
@@ -3535,13 +3579,22 @@ export function EditableResourceRow({ data, ctx, slots, leftPad }: { data: Recor
   // When the user edits the global rate inline, we store "1 unit of <foreign> = X <USD>".
   // Math: rate(foreign→base) = rateVsUsd(foreign) / rateVsUsd(base)
   //   ⇒ rateVsUsd(foreign) = rate(foreign→base) * rateVsUsd(base)
-  const handleGlobalFxRateChange = useCallback(
+  const handleFxRateChange = useCallback(
     (newRateForeignToBase: number) => {
       if (!Number.isFinite(newRateForeignToBase) || newRateForeignToBase <= 0) return;
+      // Device-local mirror — keeps the row's fallback display instant and
+      // survives a rejected project save (read-only viewers still see it).
       const baseVsUsd = ratesVsUsd[baseCurrency] ?? 1;
       setGlobalRate(resourceCurrency, newRateForeignToBase * baseVsUsd);
+      // Issue #157 (skolodi) — persist into the PROJECT fx_rates so the
+      // SECTION subtotal (which converts ONLY through project rates), the
+      // backend rollup and every export pick it up. This is the link that
+      // was missing: the rate used to live only in the global store, which
+      // the section sum ignores, so the total looked "stuck" after a
+      // currency change to a currency the project had no rate for.
+      ctx.onUpsertProjectFxRate?.(resourceCurrency, newRateForeignToBase);
     },
-    [resourceCurrency, baseCurrency, ratesVsUsd, setGlobalRate],
+    [resourceCurrency, baseCurrency, ratesVsUsd, setGlobalRate, ctx],
   );
 
   const formattedTotal = fmtWithCurrency(total, ctx.locale ?? 'de-DE', resourceCurrency);
@@ -3866,7 +3919,7 @@ export function EditableResourceRow({ data, ctx, slots, leftPad }: { data: Recor
           fxRate={fxRate}
           fxSource={fxSource}
           baseCode={baseCurrency}
-          onCommitFxRate={handleGlobalFxRateChange}
+          onCommitFxRate={handleFxRateChange}
           isForeign={isForeign}
           t={ctx.t}
         />

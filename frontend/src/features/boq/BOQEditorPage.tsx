@@ -28,7 +28,7 @@ import {
   DEFAULT_MAX_NESTING_DEPTH,
 } from './api';
 import { ApiError } from '@/shared/lib/api';
-import { projectsApi } from '@/features/projects/api';
+import { projectsApi, type Project, type ProjectFxRate } from '@/features/projects/api';
 import { fetchBIMModels } from '@/features/bim/api';
 // AutocompleteInput used in sub-components, not directly here
 // import { AutocompleteInput } from './AutocompleteInput';
@@ -262,6 +262,67 @@ export function BOQEditorPage() {
   const addToast = useToastStore((s) => s.addToast);
   const removeToast = useToastStore((s) => s.removeToast);
   const addRecent = useRecentStore((s) => s.addRecent);
+
+  /**
+   * Issue #157 (skolodi) — persist an FX rate typed in the per-resource
+   * currency popover straight into the PROJECT ``fx_rates``.
+   *
+   * Root cause of the long-standing "section total doesn't update when I
+   * change a resource's currency" report: the inline rate editor only wrote
+   * to the device-local global FX store, but the section subtotal converts
+   * exclusively through the PROJECT ``fx_rates`` table (so does the backend
+   * rollup and every export). A rate that never reached the project was
+   * therefore invisible to the sum — switching EUR↔USD (neither in the
+   * project) produced an identical, unconverted total while ARS (which the
+   * user HAD added to the project) recomputed. Writing the rate to the
+   * project closes the gap everywhere at once.
+   *
+   * Optimistically patches the cached project so the grid recomputes the
+   * instant the rate is entered; rolls back and warns if the save is
+   * rejected (e.g. a viewer without project-edit access).
+   */
+  const handleUpsertProjectFxRate = useCallback(
+    async (code: string, rate: number) => {
+      const projectId = boq?.project_id;
+      const upper = (code || '').trim().toUpperCase();
+      if (!projectId || !upper || !Number.isFinite(rate) || rate <= 0) return;
+      const base = getCurrencyCode(project?.currency).toUpperCase();
+      if (upper === base) return; // base currency never needs a rate
+      const rateStr = String(rate);
+      const existing = (project?.fx_rates ?? []) as ProjectFxRate[];
+      const has = existing.some((r) => (r.code || '').toUpperCase() === upper);
+      const next: ProjectFxRate[] = has
+        ? existing.map((r) =>
+            (r.code || '').toUpperCase() === upper ? { ...r, rate: rateStr } : r,
+          )
+        : [...existing, { code: upper, rate: rateStr }];
+
+      const key = ['project', projectId];
+      const prev = queryClient.getQueryData<Project>(key);
+      queryClient.setQueryData<Project>(key, (p) =>
+        p ? { ...p, fx_rates: next } : p,
+      );
+      try {
+        await projectsApi.update(projectId, { fx_rates: next });
+        queryClient.invalidateQueries({ queryKey: key });
+      } catch {
+        // Restore the pre-optimistic project; the device-global store still
+        // holds the rate so the resource row keeps showing the conversion.
+        if (prev) queryClient.setQueryData<Project>(key, prev);
+        addToast({
+          type: 'warning',
+          title: t('boq.fx_rate_save_failed', {
+            defaultValue: 'Could not save the FX rate to the project',
+          }),
+          message: t('boq.fx_rate_save_failed_hint', {
+            defaultValue:
+              'The rate is applied on this device but was not saved to the shared project — you may not have edit access. Ask the project owner to add it under Settings → FX rates.',
+          }),
+        });
+      }
+    },
+    [boq?.project_id, project?.currency, project?.fx_rates, queryClient, addToast, t],
+  );
 
   // Track BOQ as recent item
   useEffect(() => {
@@ -4008,6 +4069,7 @@ export function BOQEditorPage() {
           currencySymbol={currencySymbol}
           currencyCode={currencyCode}
           fxRates={fxRates}
+          onUpsertProjectFxRate={handleUpsertProjectFxRate}
           displayCurrency={
             displayCurrencyMeta
               ? { code: displayCurrencyMeta.currency, rate: displayCurrencyMeta.rate }
