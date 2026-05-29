@@ -89,12 +89,33 @@ class RouteCreate(BaseModel):
 
 
 class RouteUpdate(BaseModel):
-    """Patch a route's mutable surface (steps are managed via separate edits)."""
+    """Patch a route's mutable surface.
+
+    ``name`` and ``is_active`` are simple field patches. When ``steps`` is
+    supplied the whole step list is *replaced* (delete-and-reinsert with
+    re-densified ordinals) so the editor can add / remove / reorder steps
+    in one round trip. Omitting ``steps`` (``None``) leaves the existing
+    steps untouched.
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     is_active: bool | None = None
+    steps: list[StepCreate] | None = Field(default=None, max_length=20)
+
+    @model_validator(mode="after")
+    def _ordinals_are_unique_and_dense(self) -> RouteUpdate:
+        if self.steps is None:
+            return self
+        if not self.steps:
+            raise ValueError("A route must keep at least one step")
+        ordinals = sorted(s.ordinal for s in self.steps)
+        if ordinals != list(range(1, len(ordinals) + 1)):
+            raise ValueError(
+                "Route steps must use dense 1-based ordinals (1, 2, 3, …) without gaps or duplicates",
+            )
+        return self
 
 
 class RouteResponse(BaseModel):

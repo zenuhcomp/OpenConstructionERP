@@ -376,6 +376,22 @@ class ClashRepository:
         stmt = select(ClashResult).where(ClashResult.run_id == run_id)
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def results_by_ids(self, run_id: uuid.UUID, result_ids: list[uuid.UUID]) -> list[ClashResult]:
+        """Fetch the run's clash rows whose id is in ``result_ids`` (one query).
+
+        Powers the bulk-triage endpoint so a large selection is updated in a
+        single round-trip instead of one PATCH per row. Rows that do not
+        belong to ``run_id`` are silently excluded (the run scope is part of
+        the WHERE), so a caller can never patch another run's clashes.
+        """
+        if not result_ids:
+            return []
+        stmt = select(ClashResult).where(
+            ClashResult.run_id == run_id,
+            ClashResult.id.in_(result_ids),
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def latest_prior_completed_run(
         self,
         project_id: uuid.UUID,

@@ -56,6 +56,10 @@ DEFAULT_MODELS: dict[str, str] = {
     "cohere": "command-r-plus",
     "ai21": "jamba-1.5-large",
     "xai": "grok-2",
+    "zhipu": "glm-4-plus",
+    "baidu": "ernie-4.0-8k",
+    "yandex": "yandexgpt/latest",
+    "gigachat": "GigaChat-Pro",
     "ollama": os.environ.get("OE_OLLAMA_MODEL", "llama3.1"),
     "vllm": os.environ.get("OE_VLLM_MODEL", "meta-llama/Llama-3.1-8B-Instruct"),
     "kimi": KIMI_MODEL,
@@ -410,6 +414,29 @@ _OPENAI_COMPAT_CONFIG = {
     "xai": {
         "url": "https://api.x.ai/v1/chat/completions",
         "model": "grok-2",
+    },
+    # Zhipu AI (GLM) — OpenAI-compatible chat completions endpoint.
+    "zhipu": {
+        "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        "model": "glm-4-plus",
+    },
+    # Baidu Qianfan (ERNIE) — OpenAI-compatible v2 endpoint.
+    "baidu": {
+        "url": "https://qianfan.baidubce.com/v2/chat/completions",
+        "model": "ernie-4.0-8k",
+    },
+    # Yandex Cloud Foundation Models — OpenAI-compatible endpoint. The
+    # model id must be the bare alias here; the user typically configures
+    # the fully-qualified ``gpt://<folder-id>/yandexgpt/latest`` id as a
+    # per-provider model override in Settings > AI.
+    "yandex": {
+        "url": "https://llm.api.cloud.yandex.net/v1/chat/completions",
+        "model": "yandexgpt/latest",
+    },
+    # Sber GigaChat — OpenAI-compatible chat completions endpoint.
+    "gigachat": {
+        "url": "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+        "model": "GigaChat-Pro",
     },
     # Local LLM runtimes — OpenAI-compatible REST API, no key required.
     # Override base URL via OE_OLLAMA_URL / OE_VLLM_URL env vars to point at
@@ -809,6 +836,10 @@ def resolve_provider_and_key(
         (["cohere", "command"], "cohere", "cohere_api_key"),
         (["ai21", "jamba"], "ai21", "ai21_api_key"),
         (["xai", "grok"], "xai", "xai_api_key"),
+        (["zhipu", "glm"], "zhipu", "zhipu_api_key"),
+        (["baidu", "ernie"], "baidu", "baidu_api_key"),
+        (["yandex"], "yandex", "yandex_api_key"),
+        (["gigachat"], "gigachat", "gigachat_api_key"),
         (["ollama"], "ollama", None),
         (["vllm"], "vllm", None),
         (["kimi", "moonshot"], "kimi", "kimi_api_key"),
@@ -842,6 +873,10 @@ def resolve_provider_and_key(
         ("cohere", "cohere_api_key"),
         ("ai21", "ai21_api_key"),
         ("xai", "xai_api_key"),
+        ("zhipu", "zhipu_api_key"),
+        ("baidu", "baidu_api_key"),
+        ("yandex", "yandex_api_key"),
+        ("gigachat", "gigachat_api_key"),
         ("ollama", None),
         ("vllm", None),
         ("kimi", "kimi_api_key"),

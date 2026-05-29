@@ -43,7 +43,6 @@ import {
   Crosshair,
   Scan,
   FileText,
-  Image as ImageIcon,
   Sparkles,
   Layers,
   List,
@@ -58,6 +57,7 @@ import { useAuthStore } from '../../stores/useAuthStore';
 import { boqApi, type CreatePositionData, type Position } from '../../features/boq/api';
 import { takeoffApi } from '../../features/takeoff/api';
 import { apiGet } from '../../shared/lib/api';
+import { formatFileSize } from '../../shared/lib/formatters';
 import { useMeasurementPersistence } from './useMeasurementPersistence';
 import {
   type ScaleConfig,
@@ -225,6 +225,17 @@ type UndoOperation =
 
 /* ── Component ─────────────────────────────────────────────────────── */
 
+/** Minimal shape of a previously-uploaded takeoff document, surfaced as a
+ *  "Recent drawings" list on the landing page so the user can reopen a PDF
+ *  in one click instead of re-uploading it. */
+export interface RecentTakeoffDocument {
+  id: string;
+  filename: string;
+  pages: number;
+  size_bytes: number;
+  uploaded_at: string | null;
+}
+
 interface TakeoffViewerModuleProps {
   /** URL to pre-load a PDF from (e.g. `/api/v1/takeoff/documents/{id}/download/`). */
   initialPdfUrl?: string;
@@ -234,12 +245,19 @@ interface TakeoffViewerModuleProps {
    *  list lands (used by the /markups → /takeoff deep-link). Matches either
    *  the frontend id or the server-side UUID. */
   initialMeasurementId?: string | null;
+  /** Previously-uploaded documents for the active project, shown on the
+   *  landing page as a "Recent drawings" quick-open list. */
+  recentDocuments?: RecentTakeoffDocument[];
+  /** Open one of the recent documents in the viewer (parent owns navigation). */
+  onOpenRecentDocument?: (docId: string) => void;
 }
 
 export default function TakeoffViewerModule({
   initialPdfUrl,
   initialPdfName,
   initialMeasurementId,
+  recentDocuments,
+  onOpenRecentDocument,
 }: TakeoffViewerModuleProps = {}) {
   const { t } = useTranslation();
 
@@ -1942,24 +1960,7 @@ export default function TakeoffViewerModule({
 
   /* ── Export measurements to BOQ ────────────────────────────────── */
 
-  const openExportDialog = useCallback(async () => {
-    setShowExportDialog(true);
-    try {
-      const projects = await apiGet<{ id: string; name: string }[]>('/v1/projects/');
-      setExportProjects(projects);
-    } catch (err) {
-      setExportProjects([]);
-      addToast({
-        type: 'error',
-        title: t('takeoff.load_projects_failed', { defaultValue: 'Failed to load projects' }),
-        message: err instanceof Error ? err.message : '',
-      });
-    }
-  }, [addToast, t]);
-
-  const handleProjectChange = useCallback(async (projectId: string) => {
-    setSelectedProjectId(projectId);
-    setSelectedBoqId('');
+  const loadExportBoqs = useCallback(async (projectId: string) => {
     if (!projectId) { setExportBoqs([]); return; }
     try {
       const boqs = await apiGet<{ id: string; name: string }[]>(`/v1/boq/boqs/?project_id=${projectId}`);
@@ -1972,7 +1973,38 @@ export default function TakeoffViewerModule({
         message: err instanceof Error ? err.message : '',
       });
     }
-  }, []);
+  }, [addToast, t]);
+
+  const openExportDialog = useCallback(async () => {
+    setShowExportDialog(true);
+    // Seed the picker from the app's active project context so the
+    // estimator doesn't have to reselect the project they're already
+    // working in. The BOQ list loads in step with it.
+    const seedProject = selectedProjectId || activeProjectId || '';
+    if (seedProject) {
+      setSelectedProjectId(seedProject);
+      if (exportBoqs.length === 0) {
+        await loadExportBoqs(seedProject);
+      }
+    }
+    try {
+      const projects = await apiGet<{ id: string; name: string }[]>('/v1/projects/');
+      setExportProjects(projects);
+    } catch (err) {
+      setExportProjects([]);
+      addToast({
+        type: 'error',
+        title: t('takeoff.load_projects_failed', { defaultValue: 'Failed to load projects' }),
+        message: err instanceof Error ? err.message : '',
+      });
+    }
+  }, [addToast, t, selectedProjectId, activeProjectId, exportBoqs.length, loadExportBoqs]);
+
+  const handleProjectChange = useCallback(async (projectId: string) => {
+    setSelectedProjectId(projectId);
+    setSelectedBoqId('');
+    await loadExportBoqs(projectId);
+  }, [loadExportBoqs]);
 
   const handleExportToBOQ = useCallback(async () => {
     if (!selectedBoqId || measurements.length === 0) return;
@@ -2586,8 +2618,8 @@ export default function TakeoffViewerModule({
       icon: Scan,
       color: 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-800',
       ic: 'text-emerald-500',
-      title: t('takeoff.landing_feat_symbol_title', { defaultValue: 'Auto symbol detection' }),
-      desc: t('takeoff.landing_feat_symbol_desc', { defaultValue: 'AI spots doors, windows and MEP symbols and proposes counts with confidence scores.' }),
+      title: t('takeoff.landing_feat_extract_title', { defaultValue: 'AI text & table extraction' }),
+      desc: t('takeoff.landing_feat_extract_desc', { defaultValue: 'Pull schedules and BOQ tables straight out of the PDF text — each row comes back with a confidence score to review.' }),
     },
     {
       icon: Ruler,
@@ -2620,11 +2652,8 @@ export default function TakeoffViewerModule({
   ];
 
   const landingFormats = [
-    { ext: 'PDF', label: t('takeoff.landing_fmt_pdf', { defaultValue: 'Vector drawings, floor plans, sections' }), icon: FileText, size: 'up to 50MB', primary: true },
-    { ext: 'PNG', label: t('takeoff.landing_fmt_png', { defaultValue: 'Raster plan images' }), icon: ImageIcon, size: 'up to 50MB' },
-    { ext: 'JPG', label: t('takeoff.landing_fmt_jpg', { defaultValue: 'Scanned or photographed plans' }), icon: ImageIcon, size: 'up to 50MB' },
-    { ext: 'TIFF', label: t('takeoff.landing_fmt_tiff', { defaultValue: 'High-resolution scans' }), icon: ImageIcon, size: 'up to 50MB' },
-    { ext: 'DWG', label: t('takeoff.landing_fmt_dwg', { defaultValue: 'Use DWG Takeoff module instead' }), icon: Box, size: 'via DWG module', muted: true },
+    { ext: 'PDF', label: t('takeoff.landing_fmt_pdf', { defaultValue: 'Vector drawings, floor plans, sections' }), icon: FileText, primary: true, muted: false },
+    { ext: 'DWG', label: t('takeoff.landing_fmt_dwg', { defaultValue: 'Use DWG Takeoff module instead' }), icon: Box, primary: false, muted: true },
   ];
 
   return (
@@ -2752,7 +2781,7 @@ export default function TakeoffViewerModule({
                         addToast({
                           type: 'warning',
                           title: t('takeoff.landing_drop_pdf_only_title', { defaultValue: 'PDF only' }),
-                          message: t('takeoff.landing_drop_pdf_only_msg', { defaultValue: 'Image support is coming soon — drop a PDF for now.' }),
+                          message: t('takeoff.landing_drop_pdf_only_msg', { defaultValue: 'This viewer measures PDF drawings. Drop a PDF file to get started.' }),
                         });
                       }
                     }}
@@ -2766,7 +2795,7 @@ export default function TakeoffViewerModule({
                         {t('takeoff.landing_drop_here', { defaultValue: 'Drop a PDF here or click to browse' })}
                       </p>
                       <p className="text-xs text-content-tertiary mt-1">
-                        {t('takeoff.landing_size_hint', { defaultValue: 'PDF — up to 50MB' })}
+                        {t('takeoff.landing_size_hint', { defaultValue: 'Vector or scanned PDF drawings' })}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap justify-center">
@@ -2778,6 +2807,47 @@ export default function TakeoffViewerModule({
                     <input type="file" accept="application/pdf" onChange={handleFileUpload} className="hidden" />
                   </label>
                 </div>
+
+                {/* Recent drawings — previously uploaded PDFs for this
+                    project, so the estimator can reopen one in a click
+                    instead of re-uploading the same file. */}
+                {recentDocuments && recentDocuments.length > 0 && (
+                  <div className="mt-4">
+                    <h2 className="text-[10px] font-bold text-content-tertiary uppercase tracking-widest mb-2">
+                      {t('takeoff.landing_recent_drawings', { defaultValue: 'Recent drawings' })}
+                    </h2>
+                    <ul className="space-y-1.5">
+                      {recentDocuments.slice(0, 5).map((doc) => (
+                        <li key={doc.id}>
+                          <button
+                            type="button"
+                            onClick={() => onOpenRecentDocument?.(doc.id)}
+                            className="group/recent flex w-full items-center gap-2.5 rounded-lg border border-border-light/60 bg-white dark:bg-gray-800/40 px-2.5 py-2 text-left transition-all hover:border-oe-blue/40 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-oe-blue/40"
+                          >
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border-light bg-surface-secondary text-content-tertiary group-hover/recent:text-oe-blue">
+                              <FileText size={13} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-[11px] font-semibold text-content-primary">
+                                {doc.filename}
+                              </p>
+                              <p className="text-[10px] text-content-tertiary">
+                                {doc.pages > 0
+                                  ? `${doc.pages} ${t('takeoff.pages_short', { defaultValue: 'p' })} · `
+                                  : ''}
+                                {formatFileSize(doc.size_bytes)}
+                              </p>
+                            </div>
+                            <ChevronRight
+                              size={13}
+                              className="shrink-0 text-content-quaternary group-hover/recent:text-oe-blue"
+                            />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
 
               {/* RIGHT — Hero text + supported formats cards */}

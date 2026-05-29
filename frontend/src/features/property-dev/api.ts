@@ -283,7 +283,14 @@ export interface DevelopmentDashboard {
   total_plots: number;
   plots_by_status: Record<string, number>;
   buyers_by_status: Record<string, number>;
+  /**
+   * Meaningful only when the development has a single contract currency
+   * (0 otherwise). Use {@link DevelopmentDashboard.contracted_value_by_currency}
+   * to render an honest, FX-safe total.
+   */
   contracted_value: number | string;
+  /** Per-currency contracted-value breakdown (ISO code → amount string). */
+  contracted_value_by_currency: Record<string, string>;
   open_snags: number;
   open_warranty_claims: number;
   completed_handovers: number;
@@ -938,6 +945,38 @@ export function closeWarrantyClaim(id: string): Promise<WarrantyClaim> {
 
 export function warrantyClaimPdfUrl(id: string): string {
   return `/api${BASE}/warranty-claims/${id}/pdf`;
+}
+
+/**
+ * Stream-download a warranty-claim PDF as a Blob.
+ *
+ * The endpoint is guarded by HTTPBearer auth, so a plain ``<a href>``
+ * new-tab navigation (which carries no Authorization header) would 401.
+ * This mirrors {@link downloadPropDevDocument}: it issues an authenticated
+ * ``fetch`` and returns a Blob for the ``URL.createObjectURL`` + temp
+ * ``<a download>`` flow.
+ */
+export async function downloadWarrantyClaimPdf(id: string): Promise<Blob> {
+  const url = warrantyClaimPdfUrl(id);
+  const token = (() => {
+    try {
+      // Lazy-load to avoid a circular import; the store is already
+      // initialised by the time any download is triggered.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+      const { useAuthStore } = require('@/stores/useAuthStore');
+      return useAuthStore.getState().accessToken as string | null;
+    } catch {
+      return null;
+    }
+  })();
+  const headers: Record<string, string> = { Accept: 'application/pdf' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(url, { method: 'GET', headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  return res.blob();
 }
 
 export function createWarrantyClaimFromSnag(

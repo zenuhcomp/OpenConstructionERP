@@ -1,6 +1,95 @@
 import { BarChart3, Box, FileBarChart, FileText, Image as ImageIcon, MapPin, Package, Pencil, PenTool, Radar, Ruler, type LucideIcon } from 'lucide-react';
 import type { FileKind } from './types';
 
+// Single source of truth for per-kind accent colours. Both the landing
+// folder grid (FolderCardGrid) and the storage stats strip (FilesStatsStrip)
+// consume this so every category shows exactly one accent colour everywhere
+// on the same screen. `tile`/`icon`/`ring` style the folder-card icon chip;
+// `bar` is the solid accent used for storage bars, dots and micro-bars.
+export interface KindTone {
+  tile: string;
+  icon: string;
+  ring: string;
+  bar: string;
+}
+
+export const KIND_TONE: Record<FileKind, KindTone> = {
+  document: {
+    tile: 'bg-sky-50 dark:bg-sky-950/30',
+    icon: 'text-sky-600 dark:text-sky-400',
+    ring: 'group-hover:ring-sky-500/30',
+    bar: 'bg-sky-500',
+  },
+  photo: {
+    tile: 'bg-emerald-50 dark:bg-emerald-950/30',
+    icon: 'text-emerald-600 dark:text-emerald-400',
+    ring: 'group-hover:ring-emerald-500/30',
+    bar: 'bg-emerald-500',
+  },
+  sheet: {
+    tile: 'bg-amber-50 dark:bg-amber-950/30',
+    icon: 'text-amber-600 dark:text-amber-400',
+    ring: 'group-hover:ring-amber-500/30',
+    bar: 'bg-amber-500',
+  },
+  bim_model: {
+    tile: 'bg-violet-50 dark:bg-violet-950/30',
+    icon: 'text-violet-600 dark:text-violet-400',
+    ring: 'group-hover:ring-violet-500/30',
+    bar: 'bg-violet-500',
+  },
+  dwg_drawing: {
+    tile: 'bg-orange-50 dark:bg-orange-950/30',
+    icon: 'text-orange-600 dark:text-orange-400',
+    ring: 'group-hover:ring-orange-500/30',
+    bar: 'bg-orange-500',
+  },
+  takeoff: {
+    tile: 'bg-cyan-50 dark:bg-cyan-950/30',
+    icon: 'text-cyan-600 dark:text-cyan-400',
+    ring: 'group-hover:ring-cyan-500/30',
+    bar: 'bg-cyan-500',
+  },
+  report: {
+    tile: 'bg-pink-50 dark:bg-pink-950/30',
+    icon: 'text-pink-600 dark:text-pink-400',
+    ring: 'group-hover:ring-pink-500/30',
+    bar: 'bg-pink-500',
+  },
+  markup: {
+    tile: 'bg-rose-50 dark:bg-rose-950/30',
+    icon: 'text-rose-600 dark:text-rose-400',
+    ring: 'group-hover:ring-rose-500/30',
+    bar: 'bg-rose-500',
+  },
+};
+
+// Solid accent (the `bar` tone) keyed by kind — the storage-breakdown bar
+// and legend dots use this so they match the folder-card accents exactly.
+export const KIND_COLORS: Record<FileKind, string> = {
+  document: KIND_TONE.document.bar,
+  photo: KIND_TONE.photo.bar,
+  sheet: KIND_TONE.sheet.bar,
+  bim_model: KIND_TONE.bim_model.bar,
+  dwg_drawing: KIND_TONE.dwg_drawing.bar,
+  takeoff: KIND_TONE.takeoff.bar,
+  report: KIND_TONE.report.bar,
+  markup: KIND_TONE.markup.bar,
+};
+
+// All file kinds in canonical display order. The stable denominator for the
+// "Categories" KPI (every project has these N kinds, even when empty).
+export const ALL_KINDS: readonly FileKind[] = [
+  'document',
+  'photo',
+  'sheet',
+  'bim_model',
+  'dwg_drawing',
+  'takeoff',
+  'report',
+  'markup',
+];
+
 // One file kind can be opened in several modules — a single .pdf is
 // either a project document, a takeoff source, or a tender attachment.
 // The first entry in each list is the "primary" / suggested module.

@@ -393,12 +393,17 @@ class SubmittalService:
         submittal_id: uuid.UUID,
         new_status: str,
         reviewer_id: str,
+        notes: str | None = None,
     ) -> Submittal:
         """Review a submittal (approve, reject, etc.).
 
         Ball-in-court updates depend on the decision:
         - ``approved`` / ``approved_as_noted``: stays with reviewer (done)
         - ``revise_and_resubmit`` / ``rejected``: back to submitter
+        Reviewer ``notes`` (free text) are persisted into the submittal
+        metadata under ``review_notes`` so the reason survives in the audit
+        trail and is propagated to the ``submittal.rejected`` /
+        ``submittal.revise_resubmit`` notification events.
         Publishes ``submittal.reviewed`` event with the decision.
         """
         submittal = await self.get_submittal(submittal_id)
@@ -416,12 +421,21 @@ class SubmittalService:
         else:
             ball = reviewer_id
 
+        review_notes = (notes or "").strip()
+
         fields: dict[str, Any] = {
             "status": new_status,
             "reviewer_id": reviewer_id,
             "date_returned": datetime.now(UTC).strftime("%Y-%m-%d"),
             "ball_in_court": ball,
         }
+        # Persist the reviewer's comments into metadata so they are durable
+        # and visible in the audit trail / detail view. We merge into a copy
+        # of the existing metadata to avoid clobbering attachments etc.
+        if review_notes:
+            meta = dict(getattr(submittal, "metadata_", {}) or {})
+            meta["review_notes"] = review_notes
+            fields["metadata_"] = meta
         project_id_s = str(submittal.project_id)
         title_s = submittal.title
         created_by_s = str(submittal.created_by) if submittal.created_by else None
@@ -443,8 +457,8 @@ class SubmittalService:
             action="status_changed",
             from_status=prior_status,
             to_status=new_status,
-            reason=f"Submittal reviewed: decision={new_status}",
-            metadata={"reviewer_id": reviewer_id},
+            reason=(f"Submittal reviewed: decision={new_status}" + (f" — {review_notes}" if review_notes else "")),
+            metadata={"reviewer_id": reviewer_id, "review_notes": review_notes or None},
             module="submittals",
             parent_entity_type="project",
             parent_entity_id=project_id_s,
@@ -478,7 +492,7 @@ class SubmittalService:
                     "title": title_s,
                     "reviewer_id": reviewer_id,
                     "submitted_by": created_by_s,
-                    "reason": fields.get("review_notes") or "",
+                    "reason": review_notes,
                 },
             )
         elif new_status == "revise_and_resubmit":
@@ -491,7 +505,7 @@ class SubmittalService:
                     "title": title_s,
                     "reviewer_id": reviewer_id,
                     "submitted_by": created_by_s,
-                    "reason": fields.get("review_notes") or "",
+                    "reason": review_notes,
                 },
             )
 

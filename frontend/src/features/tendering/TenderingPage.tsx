@@ -647,14 +647,14 @@ function BidComparisonTable({
               <th className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-content-primary">
                 {t('tendering.budget', 'Budget')}
               </th>
-              {comparison.bid_companies.map((company) => (
+              {comparison.bid_totals.map((bt) => (
                 <th
-                  key={company}
+                  key={bt.bid_id}
                   className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-content-primary"
                 >
                   <span className="flex items-center justify-end gap-1.5">
                     <Building2 size={12} className="text-content-tertiary" />
-                    {company}
+                    {bt.company_name}
                   </span>
                 </th>
               ))}
@@ -673,7 +673,7 @@ function BidComparisonTable({
                 <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-content-secondary">
                   {formatNumber(row.budget_rate)}
                 </td>
-                {row.bids.map((bid, bi) => {
+                {row.bids.map((bid) => {
                   const rates = row.bids.map((b) => b.unit_rate);
                   const flag = classifyCell(bid.unit_rate, rates);
                   const flagCls =
@@ -690,7 +690,7 @@ function BidComparisonTable({
                         : undefined;
                   return (
                     <td
-                      key={`bid-${comparison.bid_companies[bi]}`}
+                      key={`bid-${bid.bid_id}`}
                       className={`whitespace-nowrap px-3 py-2.5 text-right tabular-nums ${flagCls}`}
                       title={flagLabel}
                       aria-label={flagLabel}
@@ -722,9 +722,9 @@ function BidComparisonTable({
               <td className="whitespace-nowrap px-3 py-3 text-right font-bold tabular-nums text-content-primary">
                 {formatCurrency(comparison.budget_total, currency)}
               </td>
-              {comparison.bid_totals.map((bt, i) => (
+              {comparison.bid_totals.map((bt) => (
                 <td
-                  key={`total-${comparison.bid_companies[i]}`}
+                  key={`total-${bt.bid_id}`}
                   className="whitespace-nowrap px-3 py-3 text-right tabular-nums"
                 >
                   <span className="font-bold text-content-primary">
@@ -826,15 +826,33 @@ function PackageDetail({
 
   const handleExport = useCallback(() => {
     if (!comparison) return;
-    const headers = ['Position', 'Unit', 'Budget Rate', ...comparison.bid_companies.map(c => `${c} Rate`)];
+    // RFC-4180 escaping: wrap fields containing comma/quote/newline in
+    // double quotes and double any embedded quotes, so company names or
+    // descriptions with commas don't shift the columns.
+    const esc = (v: string | number) => {
+      const s = String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rateSuffix = t('tendering.export_rate_suffix', { defaultValue: 'Rate' });
+    const headers = [
+      t('tendering.position', 'Position'),
+      t('tendering.export_unit', { defaultValue: 'Unit' }),
+      t('tendering.export_budget_rate', { defaultValue: 'Budget Rate' }),
+      ...comparison.bid_totals.map((bt) => `${bt.company_name} ${rateSuffix}`),
+    ];
     const rows = comparison.rows.map(row => [
       row.description,
       row.unit,
       row.budget_rate.toFixed(2),
       ...row.bids.map(b => b.unit_rate.toFixed(2)),
     ]);
-    const footer = ['TOTAL', '', comparison.budget_total.toFixed(0), ...comparison.bid_totals.map(bt => bt.total.toFixed(0))];
-    const csv = [headers, ...rows, footer].map(r => r.join(',')).join('\n');
+    const footer = [
+      t('tendering.total', 'TOTAL'),
+      '',
+      comparison.budget_total.toFixed(0),
+      ...comparison.bid_totals.map(bt => bt.total.toFixed(0)),
+    ];
+    const csv = [headers, ...rows, footer].map(r => r.map(esc).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1033,20 +1051,15 @@ function PackageDetail({
       </Card>
 
       {/* Sub-tab strip — RIB iTWO-style: bids ↔ addenda ↔ leveling.
-          Addenda and Leveling are hidden until their backend routes ship
-          (the matching ``/addenda/`` and ``/leveling-matrix/`` endpoints
-          do not exist on tendering/router.py yet — Wave 12 audit found
-          the tabs were silently 404-ing). Set ``VITE_TENDERING_ADDENDA``
-          / ``VITE_TENDERING_LEVELING`` to ``"1"`` to opt-in for QA. */}
+          Addenda (``/packages/{id}/addenda/``) and Leveling
+          (``/packages/{id}/leveling-matrix/`` + ``/level-bids/``) are now
+          backed by real endpoints on tendering/router.py, so the tabs are
+          always shown. */}
       <div className="flex items-center gap-1 border-b border-border-light">
         {([
           { id: 'bids' as const, label: t('tendering.tab_bids', 'Bids & Comparison') },
-          ...(import.meta.env.VITE_TENDERING_ADDENDA === '1'
-            ? [{ id: 'addenda' as const, label: t('tendering.tab_addenda', 'Addenda') }]
-            : []),
-          ...(import.meta.env.VITE_TENDERING_LEVELING === '1'
-            ? [{ id: 'leveling' as const, label: t('tendering.tab_leveling', 'Leveling') }]
-            : []),
+          { id: 'addenda' as const, label: t('tendering.tab_addenda', 'Addenda') },
+          { id: 'leveling' as const, label: t('tendering.tab_leveling', 'Leveling') },
         ]).map((tab) => (
           <button
             key={tab.id}

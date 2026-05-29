@@ -486,6 +486,27 @@ class ScheduleStatsResponse(BaseModel):
     )
 
 
+class WorkCalendarResponse(BaseModel):
+    """Resolved regional work calendar for a project.
+
+    Returns the calendar the backend actually uses for duration/CPM math, so the
+    frontend renders the true hours-per-day / days-per-week instead of
+    re-deriving it from a smaller client-side map that can diverge.
+    """
+
+    region: str | None = Field(default=None, description="The project region the calendar was resolved from")
+    hours_per_day: float = Field(description="Working hours per day")
+    work_days_per_week: int = Field(description="Number of working days per week")
+    label: str = Field(description="Human-readable calendar label")
+
+
+class ClearActivitiesResponse(BaseModel):
+    """Result of a bulk activity clear (schedule reset)."""
+
+    schedule_id: UUID
+    deleted: int = Field(description="Number of activities removed")
+
+
 class GanttData(BaseModel):
     """Structured data for Gantt chart rendering."""
 

@@ -2216,11 +2216,14 @@ export function BIMPage() {
     urlStateAppliedRef.current = false;
   }, [activeModelId]);
 
-  // Debounced writer: camera + selection -> URL. We read the camera on
-  // an interval rather than listening to OrbitControls directly to keep
-  // this scoped to the parent page (the bridge is the public contract
-  // BIMViewer exposes; wiring into SceneManager here would cross that
-  // boundary and force every consumer to learn three.js internals).
+  // Event-driven writer: camera + selection -> URL. Instead of polling the
+  // camera bridge on a timer (which burns CPU even when the viewer is idle),
+  // we subscribe to the bridge's ``onCameraChange`` (an OrbitControls
+  // 'change' relay) and flush a debounced URL write only when the camera is
+  // actually dirty. Selection changes flush immediately via the effect
+  // re-run. We still go through the public ``window.__oeBim`` bridge rather
+  // than reaching into SceneManager, so this stays scoped to the parent page
+  // and no consumer has to learn three.js internals.
   //
   // selectionSignature tracks whatever the current multi/single selection
   // resolves to — we derive it inside the effect so this hook doesn't
@@ -2231,26 +2234,34 @@ export function BIMPage() {
   useEffect(() => {
     if (!activeModelId) return;
     if (!urlStateAppliedRef.current) return;
+
     let lastSerialized = '';
-    const interval = window.setInterval(() => {
-      const bridge = (
-        window as unknown as {
-          __oeBim?: {
-            getViewpoint: () => {
-              position: { x: number; y: number; z: number };
-              target: { x: number; y: number; z: number };
-            } | null;
-          };
-        }
-      ).__oeBim;
+    let debounceTimer: number | null = null;
+    let unsubscribe: (() => void) | null = null;
+    let subscribeRaf = 0;
+    let cancelled = false;
+
+    type CameraBridge = {
+      getViewpoint: () => {
+        position: { x: number; y: number; z: number };
+        target: { x: number; y: number; z: number };
+      } | null;
+      onCameraChange?: (cb: () => void) => () => void;
+      sceneManager?: unknown;
+    };
+    const getBridge = (): CameraBridge | undefined =>
+      (window as unknown as { __oeBim?: CameraBridge }).__oeBim;
+
+    // Read the live camera + selection and write to the URL — only when the
+    // serialized payload actually changed, so an idle subscription never
+    // touches history.
+    const flush = () => {
+      const bridge = getBridge();
       const camera = bridge?.getViewpoint?.() ?? null;
       const selection: string[] = multiSelectedIds.length > 0
         ? multiSelectedIds
         : (selectedElementId ? [selectedElementId] : []);
-      const payload = serializeBIMUrlState({
-        camera,
-        selection,
-      });
+      const payload = serializeBIMUrlState({ camera, selection });
       const serialized = JSON.stringify(payload);
       if (serialized === lastSerialized) return;
       lastSerialized = serialized;
@@ -2261,11 +2272,48 @@ export function BIMPage() {
       for (const k of BIM_URL_STATE_KEYS) next.delete(k);
       for (const [k, v] of Object.entries(payload)) next.set(k, v);
       setSearchParams(next, { replace: true });
-    }, 500);
-    return () => window.clearInterval(interval);
-    // selectionSignature is intentional — we want to re-evaluate when the
-    // selection changes but keep the interval running across many URL
-    // writes, so the dep list stays minimal.
+    };
+
+    // Camera 'change' fires dozens of times per second during an orbit
+    // drag — coalesce them into one URL write 500ms after motion stops.
+    const scheduleFlush = () => {
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null;
+        flush();
+      }, 500);
+    };
+
+    // The bridge (and its SceneManager handle) publishes a frame or two
+    // after this effect runs; retry the subscription on rAF until the
+    // scene is alive, then attach the camera listener once.
+    const trySubscribe = () => {
+      if (cancelled) return;
+      const bridge = getBridge();
+      if (bridge?.onCameraChange && bridge.sceneManager) {
+        unsubscribe = bridge.onCameraChange(scheduleFlush);
+        // Capture the camera as left by the deep-link hydration / model
+        // load so a freshly opened view is reflected in the URL without
+        // requiring the user to nudge the camera first.
+        flush();
+        return;
+      }
+      subscribeRaf = requestAnimationFrame(trySubscribe);
+    };
+    trySubscribe();
+
+    // Selection changes (effect re-run via selectionSignature) write
+    // immediately — the camera may be idle, so we can't wait for a move.
+    flush();
+
+    return () => {
+      cancelled = true;
+      if (subscribeRaf) cancelAnimationFrame(subscribeRaf);
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
+      unsubscribe?.();
+    };
+    // selectionSignature is intentional — re-running on selection change
+    // re-subscribes (cheap) and flushes the new selection immediately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeModelId, selectionSignature]);
 
@@ -2681,9 +2729,29 @@ export function BIMPage() {
   // (which would otherwise fire the elements query and surface an error).
   const isModelLoadingByUrl =
     !!urlModelId && !activeModel && (modelsQuery.isLoading || modelsQuery.isFetching);
+  // A model is "non-ready" when the viewer must show the inline empty /
+  // converting state instead of mounting BIMViewer (which would blind-fetch
+  // geometry). Only `ready` and `degraded` carry a 3D mesh on the server
+  // (`degraded` = geometry imported, quantities missing — still viewable),
+  // so every other status is non-ready. We enumerate the known no-geometry /
+  // pending / failed variants and add defensive aliases (pending/queued/
+  // uploading/converting/failed/no_geometry) so an unexpected status string
+  // never causes a 404 geometry fetch for a model that is known-absent (#168).
+  const NON_READY_STATUSES = new Set([
+    'processing',
+    'pending',
+    'queued',
+    'uploading',
+    'converting',
+    'needs_converter',
+    'converter_required',
+    'no_geometry',
+    'failed',
+    'error',
+  ]);
   const isModelNonReady =
     !!isModelLoadingByUrl ||
-    !!(activeModel && ['processing', 'needs_converter', 'error'].includes(activeModel.status));
+    !!(activeModel && NON_READY_STATUSES.has(activeModel.status));
 
   return (
     <div className="flex flex-col -mx-4 sm:-mx-7 -mt-6 -mb-6 border-s border-border-light" style={{ height: 'calc(100vh - 56px)' }}>

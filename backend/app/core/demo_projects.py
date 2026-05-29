@@ -1956,6 +1956,15 @@ _PARIS = DemoTemplate(
 
 DEMO_TEMPLATES: dict[str, DemoTemplate] = {t.demo_id: t for t in [_BERLIN, _LONDON, _US_MEDICAL, _DUBAI, _PARIS]}
 
+# Partner-pack flagship demo projects (one realistic country/company project
+# per pack) are authored as standalone DemoTemplate files under ``demo_packs/``
+# and merged into ``DEMO_TEMPLATES`` + ``DEMO_CATALOG`` via
+# ``register_pack_templates`` (defined below). The merge is driven by
+# ``demo_packs`` pushing into this module at the bottom of the file, which
+# keeps it order-independent: importing either module first yields the full
+# registry without a circular-import race (the pack files only need
+# ``DemoTemplate`` from here, never ``PACK_TEMPLATES``).
+
 # Fresh-install seed: four demo projects covering the broadest spread of
 # archetypes (residential, industrial, healthcare/intl, education/fit-out)
 # without leaning on a single very large UK example. The London/One Canary
@@ -2030,6 +2039,184 @@ DEMO_CATALOG: list[dict] = [
         "positions": 100,
     },
 ]
+
+
+# ---------------------------------------------------------------------------
+# Partner-pack flagship country projects
+# ---------------------------------------------------------------------------
+
+# Pack slug → flagship demo project id. When a partner pack is active
+# (``OE_PARTNER_PACK``) its country project is auto-installed alongside the
+# default demo workspace so the pack lands with a representative, fully
+# worked-out project in its own currency / classification / locale.
+PACK_DEMO_PROJECT: dict[str, str] = {
+    "aus": "mixed-use-sydney",
+    "nzs": "commercial-auckland",
+    "batimatech-ca": "office-montreal",
+    "bimhessen-de": "office-frankfurt",
+    "brazil-sinapi": "residential-saopaulo",
+    "doker-formwork": "rc-structure-formwork",
+    "india-cpwd": "govt-building-delhi",
+    "modular-prefab": "modular-housing",
+    "renewables-epc": "solar-bess-epc",
+    "saudi-vision2030": "mixed-use-riyadh",
+    "uk-jct": "commercial-london",
+    "us-rsmeans": "commercial-denver",
+}
+
+# Country-name → ISO 3166-1 alpha-2, for catalog rows auto-derived from a
+# pack template's structured address.
+_COUNTRY_ISO2: dict[str, str] = {
+    "Australia": "AU",
+    "New Zealand": "NZ",
+    "Canada": "CA",
+    "Germany": "DE",
+    "Brazil": "BR",
+    "India": "IN",
+    "Netherlands": "NL",
+    "Saudi Arabia": "SA",
+    "United Kingdom": "GB",
+    "United States": "US",
+}
+
+# Friendly project archetype label per pack demo project.
+_PACK_DEMO_TYPE: dict[str, str] = {
+    "mixed-use-sydney": "Mixed-use",
+    "commercial-auckland": "Commercial",
+    "office-montreal": "Commercial",
+    "office-frankfurt": "Commercial",
+    "residential-saopaulo": "Residential",
+    "rc-structure-formwork": "Structural",
+    "govt-building-delhi": "Public",
+    "modular-housing": "Residential",
+    "solar-bess-epc": "Energy",
+    "mixed-use-riyadh": "Mixed-use",
+    "commercial-london": "Commercial",
+    "commercial-denver": "Commercial",
+}
+
+
+# ISO-4217 → display symbol for the handful of currencies the pack templates
+# actually use. Anything not listed falls back to the bare ISO code (e.g.
+# "BRL 38.4M"), which matches the mixed style of the hand-authored built-in
+# catalog rows ("€12M", "$25M", "15M AED").
+_CURRENCY_SYMBOL: dict[str, str] = {
+    "EUR": "€",
+    "GBP": "£",
+    "USD": "$",
+    "AUD": "A$",
+    "NZD": "NZ$",
+    "CAD": "C$",
+}
+
+
+def _compact_budget_label(total: float, currency: str) -> str:
+    """Format a numeric total as a compact catalog budget label.
+
+    Mirrors the hand-authored built-in rows ("€12M", "15M AED"): millions for
+    anything >= 1M, thousands for smaller jobs, with the currency symbol when
+    known and a trailing ISO code otherwise. Returns "" for a non-positive or
+    unknown total so the caller stays defensive.
+    """
+    if not total or total <= 0:
+        return ""
+    code = (currency or "").strip().upper()
+    symbol = _CURRENCY_SYMBOL.get(code)
+    if total >= 1_000_000:
+        magnitude = total / 1_000_000
+        # Drop the trailing ".0" for round figures (12.0M -> 12M).
+        num = f"{magnitude:.1f}".rstrip("0").rstrip(".")
+        amount = f"{num}M"
+    elif total >= 1_000:
+        amount = f"{round(total / 1_000):d}K"
+    else:
+        amount = f"{round(total):d}"
+    if symbol:
+        return f"{symbol}{amount}"
+    if code:
+        return f"{amount} {code}"
+    return amount
+
+
+def _template_total(template: DemoTemplate) -> float:
+    """Sum the direct-cost total (qty * rate) across all section items.
+
+    Each section item is ``(code, title, unit, qty, rate, classification)`` per
+    :data:`SectionDef`; we sum ``qty * rate``. This intentionally ignores
+    markups so the catalog headline matches the direct construction cost the
+    way the built-in rows ("Baukosten ca. 12 Mio EUR") are quoted.
+    """
+    total = 0.0
+    for section in template.sections:
+        items = section[3] if len(section) > 3 else []
+        for item in items:
+            try:
+                qty = float(item[3])
+                rate = float(item[4])
+            except (IndexError, TypeError, ValueError):  # pragma: no cover - defensive
+                continue
+            total += qty * rate
+    return total
+
+
+def _catalog_entry_from_template(template: DemoTemplate) -> dict:
+    """Build a marketplace catalog row from a pack ``DemoTemplate``."""
+    sections = len(template.sections)
+    positions = sum(len(section[3]) for section in template.sections)
+    addr = template.address or {}
+    country = _COUNTRY_ISO2.get(str(addr.get("country", "")), "")
+    desc = " ".join(template.project_description.split())
+    if len(desc) > 160:
+        desc = desc[:157].rstrip() + "..."
+    # The pack templates carry no pre-formatted "budget" string in
+    # project_metadata (unlike the hand-authored built-in rows), so derive the
+    # real headline figure from the priced section items. Honour an explicit
+    # metadata override if a pack ever supplies one; otherwise compute it.
+    meta_budget = (
+        str(template.project_metadata.get("budget", "")).strip()
+        if template.project_metadata
+        else ""
+    )
+    budget = meta_budget or _compact_budget_label(
+        _template_total(template), template.currency
+    )
+    return {
+        "demo_id": template.demo_id,
+        "name": template.project_name,
+        "description": desc,
+        "country": country,
+        "currency": template.currency,
+        "budget": budget,
+        "type": _PACK_DEMO_TYPE.get(template.demo_id, "Commercial"),
+        "sections": sections,
+        "positions": positions,
+    }
+
+
+def register_pack_templates(templates: "list[DemoTemplate]") -> None:
+    """Merge partner-pack demo templates into the registry and catalog.
+
+    Called by :mod:`app.core.demo_packs` once it has loaded its ``TEMPLATE``
+    files. Idempotent: ``setdefault`` keeps the built-ins authoritative on any
+    id clash, and catalog rows are appended only for ids not already present,
+    so a repeat call (either import order) never duplicates. A broken pack
+    never breaks the registry.
+    """
+    import logging as _logging
+
+    catalog_ids = {c["demo_id"] for c in DEMO_CATALOG}
+    for template in sorted(templates, key=lambda x: x.demo_id):
+        try:
+            DEMO_TEMPLATES.setdefault(template.demo_id, template)
+            if template.demo_id not in catalog_ids:
+                DEMO_CATALOG.append(_catalog_entry_from_template(template))
+                catalog_ids.add(template.demo_id)
+        except Exception:  # pragma: no cover - one bad pack must not break the rest
+            _logging.getLogger(__name__).warning(
+                "failed to register pack template %s",
+                getattr(template, "demo_id", "?"),
+                exc_info=True,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -7896,3 +8083,19 @@ async def install_demo_project(
         "documents": doc_count,
         **module_data,
     }
+
+
+# ---------------------------------------------------------------------------
+# Load partner-pack demo templates (order-independent merge)
+# ---------------------------------------------------------------------------
+# Importing ``demo_packs`` runs its loader, which calls
+# ``register_pack_templates`` above to merge each pack's flagship project into
+# DEMO_TEMPLATES + DEMO_CATALOG. Done at the very bottom so this module is
+# fully defined before the packs push into it; wrapped so a packaging issue
+# never breaks core boot.
+try:
+    import app.core.demo_packs  # noqa: F401  (import side-effect: registers pack templates)
+except Exception:  # pragma: no cover - partner packs are optional
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning("partner-pack demo templates not loaded", exc_info=True)

@@ -206,3 +206,11 @@ data/reingest_backup_*.json
 # Generated license inventories — attached to GH Releases, not committed
 /NOTICE.backend.json
 /NOTICE.frontend.json
+
+# Runtime QMS upload artifacts (smoke/demo attachments, not source)
+backend/uploads/qms/
+
+# Scratch dev/test output
+backend/.pytest_*.out
+backend/_dev_backend.err
+backend/*.err

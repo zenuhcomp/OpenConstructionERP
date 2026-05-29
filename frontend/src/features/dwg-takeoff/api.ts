@@ -252,8 +252,26 @@ export async function deleteDrawing(id: string): Promise<void> {
 
 /* ── Entities & Layers ─────────────────────────────────────────────────── */
 
-export async function fetchEntities(drawingId: string): Promise<DxfEntity[]> {
-  return apiGet<DxfEntity[]>(`/v1/dwg_takeoff/drawings/${drawingId}/entities/`);
+/**
+ * Fetch parsed entities for a drawing.
+ *
+ * When `visibleLayers` is a non-empty list, only those layers are requested
+ * so the backend filters the (potentially large) entity set BEFORE
+ * serialising it — a medium DWG can carry 50k+ entities, and the canvas
+ * only ever renders the layers the user has toggled on. Omitting the
+ * parameter (or passing an empty list) returns every layer, which is the
+ * correct behaviour on first load when the full layer list is not yet known.
+ */
+export async function fetchEntities(
+  drawingId: string,
+  visibleLayers?: string[],
+): Promise<DxfEntity[]> {
+  let url = `/v1/dwg_takeoff/drawings/${drawingId}/entities/`;
+  if (visibleLayers && visibleLayers.length > 0) {
+    const layers = visibleLayers.map((l) => encodeURIComponent(l)).join(',');
+    url += `?layers=${layers}`;
+  }
+  return apiGet<DxfEntity[]>(url);
 }
 
 export async function fetchThumbnail(drawingId: string): Promise<string> {
@@ -398,6 +416,12 @@ export interface DwgOfflineReadiness {
   converter_available: boolean;
   version: string | null;
   message: string;
+  /** True only when the browser and the backend run on the same machine
+   *  (loopback request + non-production server). Drives whether the UI may
+   *  show the strong "your files never leave your computer" claim or the
+   *  honest "processed on your OpenConstructionERP server" copy. Optional so
+   *  older backends that don't yet send it are treated as NOT local-only. */
+  local_only?: boolean;
 }
 
 export async function fetchOfflineReadiness(): Promise<DwgOfflineReadiness> {
@@ -407,6 +431,7 @@ export async function fetchOfflineReadiness(): Promise<DwgOfflineReadiness> {
       converter_available: false,
       version: null,
       message: 'DWG takeoff module is disabled',
+      local_only: false,
     };
   }
   return apiGet<DwgOfflineReadiness>('/v1/dwg_takeoff/offline-readiness/');

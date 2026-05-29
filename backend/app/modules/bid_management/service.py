@@ -644,6 +644,21 @@ class BidManagementService:
                 detail=(f"Cannot award a '{winner.status}' bidder (must be 'active')"),
             )
 
+        # The winner must have at least one VALID submission. Late /
+        # currency-mismatched / incomplete bids are flagged is_valid=False
+        # by open_bids and must never be awardable — otherwise a manager
+        # could award a disqualified-on-technicality offer that the leveling
+        # matrix deliberately excludes from the competitive comparison.
+        package_submissions = await self.submission_repo.submissions_for_package(package_id)
+        if not any(s.bidder_id == winner.id and s.is_valid for s in package_submissions):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Cannot award a bidder without a valid submission "
+                    "(late, currency-mismatched or incomplete bids are excluded)"
+                ),
+            )
+
         # Award row (upsert)
         existing = await self.award_repo.get_for_package(package_id)
         if existing is not None:
@@ -1180,6 +1195,36 @@ class BidManagementService:
         )
         return await self.comparison_repo.create(comparison)
 
+    async def get_comparison_for_package(self, package_id: uuid.UUID) -> BidComparison | None:
+        """Return the single comparison for a package, or ``None``.
+
+        There is at most one comparison per package (``create_comparison``
+        enforces uniqueness with a 409). The leveling UI uses this to make
+        "Compute Leveling" idempotent: get-or-create instead of always
+        POSTing a new comparison (which would 409 on every re-run).
+        """
+        await self.get_package(package_id)
+        return await self.comparison_repo.get_for_package(package_id)
+
+    async def get_or_create_comparison(self, data: BidComparisonCreate) -> BidComparison:
+        """Fetch the package's comparison, creating it on first use.
+
+        Idempotent companion to :meth:`create_comparison`. Re-running the
+        leveling flow returns the existing header (so its computed rows can
+        be recomputed) instead of raising 409.
+        """
+        await self.get_package(data.package_id)
+        existing = await self.comparison_repo.get_for_package(data.package_id)
+        if existing is not None:
+            return existing
+        comparison = BidComparison(
+            package_id=data.package_id,
+            technical_scoring_rule=data.technical_scoring_rule,
+            commercial_weight_pct=data.commercial_weight_pct,
+            technical_weight_pct=data.technical_weight_pct,
+        )
+        return await self.comparison_repo.create(comparison)
+
     async def update_comparison(self, comparison_id: uuid.UUID, data: BidComparisonUpdate) -> BidComparison:
         comparison = await self.comparison_repo.get_by_id(comparison_id)
         if comparison is None:
@@ -1187,6 +1232,21 @@ class BidManagementService:
         fields = data.model_dump(exclude_unset=True)
         if not fields:
             return comparison
+        # Enforce commercial + technical weights == 100 against the merged
+        # values. The schema validator only fires when BOTH are present in
+        # one request; here we cover the partial-update path (one weight
+        # supplied, the other taken from the persisted row).
+        if "commercial_weight_pct" in fields or "technical_weight_pct" in fields:
+            commercial = fields.get("commercial_weight_pct", comparison.commercial_weight_pct)
+            technical = fields.get("technical_weight_pct", comparison.technical_weight_pct)
+            if commercial + technical != 100:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "commercial_weight_pct + technical_weight_pct must equal 100 "
+                        f"(got {commercial + technical})"
+                    ),
+                )
         await self.comparison_repo.update_fields(comparison_id, **fields)
         await self.session.refresh(comparison)
         return comparison
@@ -1208,8 +1268,20 @@ class BidManagementService:
         # Clear old rows
         await self.leveling_repo.delete_for_comparison(comparison_id)
 
-        commercial_w = Decimal(comparison.commercial_weight_pct) / Decimal("100")
-        technical_w = Decimal(comparison.technical_weight_pct) / Decimal("100")
+        # Normalize the two weights by their own sum (not a hard-coded 100)
+        # so legacy rows where commercial+technical != 100 still produce a
+        # convex blend instead of inflating or deflating total_score. New
+        # rows are validated to sum to 100 at the schema layer, where this
+        # divisor is simply 100.
+        weight_sum = Decimal(comparison.commercial_weight_pct) + Decimal(comparison.technical_weight_pct)
+        if weight_sum <= Decimal("0"):
+            # Degenerate config (0/0) — fall back to pure-commercial scoring
+            # rather than dividing by zero or zeroing every score.
+            commercial_w = Decimal("1")
+            technical_w = Decimal("0")
+        else:
+            commercial_w = Decimal(comparison.commercial_weight_pct) / weight_sum
+            technical_w = Decimal(comparison.technical_weight_pct) / weight_sum
 
         # Filter valid submissions from non-disqualified bidders
         valid = [
@@ -1268,7 +1340,11 @@ class BidManagementService:
             comparison.normalized_high = str(max(normalized_totals.values()))
         recommended = recommend_bidder(comparison, rows, bidders)
         comparison.recommended_bidder_id = recommended.id if recommended else None
-        comparison.recommended_reason = f"Top rank ({recommended.company_name})" if recommended else ""
+        # Store a stable, translatable token instead of baking English into
+        # the DB. The recommended bidder's company name is resolvable from
+        # ``recommended_bidder_id`` at render time, so the UI maps this key
+        # through i18n (see frontend leveling-table rendering).
+        comparison.recommended_reason = "leveling.top_rank" if recommended else ""
 
         await self.session.flush()
         return rows

@@ -46,6 +46,22 @@ vi.mock('@/stores/useToastStore', () => ({
 vi.mock('../api', () => ({
   listRoutes: vi.fn(),
   getRoute: vi.fn(),
+  getMeta: vi.fn(() =>
+    Promise.resolve({
+      target_kinds: [
+        'markup',
+        'submittal',
+        'change_order',
+        'rfi',
+        'contract',
+        'variation',
+        'invoice',
+        'purchase_order',
+      ],
+      step_modes: ['all', 'any', 'majority'],
+      instance_statuses: ['pending', 'approved', 'rejected', 'cancelled'],
+    }),
+  ),
   createRoute: vi.fn(),
   updateRoute: vi.fn(),
   deleteRoute: vi.fn(),
@@ -55,6 +71,7 @@ vi.mock('../api', () => ({
   decideInstance: vi.fn(),
   cancelInstance: vi.fn(),
   approvalRoutesKeys: {
+    meta: () => ['approval-routes', 'meta'] as const,
     routes: (projectId?: string | null, targetKind?: string | null) =>
       ['approval-routes', 'routes', projectId ?? null, targetKind ?? null] as const,
     route: (id: string) => ['approval-routes', 'route', id] as const,
@@ -95,7 +112,6 @@ import { ApprovalRoutesPage } from '../ApprovalRoutesPage';
 const SAMPLE_ROUTE: ApprovalRoute = {
   id: 'route-1',
   name: 'Std submittal review',
-  description: 'Engineer then manager',
   target_kind: 'submittal',
   project_id: null,
   is_active: true,
@@ -103,16 +119,16 @@ const SAMPLE_ROUTE: ApprovalRoute = {
     {
       id: 'step-1',
       route_id: 'route-1',
-      sort_order: 0,
+      ordinal: 1,
       approver_role: 'engineer',
       approver_user_id: null,
-      mode: 'all',
+      mode: 'any',
       sla_hours: 24,
     },
   ],
   created_at: '2026-05-20T00:00:00Z',
   updated_at: '2026-05-20T00:00:00Z',
-  created_by_id: 'user-1',
+  created_by: 'user-1',
 };
 
 function renderPage() {

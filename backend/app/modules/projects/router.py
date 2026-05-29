@@ -1421,6 +1421,132 @@ async def project_dashboard(
     }
 
 
+# ── Recent activity feed (project-scoped, lightweight) ─────────────────
+
+
+@router.get(
+    "/{project_id}/activity",
+    summary="Recent activity for a project",
+    description="Project-scoped cross-module event stream (RFIs, tasks, change "
+    "orders, documents, punch items, field reports), newest first. Each module "
+    "degrades gracefully if its table is absent.",
+)
+async def project_activity(
+    project_id: uuid.UUID,
+    session: SessionDep,
+    user_id: CurrentUserId,
+    payload: CurrentUserPayload,
+    service: ProjectService = Depends(_get_service),
+    limit: int = Query(default=8, ge=1, le=50),
+) -> list[dict]:
+    """Recent cross-module activity for a single project.
+
+    Mirrors the ``recent_activity`` block of the project dashboard but as a
+    standalone, cheap endpoint that the project overview widgets can poll
+    without pulling the full dashboard payload. Returns ``[{type, title,
+    date}]`` newest first. Verifies project read access; every module query
+    is wrapped so a missing table never fails the request.
+    """
+    from sqlalchemy import func, literal_column, union_all
+
+    # Verify read access — owner, admin, or team member
+    await _verify_project_access(service, project_id, user_id, session, payload)
+
+    activity_queries = []
+    try:
+        from app.modules.rfi.models import RFI as _RFI
+
+        activity_queries.append(
+            select(
+                literal_column("'rfi_created'").label("type"),
+                _RFI.subject.label("title"),
+                _RFI.created_at,
+            ).where(_RFI.project_id == project_id)
+        )
+    except Exception:
+        logger.debug("Activity: RFI query build failed", exc_info=True)
+    try:
+        from app.modules.tasks.models import Task as _Task
+
+        activity_queries.append(
+            select(
+                literal_column("'task_created'").label("type"),
+                _Task.title.label("title"),
+                _Task.created_at,
+            ).where(_Task.project_id == project_id)
+        )
+    except Exception:
+        logger.debug("Activity: Task query build failed", exc_info=True)
+    try:
+        from app.modules.changeorders.models import ChangeOrder
+
+        activity_queries.append(
+            select(
+                literal_column("'change_order'").label("type"),
+                ChangeOrder.title.label("title"),
+                ChangeOrder.created_at,
+            ).where(ChangeOrder.project_id == project_id)
+        )
+    except Exception:
+        logger.debug("Activity: ChangeOrder query build failed", exc_info=True)
+    try:
+        from app.modules.documents.models import Document as _Doc
+
+        activity_queries.append(
+            select(
+                literal_column("'document_uploaded'").label("type"),
+                _Doc.name.label("title"),
+                _Doc.created_at,
+            ).where(_Doc.project_id == project_id)
+        )
+    except Exception:
+        logger.debug("Activity: Document query build failed", exc_info=True)
+    try:
+        from app.modules.punchlist.models import PunchItem as _Punch
+
+        activity_queries.append(
+            select(
+                literal_column("'punch_item'").label("type"),
+                _Punch.title.label("title"),
+                _Punch.created_at,
+            ).where(_Punch.project_id == project_id)
+        )
+    except Exception:
+        logger.debug("Activity: PunchItem query build failed", exc_info=True)
+    try:
+        from app.modules.fieldreports.models import FieldReport
+
+        activity_queries.append(
+            select(
+                literal_column("'field_report'").label("type"),
+                func.coalesce(FieldReport.work_performed, FieldReport.report_type).label("title"),
+                FieldReport.created_at,
+            ).where(FieldReport.project_id == project_id)
+        )
+    except Exception:
+        logger.debug("Activity: FieldReport query build failed", exc_info=True)
+
+    events: list[dict] = []
+    if activity_queries:
+        try:
+            combined = union_all(*activity_queries).subquery()
+            rows = (
+                await session.execute(select(combined).order_by(combined.c.created_at.desc()).limit(limit))
+            ).all()
+            for row in rows:
+                events.append(
+                    {
+                        "type": row[0],
+                        "title": row[1],
+                        "date": row[2].isoformat() if isinstance(row[2], datetime) else str(row[2]),
+                    }
+                )
+        except Exception:
+            logger.debug("Activity: union query failed", exc_info=True)
+
+    return events
+
+
 # ── Dashboard Summary Cards (lightweight, single endpoint) ──────────────
 
 
@@ -1442,8 +1568,9 @@ async def dashboard_cards(
     multiple modules. Each module section is wrapped in try/except for
     graceful degradation if a module table does not exist yet.
     """
-    from sqlalchemy import Float, func, select
-    from sqlalchemy.sql.expression import cast
+    from types import SimpleNamespace
+
+    from sqlalchemy import func, select
 
     from app.modules.projects.models import Project
 
@@ -1476,11 +1603,32 @@ async def dashboard_cards(
     project_ids = [p.id for p in all_projects]
 
     # ── BOQ total value per project ─────────────────────────────────────
+    #
+    # Money rule (a): WITHIN a single project, foreign-currency positions are
+    # converted to the project's base currency via ``Project.fx_rates``.
+    # Each project carries exactly one base currency (``Project.currency``),
+    # so the per-project ``boq_total_value`` is a single well-defined number
+    # in that currency — the frontend groups ACROSS projects by currency
+    # (rule b) and never blends different currencies into one scalar.
     boq_values: dict[str, float] = {}
     boq_counts: dict[str, int] = {}
     position_counts: dict[str, int] = {}
     try:
         from app.modules.boq.models import BOQ, Position
+        from app.modules.boq.service import (
+            _position_currency,
+            _position_total_in_base,
+            _project_fx_map,
+        )
+
+        # Pre-compute each project's FX map + base currency so per-position
+        # conversion is a dict lookup rather than a per-row recompute.
+        fx_by_project: dict[str, dict[str, str]] = {
+            str(p.id): _project_fx_map(p) for p in all_projects
+        }
+        base_by_project: dict[str, str] = {
+            str(p.id): (p.currency or "") for p in all_projects
+        }
 
         # BOQ count per project
         boq_count_rows = (
@@ -1502,23 +1650,28 @@ async def dashboard_cards(
         if boq_id_to_project:
             all_boq_ids = [uuid.UUID(bid) for bid in boq_id_to_project]
 
-            # Sum of position totals per BOQ
+            # Stream positions with their currency metadata so each total can
+            # be converted into its project's base currency before summing.
             pos_rows = (
                 await session.execute(
-                    select(
-                        Position.boq_id,
-                        func.sum(cast(Position.total, Float)).label("total_value"),
-                        func.count(Position.id).label("pos_count"),
+                    select(Position.boq_id, Position.total, Position.metadata_).where(
+                        Position.boq_id.in_(all_boq_ids)
                     )
-                    .where(Position.boq_id.in_(all_boq_ids))
-                    .group_by(Position.boq_id)
                 )
             ).all()
-            for boq_id, total_val, pos_cnt in pos_rows:
+            for boq_id, total, metadata in pos_rows:
                 pid = boq_id_to_project.get(str(boq_id), "")
-                if pid:
-                    boq_values[pid] = boq_values.get(pid, 0.0) + (total_val or 0.0)
-                    position_counts[pid] = position_counts.get(pid, 0) + (pos_cnt or 0)
+                if not pid:
+                    continue
+                position_counts[pid] = position_counts.get(pid, 0) + 1
+                code = _position_currency(SimpleNamespace(metadata_=metadata))
+                converted = _position_total_in_base(
+                    total,
+                    code,
+                    fx_by_project.get(pid),
+                    base_by_project.get(pid, ""),
+                )
+                boq_values[pid] = boq_values.get(pid, 0.0) + float(converted)
     except Exception:
         logger.debug("Dashboard cards: BOQ query failed", exc_info=True)
 
@@ -1768,8 +1921,14 @@ async def analytics_overview(
 
         # Find budget for this project
         planned, actual = budget_map.get(pid, (0.0, 0.0))
-        variance = planned - actual if planned > 0 else 0
-        variance_pct = round((variance / planned * 100), 1) if planned > 0 else 0
+        # Variance is always planned - actual. When planned == 0 but actual > 0
+        # the project has incurred cost with no recorded budget; that is an
+        # overspend (negative variance), not a neutral "on budget" zero.
+        variance = planned - actual
+        # Percentage is undefined when there is no budget to measure against;
+        # return None so the frontend can render an explicit placeholder
+        # instead of a misleading 0.0%.
+        variance_pct = round((variance / planned * 100), 1) if planned > 0 else None
 
         # BOQ count from pre-fetched map (single grouped query above)
         boq_count = boq_counts_map.get(pid, 0)
@@ -1785,7 +1944,7 @@ async def analytics_overview(
                 "variance": round(variance, 2),
                 "variance_pct": variance_pct,
                 "boq_count": boq_count,
-                "status": "on_budget" if variance >= 0 else "over_budget",
+                "status": "over_budget" if actual > planned else "on_budget",
             }
         )
 

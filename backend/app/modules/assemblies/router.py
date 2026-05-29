@@ -56,6 +56,23 @@ def _get_service(session: SessionDep) -> AssemblyService:
     return AssemblyService(session)
 
 
+def _scope_owner_id(user_id: str, payload: dict | None) -> uuid.UUID | None:
+    """Resolve the owner scope for collection/stats endpoints.
+
+    Admins (role claim == ``admin``) get ``None`` — an unscoped,
+    platform-wide view. Everyone else is pinned to their own ``owner_id``
+    so list + stats never leak another tenant's assemblies (the per-item
+    endpoints already 404 for non-owners; this closes the matching gap in
+    the collection / aggregate endpoints).
+    """
+    if payload and payload.get("role") == "admin":
+        return None
+    try:
+        return uuid.UUID(str(user_id))
+    except (TypeError, ValueError):
+        return None
+
+
 async def _verify_assembly_owner(
     session: SessionDep,
     assembly_id: uuid.UUID,
@@ -202,6 +219,8 @@ async def create_assembly(
     dependencies=[Depends(RequirePermission("assemblies.read"))],
 )
 async def search_assemblies(
+    user_id: CurrentUserId,
+    payload: CurrentUserPayload,
     q: str | None = Query(default=None, description="Text search on code, name, description"),
     category: str | None = Query(default=None, description="Filter by category"),
     unit: str | None = Query(default=None, description="Filter by unit"),
@@ -212,7 +231,12 @@ async def search_assemblies(
     limit: int = Query(default=50, ge=1, le=500),
     service: AssemblyService = Depends(_get_service),
 ) -> AssemblySearchResponse:
-    """Search assemblies with optional filters and pagination."""
+    """Search assemblies with optional filters and pagination.
+
+    Scoped to the caller's own assemblies (per-tenant isolation) so the
+    collection cannot leak other tenants' recipes — admins see all.
+    """
+    scope_owner = _scope_owner_id(user_id, payload)
     assemblies, total = await service.search_assemblies(
         q=q,
         category=category,
@@ -222,6 +246,7 @@ async def search_assemblies(
         is_template=is_template,
         offset=offset,
         limit=limit,
+        owner_id=scope_owner,
     )
 
     # Compute usage counts for each assembly from BOQ metadata
@@ -229,6 +254,7 @@ async def search_assemblies(
     try:
         usage_map = await service.get_usage_counts(
             [a.id for a in assemblies],
+            owner_id=scope_owner,
         )
     except Exception:
         logger.debug("Could not compute assembly usage counts")
@@ -443,10 +469,16 @@ async def ai_generate_assembly(
     dependencies=[Depends(RequirePermission("assemblies.read"))],
 )
 async def get_stats(
+    user_id: CurrentUserId,
+    payload: CurrentUserPayload,
     service: AssemblyService = Depends(_get_service),
 ) -> dict:
-    """Return aggregated assembly statistics: totals, category breakdown, most-used."""
-    return await service.get_stats()
+    """Return aggregated assembly statistics: totals, category breakdown, most-used.
+
+    Scoped to the caller's own assemblies so the stats banner does not
+    expose the platform-wide count to a non-admin tenant.
+    """
+    return await service.get_stats(owner_id=_scope_owner_id(user_id, payload))
 
 
 @router.get(

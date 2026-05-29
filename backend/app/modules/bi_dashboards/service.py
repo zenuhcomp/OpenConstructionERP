@@ -421,6 +421,35 @@ class BIDashboardsService:
             **payload,
         }
 
+    async def _fresh_snapshot_payload(
+        self,
+        widget_id: uuid.UUID,
+        now: datetime,
+    ) -> tuple[Decimal, str | None, dict[str, Any]] | None:
+        """Return ``(value, unit, breakdown)`` from a still-valid snapshot.
+
+        Used by :meth:`evaluate_dashboard` to reuse the snapshot
+        :meth:`render_dashboard` just wrote for the unfiltered case, so a
+        single dashboard open computes each KPI once. Returns ``None`` when
+        no fresh snapshot exists (caller then computes live).
+        """
+        snap = await self.repo.get_latest_snapshot(widget_id)
+        if snap is None or snap.valid_until is None:
+            return None
+        valid_until = snap.valid_until
+        if valid_until.tzinfo is None:
+            valid_until = valid_until.replace(tzinfo=UTC)
+        if valid_until <= now:
+            return None
+        payload = snap.value_json or {}
+        try:
+            value = Decimal(str(payload.get("value", "0")))
+        except Exception:
+            value = Decimal("0")
+        unit = payload.get("unit")
+        breakdown = payload.get("breakdown", {}) or {}
+        return value, unit, breakdown
+
     async def render_dashboard(
         self,
         dashboard_id: uuid.UUID,
@@ -571,18 +600,33 @@ class BIDashboardsService:
                     kpi_filters[key] = value
 
         now = _now()
+        # Perf (audit #7): when no filters narrow the result — the common
+        # "just opened the board" case — every widget's unfiltered value is
+        # identical to the one ``render_dashboard`` just computed and cached.
+        # Reuse that fresh snapshot instead of recomputing each KPI from
+        # scratch, so a single dashboard open computes each widget once
+        # rather than twice. Any active filter (project/period/extra) makes
+        # the cache inapplicable and we fall through to a live compute.
+        has_active_filter = bool(project_id_val or period_start_val or period_end_val or kpi_filters)
         results: list[WidgetEvaluateResult] = []
         for widget in widgets:
             value: Decimal | None = None
             unit: str | None = None
             breakdown: dict[str, Any] = {}
             if widget.kpi_code is not None:
+                cached = None
+                if not has_active_filter:
+                    cached = await self._fresh_snapshot_payload(widget.id, now)
+                if cached is not None:
+                    value = cached[0]
+                    unit = cached[1]
+                    breakdown = cached[2]
                 # When cross-filter is OFF we deliberately call compute
                 # with NO project/period/filter args. That mirrors the
                 # static render path byte-for-byte — important for the
                 # forward-compat contract: dashboards that haven't opted
                 # in must keep returning today's values.
-                if cross_filter:
+                elif cross_filter:
                     # Fall back to widget.config_json["project_id"] when the
                     # caller didn't supply one — preserves the per-widget
                     # default project binding used by render_dashboard.
@@ -607,14 +651,17 @@ class BIDashboardsService:
                         period_end=period_end_val,
                         filters=kpi_filters or None,
                     )
+                    value = computation.value
+                    unit = computation.unit
+                    breakdown = computation.breakdown or {}
                 else:
                     computation = await _kpis.compute(
                         widget.kpi_code,
                         self.session,
                     )
-                value = computation.value
-                unit = computation.unit
-                breakdown = computation.breakdown or {}
+                    value = computation.value
+                    unit = computation.unit
+                    breakdown = computation.breakdown or {}
 
             # Optional ``series`` for line/bar charts — pulled from the
             # KPI history (cheapest source of a time-axis). For non-

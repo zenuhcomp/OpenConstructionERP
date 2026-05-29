@@ -277,3 +277,125 @@ class BidAnalysisResponse(BaseModel):
     vendors: list[BidVendorEntry] = Field(default_factory=list)
     outliers: list[BidOutlierEntry] = Field(default_factory=list)
     spread: BidSpread = Field(default_factory=BidSpread)
+
+
+# ── Addenda (mid-tender clarifications) ──────────────────────────────────────
+# Addenda are stored inside the package ``metadata_`` JSON store (under the
+# ``addenda`` key) rather than a dedicated table — they are a lightweight,
+# append-only revision log scoped to one package, and the data model already
+# uses ``metadata_`` as the extensible per-package store (see service
+# ``update_package`` lifecycle stamps). This keeps the feature schema-free
+# (no migration) while remaining fully persisted and FX-irrelevant.
+
+
+class AddendumAckEntry(BaseModel):
+    """One bidder acknowledgement of a published addendum."""
+
+    bidder_id: str
+    acknowledged_at: str
+    user_id: str | None = None
+
+
+class AddendumCreate(BaseModel):
+    """Create a new (draft) addendum on a package."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(..., min_length=1, max_length=200)
+    body: str | None = Field(default=None, max_length=10000)
+
+
+class AddendumAcknowledgeRequest(BaseModel):
+    """Record a bidder's acknowledgement of an addendum."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    bidder_id: str = Field(..., min_length=1, max_length=100)
+
+
+class AddendumResponse(BaseModel):
+    """An addendum revision returned from the API."""
+
+    id: str
+    package_id: UUID
+    revision_no: int
+    title: str
+    body: str | None = None
+    published_at: str | None = None
+    published_by_user_id: str | None = None
+    acknowledged_by: list[AddendumAckEntry] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+# ── Bid leveling ─────────────────────────────────────────────────────────────
+# Bid leveling normalizes every bid onto the package's reference BOQ lines.
+# It is a pure computation over data that already exists (BOQ positions + each
+# bid's ``line_items``) — no persistence, no migration. Lines a bidder omitted
+# are "imputed" at the bidder's own mean rate so a short quote cannot win on a
+# misleadingly low total.
+
+
+class BidLevelingSummary(BaseModel):
+    """Per-bid leveling rollup (raw vs leveled, line classification counts)."""
+
+    bid_id: str
+    company_name: str
+    raw_amount: float = 0.0
+    leveled_amount: float = 0.0
+    matched_lines: int = 0
+    scaled_lines: int = 0
+    imputed_lines: int = 0
+    currency: str = ""
+
+
+class LevelingMatrixCell(BaseModel):
+    """One (reference line × bid) cell of the leveling matrix."""
+
+    bid_id: str
+    company_name: str
+    raw_total: float = 0.0
+    leveled_total: float = 0.0
+    status: str = ""  # "" | "matched" | "scaled" | "imputed"
+    unit_rate: float = 0.0
+
+
+class LevelingMatrixRow(BaseModel):
+    """One reference BOQ line with a cell per bid."""
+
+    position_id: str | None = None
+    line_code: str = ""
+    description: str = ""
+    unit: str = ""
+    reference_quantity: float = 0.0
+    reference_rate: float = 0.0
+    reference_total: float = 0.0
+    cells: list[LevelingMatrixCell] = Field(default_factory=list)
+
+
+class LevelingMatrixResponse(BaseModel):
+    """Full bid-leveling matrix for a package."""
+
+    package_id: UUID
+    package_name: str
+    # ISO currency the matrix is computed in (the package currency). Leveling
+    # only includes bids quoted in this currency — never blend currencies.
+    currency: str = ""
+    # Count of bids excluded because they were quoted in a different currency.
+    excluded_off_currency: int = 0
+    bid_summaries: list[BidLevelingSummary] = Field(default_factory=list)
+    rows: list[LevelingMatrixRow] = Field(default_factory=list)
+
+
+class LevelBidsResponse(BaseModel):
+    """Result of running leveling across a package's bids."""
+
+    package_id: UUID
+    package_name: str
+    # ISO currency the leveling was computed in (the package currency).
+    currency: str = ""
+    # Count of bids excluded because they were quoted in a different currency.
+    excluded_off_currency: int = 0
+    bid_count: int = 0
+    reference_line_count: int = 0
+    bid_summaries: list[BidLevelingSummary] = Field(default_factory=list)

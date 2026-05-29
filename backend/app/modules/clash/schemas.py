@@ -405,6 +405,33 @@ class ClashResultUpdate(BaseModel):
     add_comment: ClashAddComment | None = Field(default=None)
 
 
+class ClashBulkResultUpdate(BaseModel):
+    """Apply ONE triage change to many clashes at once (review-table bulk bar).
+
+    Exactly one of ``status`` / ``severity`` / ``assigned_to`` is set per
+    request (the toolbar issues one action at a time); the others stay
+    ``None`` and are left untouched. Replaces the per-row PATCH fan-out so a
+    large selection updates in a single round-trip.
+    """
+
+    result_ids: list[uuid.UUID] = Field(
+        ...,
+        min_length=1,
+        max_length=25_000,
+        description="The clashes to update (run-scoped; foreign ids are ignored).",
+    )
+    status: str | None = Field(default=None)
+    severity: str | None = Field(default=None)
+    assigned_to: str | None = Field(default=None)
+
+
+class ClashBulkUpdateResponse(BaseModel):
+    """Outcome of a bulk triage write — how many rows actually changed."""
+
+    updated: int = 0
+    requested: int = 0
+
+
 class ClashMatrixCell(BaseModel):
     """One discipline×discipline cell of the clash matrix."""
 

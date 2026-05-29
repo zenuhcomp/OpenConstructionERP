@@ -172,13 +172,32 @@ class GeoHubService:
                 detail=not_found_detail,
             )
         from app.modules.projects.repository import ProjectRepository
+        from app.modules.teams.access import is_project_member
 
         project = await ProjectRepository(self.session).get_by_id(project_id)
-        if project is None or str(project.owner_id) != str(user_id):
+        if project is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=not_found_detail,
             )
+        # Owner OR team member — mirror the projects module's access model
+        # (app.modules.teams.access) so collaborators who can open a project
+        # everywhere else aren't locked out of its geo map / anchors / pins.
+        if str(project.owner_id) == str(user_id):
+            return
+        try:
+            user_uuid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id))
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=not_found_detail,
+            ) from None
+        if await is_project_member(self.session, project_id, user_uuid):
+            return
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=not_found_detail,
+        )
 
     # ── Auto-anchor from address ────────────────────────────────────────
 
@@ -1820,9 +1839,10 @@ class GeoHubService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required",
             )
-        from sqlalchemy import select
+        from sqlalchemy import or_, select
 
         from app.modules.projects.models import Project
+        from app.modules.teams.access import member_project_ids_subquery
 
         is_admin = payload.get("role") == "admin"
         user_id = payload.get("sub") or payload.get("user_id")
@@ -1835,10 +1855,17 @@ class GeoHubService:
             .where(Project.status != "archived")
         )
         if not is_admin:
-            # 404-safe scoping: non-admins only see projects they own.
-            # Cast user_id through ``str`` because JWT subs can arrive as
-            # either UUID or string depending on the auth path.
-            stmt = stmt.where(Project.owner_id == user_id)
+            # 404-safe scoping: non-admins see projects they own OR are a
+            # team member of — mirrors the projects module's access model so
+            # collaborators aren't shown an empty global map. Cast user_id
+            # through ``str`` because JWT subs can arrive as either UUID or
+            # string depending on the auth path.
+            stmt = stmt.where(
+                or_(
+                    Project.owner_id == user_id,
+                    Project.id.in_(member_project_ids_subquery(user_id)),
+                )
+            )
         stmt = stmt.order_by(Project.created_at.desc()).limit(limit)
 
         result = await self.session.execute(stmt)

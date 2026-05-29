@@ -3161,6 +3161,108 @@ class ClashService:
                 )
         return result
 
+    async def bulk_update_results(
+        self,
+        project_id: uuid.UUID,
+        run_id: uuid.UUID,
+        result_ids: list[uuid.UUID],
+        *,
+        new_status: str | None = None,
+        assigned_to: str | None = None,
+        severity: str | None = None,
+        actor: str | None = None,
+    ) -> int:
+        """Apply one triage change to many clashes in a single round-trip.
+
+        Backs the review table's bulk-actions toolbar (set status / severity /
+        assignee over the current selection) so a large selection no longer
+        fires one PATCH per row. Validates the target values once up-front,
+        patches every matching row, appends per-row audit history, then
+        rebuilds the run summary **once** at the end (rather than once per
+        row). Watcher notifications are fanned out best-effort per changed
+        row. Returns the number of rows that actually changed.
+        """
+        run = await self.get_run(project_id, run_id)  # IDOR + 404 guard
+        actor_id = str(actor or "system")
+
+        # Validate once — a bad value fails the whole batch before any write.
+        if new_status is not None and new_status not in CLASH_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid clash status '{new_status}'",
+            )
+        if severity is not None and severity not in CLASH_SEVERITIES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid clash severity '{severity}'",
+            )
+        if new_status is None and severity is None and assigned_to is None:
+            return 0
+
+        # De-duplicate ids preserving order; cap the batch so a runaway
+        # selection can't hold the event loop (matches the export ceiling).
+        seen: set[uuid.UUID] = set()
+        unique_ids: list[uuid.UUID] = []
+        for rid in result_ids:
+            if rid not in seen:
+                seen.add(rid)
+                unique_ids.append(rid)
+        if len(unique_ids) > _MAX_RESULTS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Bulk selection exceeds {_MAX_RESULTS} rows.",
+            )
+
+        rows = await self.repo.results_by_ids(run_id, unique_ids)
+        # (result, changed_fields) for the post-flush notification fan-out.
+        touched: list[tuple[ClashResult, list[str]]] = []
+        for result in rows:
+            changed_fields: list[str] = []
+            if new_status is not None and result.status != new_status:
+                self._append_history(result, actor_id, "status", result.status, new_status)
+                result.status = new_status
+                changed_fields.append("status")
+            if severity is not None and result.severity != severity:
+                self._append_history(result, actor_id, "severity", result.severity, severity)
+                result.severity = severity
+                changed_fields.append("severity")
+            if assigned_to is not None:
+                new_assignee = assigned_to or None
+                if (result.assigned_to or None) != new_assignee:
+                    self._append_history(result, actor_id, "assigned_to", result.assigned_to, new_assignee)
+                    result.assigned_to = new_assignee
+                    changed_fields.append("assigned_to")
+            if changed_fields:
+                touched.append((result, changed_fields))
+
+        if not touched:
+            return 0
+
+        await self.session.flush()
+        # Rebuild the cached status counts ONCE for the whole batch.
+        all_rows, _ = await self.repo.list_results(run_id, limit=_MAX_RESULTS)
+        run.summary = _build_summary(list(all_rows))
+        await self.session.flush()
+
+        for result, changed_fields in touched:
+            watchers = [str(w) for w in (result.watchers or []) if w]
+            if watchers:
+                await self._notify(
+                    watchers,
+                    notification_type="clash_updated",
+                    title_key="clash.notification.updated",
+                    project_id=project_id,
+                    run_id=run_id,
+                    result_id=result.id,
+                    actor=actor_id,
+                    body_context={
+                        "fields": ",".join(changed_fields),
+                        "a_name": result.a_name,
+                        "b_name": result.b_name,
+                    },
+                )
+        return len(touched)
+
     # ── Watchers ───────────────────────────────────────────────────────
 
     async def set_watch(

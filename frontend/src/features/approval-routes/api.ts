@@ -25,6 +25,7 @@ import type {
   ApprovalInstance,
   ApprovalRoute,
   ApprovalRouteCreatePayload,
+  ApprovalRoutesMeta,
   ApprovalRouteUpdatePayload,
   InstanceCancelPayload,
   InstanceCreatePayload,
@@ -33,12 +34,23 @@ import type {
 
 const BASE = '/v1/approval-routes';
 
+/* ── Metadata ────────────────────────────────────────────────────────── */
+
+/** Validated whitelists (target kinds / modes / statuses) straight from
+ *  the backend — single source of truth so the UI never drifts. */
+export async function getMeta(): Promise<ApprovalRoutesMeta> {
+  return apiGet<ApprovalRoutesMeta>(`${BASE}/meta`);
+}
+
 /* ── Route templates ─────────────────────────────────────────────────── */
 
 export interface ListRoutesParams {
   projectId?: string | null;
   targetKind?: string | null;
-  /** When true, includes archived (``is_active=false``) routes. */
+  /** Whether to include archived (``is_active=false``) routes. The
+   *  backend defaults to ``true`` (admin surface). Pass ``false`` from a
+   *  consumer picker so users can only start a workflow on an active
+   *  template. */
   includeInactive?: boolean;
 }
 
@@ -48,7 +60,9 @@ export async function listRoutes(
   const qs = new URLSearchParams();
   if (params.projectId) qs.set('project_id', params.projectId);
   if (params.targetKind) qs.set('target_kind', params.targetKind);
-  if (params.includeInactive) qs.set('include_inactive', '1');
+  // The backend defaults include_inactive=true; only send it when the
+  // caller explicitly wants to restrict to active routes.
+  if (params.includeInactive === false) qs.set('include_inactive', 'false');
   const query = qs.toString();
   return apiGet<ApprovalRoute[]>(`${BASE}/routes${query ? `?${query}` : ''}`);
 }
@@ -141,6 +155,8 @@ export async function cancelInstance(
 /* ── React Query keys (single source of truth) ──────────────────────── */
 
 export const approvalRoutesKeys = {
+  /** Validated whitelists (target kinds / modes / statuses). */
+  meta: () => ['approval-routes', 'meta'] as const,
   /** List of route templates filtered by project + target kind. */
   routes: (projectId?: string | null, targetKind?: string | null) =>
     ['approval-routes', 'routes', projectId ?? null, targetKind ?? null] as const,

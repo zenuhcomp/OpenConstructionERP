@@ -296,7 +296,7 @@ async def update_container(
 @router.post(
     "/containers/{container_id}/transition/",
     response_model=ContainerResponse,
-    dependencies=[Depends(RequirePermission("cde.update"))],
+    dependencies=[Depends(RequirePermission("cde.transition"))],
 )
 async def transition_state(
     container_id: uuid.UUID,

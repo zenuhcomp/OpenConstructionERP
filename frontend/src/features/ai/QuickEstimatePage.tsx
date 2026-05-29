@@ -47,7 +47,7 @@ import clsx from 'clsx';
 import { Card, CardContent, Button, Badge, AIDisclaimerBanner } from '@/shared/ui';
 import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
-import { aiApi, type QuickEstimateRequest, type EstimateJobResponse, type EstimateItem, type CadExtractResponse, type EnrichResult, type EnrichedItem, type CadColumnsResponse, type CadGroupResponse, type CadDynamicGroup, type CadGroupElementsResponse } from './api';
+import { aiApi, type QuickEstimateRequest, type EstimateJobResponse, type EstimateItem, type CadExtractResponse, type EnrichResult, type EnrichedItem, type CostMatch, type CadColumnsResponse, type CadGroupResponse, type CadDynamicGroup, type CadGroupElementsResponse } from './api';
 import { apiGet, apiPost } from '@/shared/lib/api';
 import {
   formatFileSize,
@@ -445,7 +445,13 @@ function SaveToBOQDialog({ open, onClose, onSave, saving }: SaveDialogProps) {
 
 function ResultsTable({ result, selectedCurrency, enrichResult }: { result: EstimateJobResponse; selectedCurrency?: string; enrichResult?: EnrichResult | null }) {
   const { t } = useTranslation();
-  const currency = selectedCurrency || result.currency || 'EUR';
+  // Resolved estimate currency — explicit selection wins, else the currency
+  // the AI actually priced in. Never fall back to a hard-coded 'EUR': when it
+  // is unknown we render plain numbers (no misleading ISO symbol).
+  const currency = (selectedCurrency || result.currency || '').trim();
+  // formatNumber renders a currency symbol only when a code is passed; an
+  // empty code yields a plain decimal.
+  const currencyArg = currency || undefined;
 
   // Build a lookup map from enrichment results by index
   const enrichMap = new Map<number, EnrichedItem>();
@@ -454,6 +460,19 @@ function ResultsTable({ result, selectedCurrency, enrichResult }: { result: Esti
       enrichMap.set(ei.index, ei);
     }
   }
+
+  // A matched cost-DB rate may be priced in a different currency than the
+  // estimate. We must never blend currencies into one scalar total, so a
+  // match only contributes its rate to the recomputed total (and the struck-
+  // through "applied rate" view) when its currency matches the estimate
+  // currency (or the match carries no currency — treated as same-currency
+  // legacy data). Otherwise we keep the AI's own rate for the total and show
+  // the matched rate separately with its own ISO code.
+  const matchAppliesToTotal = (m: CostMatch | null | undefined): boolean => {
+    if (!m) return false;
+    const mc = (m.currency || '').trim();
+    return mc === '' || mc === currency;
+  };
 
   let currentCategory = '';
 
@@ -528,31 +547,47 @@ function ResultsTable({ result, selectedCurrency, enrichResult }: { result: Esti
                     {bestMatch ? (
                       <div className="flex flex-col items-end gap-0.5">
                         <span className="line-through text-content-quaternary text-xs">
-                          {formatNumber(item.unit_rate)}
+                          {formatNumber(item.unit_rate, currencyArg)}
                         </span>
                         <span className="text-emerald-600 font-semibold" title={`CWICR: ${bestMatch.code} (${Math.round(bestMatch.score * 100)}% match)`}>
-                          {formatNumber(bestMatch.rate)}
+                          {/* Show the matched rate in ITS OWN currency so we never
+                              imply a foreign rate is in the estimate currency. */}
+                          {formatNumber(bestMatch.rate, (bestMatch.currency || currency) || undefined)}
                         </span>
                         <span className="text-[10px] text-emerald-600/70 font-normal">
                           {bestMatch.code}
                         </span>
+                        {!matchAppliesToTotal(bestMatch) && (
+                          <span
+                            className="text-[10px] text-amber-600 font-medium"
+                            title={t('ai.match_currency_mismatch_hint', {
+                              defaultValue:
+                                'Matched rate is in a different currency and is not folded into the total.',
+                            })}
+                          >
+                            {t('ai.match_currency_label', {
+                              defaultValue: '{{code}} (not in total)',
+                              code: (bestMatch.currency || '').trim() || '—',
+                            })}
+                          </span>
+                        )}
                       </div>
                     ) : (
-                      formatNumber(item.unit_rate)
+                      formatNumber(item.unit_rate, currencyArg)
                     )}
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-medium text-content-primary">
-                    {bestMatch ? (
+                    {bestMatch && matchAppliesToTotal(bestMatch) ? (
                       <div className="flex flex-col items-end gap-0.5">
                         <span className="line-through text-content-quaternary text-xs">
-                          {formatNumber(item.total)}
+                          {formatNumber(item.total, currencyArg)}
                         </span>
                         <span className="text-emerald-600 font-semibold">
-                          {formatNumber(item.quantity * bestMatch.rate)}
+                          {formatNumber(item.quantity * bestMatch.rate, currencyArg)}
                         </span>
                       </div>
                     ) : (
-                      formatNumber(item.total)
+                      formatNumber(item.total, currencyArg)
                     )}
                   </td>
                 </tr>
@@ -572,20 +607,25 @@ function ResultsTable({ result, selectedCurrency, enrichResult }: { result: Esti
               {enrichMap.size > 0 ? (
                 <div className="flex flex-col items-end gap-0.5">
                   <span className="line-through text-content-quaternary text-sm font-normal">
-                    {formatNumber(result.grand_total, currency)}
+                    {formatNumber(result.grand_total, currencyArg)}
                   </span>
                   <span className="text-emerald-600">
+                    {/* Only fold a matched rate into the total when it shares
+                        the estimate currency — never blend currencies. Lines
+                        whose match is in a foreign currency keep the AI's own
+                        rate in the total and are flagged per-line above. */}
                     {formatNumber(
                       result.items.reduce((sum, item, idx) => {
-                        const ei = enrichMap.get(idx);
-                        return sum + item.quantity * (ei?.best_match?.rate ?? item.unit_rate);
+                        const match = enrichMap.get(idx)?.best_match;
+                        const rate = matchAppliesToTotal(match) ? match!.rate : item.unit_rate;
+                        return sum + item.quantity * rate;
                       }, 0),
-                      currency,
+                      currencyArg,
                     )}
                   </span>
                 </div>
               ) : (
-                formatNumber(result.grand_total, currency)
+                formatNumber(result.grand_total, currencyArg)
               )}
             </td>
           </tr>
@@ -1600,7 +1640,9 @@ export function QuickEstimatePage() {
     if (!result?.id) return;
     setEnriching(true);
     try {
-      const data = await aiApi.enrichEstimate(result.id, enrichRegion, currency || 'EUR');
+      // Pass the resolved estimate currency (selection → AI-priced currency),
+      // never a fabricated 'EUR' default.
+      const data = await aiApi.enrichEstimate(result.id, enrichRegion, currency || result.currency || '');
       setEnrichResult(data);
       addToast({
         type: 'success',

@@ -3798,6 +3798,55 @@ async def download_document(
 # ── AI Analysis ──────────────────────────────────────────────────────────
 
 
+def _derive_element_confidence(
+    llm_score: Any,
+    *,
+    description: str,
+    quantity: float,
+    raw_unit: str,
+) -> float:
+    """Derive a per-element confidence for an AI-extracted BOQ item.
+
+    Prefers the score supplied by the LLM (clamped to ``0.0..1.0``) when it
+    provides a usable number. Otherwise falls back to a data-quality
+    heuristic mirroring :func:`TakeoffService.extract_tables`: the score is
+    degraded when the quantity is missing/zero, the unit is missing, or the
+    description is short — so the estimator confirms weak rows before they
+    flow into the BOQ.
+
+    Args:
+        llm_score: The raw ``confidence`` value from the LLM item (any type).
+        description: The cleaned element description.
+        quantity: The parsed, clamped quantity.
+        raw_unit: The unit string exactly as supplied (empty when absent).
+
+    Returns:
+        A confidence score in the ``0.0..1.0`` range.
+    """
+    if llm_score is not None:
+        try:
+            score = float(llm_score)
+        except (ValueError, TypeError):
+            score = None
+        else:
+            # Some models emit a 0-100 percentage instead of a 0-1 fraction.
+            if score > 1.0:
+                score = score / 100.0
+            return max(0.0, min(1.0, score))
+
+    has_real_qty = quantity > 0
+    has_unit = bool(raw_unit)
+    has_description = len(description.strip()) >= 5
+
+    if not has_description:
+        return 0.4
+    if not has_real_qty:
+        return 0.5
+    if not has_unit:
+        return 0.6
+    return 0.85
+
+
 @router.post(
     "/documents/{doc_id}/analyze/",
     dependencies=[Depends(RequirePermission("takeoff.read"))],
@@ -3924,7 +3973,8 @@ async def analyze_document(
             )
             quantity = 0.0
 
-        unit = str(item.get("unit", "pcs")).strip() or "pcs"
+        raw_unit = str(item.get("unit", "")).strip()
+        unit = raw_unit or "pcs"
         category = str(item.get("category", "General")).strip() or "General"
 
         try:
@@ -3939,13 +3989,25 @@ async def analyze_document(
             )
             unit_rate = 0.0
 
+        # Per-element confidence. Prefer the LLM's own score when it
+        # supplied one (some prompts ask for it); otherwise derive a
+        # quality-based score mirroring service.extract_tables — degrade
+        # for a missing/zero quantity, a missing unit, or a short
+        # description so the estimator is steered to confirm weak rows.
+        confidence = _derive_element_confidence(
+            item.get("confidence"),
+            description=description,
+            quantity=quantity,
+            raw_unit=raw_unit,
+        )
+
         element = {
             "id": f"ai_{idx + 1}",
             "category": category,
             "description": description,
             "quantity": round(quantity, 2),
             "unit": unit,
-            "confidence": 0.8,
+            "confidence": confidence,
         }
         elements.append(element)
 

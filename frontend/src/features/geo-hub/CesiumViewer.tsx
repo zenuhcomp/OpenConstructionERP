@@ -172,6 +172,37 @@ interface CesiumViewerProps {
    * prop value changes after mount. Undefined falls back to ``'3d'``.
    */
   sceneMode?: GeoSceneMode;
+  /**
+   * Called when the user LEFT-clicks a pin we rendered. Receives the
+   * decoded pin tag stored in ``properties._oeGeoHubPinTag``:
+   *
+   *   * ``project:<id>``       — a single anchored-project pin
+   *   * ``cluster:<n>:<lat,lon>`` — a cluster bubble; ``clusterProjectIds``
+   *     carries the member project ids so the page can expand it
+   *   * ``hse:<id>`` / ``punch:<id>`` / ``diary:<id>`` — cross-module pins
+   *   * ``search``             — the transient address-search pin
+   *
+   * The viewer deliberately does NOT import react-router; the page wires
+   * navigation. When ``anchorDragMode`` is active a click is consumed by
+   * the anchor flow instead and this callback is not invoked.
+   */
+  onPinSelect?: (sel: {
+    tag: string;
+    clusterProjectIds?: string[];
+  }) => void;
+  /**
+   * When true the next LEFT-click on the globe is interpreted as "set the
+   * anchor here" — the viewer resolves the surface coordinate and calls
+   * ``onMapClick`` instead of selecting a pin. The page owns the toggle
+   * and the PATCH; the viewer only reports the picked lat/lon.
+   */
+  anchorDragMode?: boolean;
+  /**
+   * Called with the picked globe surface coordinate when the user clicks
+   * the map while ``anchorDragMode`` is true. The page PATCHes the anchor
+   * and exits drag mode.
+   */
+  onMapClick?: (coords: { lat: number; lon: number }) => void;
 }
 
 /** Stable signature for the viewer effect: rebuild only when the
@@ -239,6 +270,22 @@ interface CesiumScreenSpaceEventHandlerLike {
   destroy: () => void;
 }
 
+/** Picked entity returned by ``scene.pick`` / ``scene.drillPick``. */
+interface CesiumPickedFeatureLike {
+  /**
+   * The entity (when the pick hit a labelled point we added). Carries
+   * the ``properties`` bag where our ``_oeGeoHubPinTag`` lives. May be
+   * absent for non-entity picks (3D Tiles features, terrain).
+   */
+  id?: {
+    properties?: {
+      getValue?: (time?: unknown) => Record<string, unknown> | undefined;
+      // Some Cesium builds expose property bags as plain objects too.
+      [key: string]: unknown;
+    };
+  };
+}
+
 type CesiumViewerInstance = {
   destroy: () => void;
   camera: {
@@ -255,13 +302,34 @@ type CesiumViewerInstance = {
     changed: CesiumEventLike;
     heading: number;
     positionCartographic: CesiumCartographicLike;
+    /**
+     * Resolve a window pixel to a point on the WGS-84 ellipsoid surface.
+     * Used by the "Drag to adjust" anchor flow to turn a map click into
+     * lat/lon. Optional in the shim so a stripped build degrades to a
+     * no-op rather than throwing.
+     */
+    pickEllipsoid?: (
+      windowPosition: CesiumCartesian2Like,
+      ellipsoid?: unknown,
+    ) => CesiumCartesian3Like | undefined;
   };
   scene: {
     primitives: { add: (p: unknown) => unknown };
     canvas: HTMLCanvasElement;
     pickPosition?: (windowPosition: CesiumCartesian2Like) => CesiumCartesian3Like | undefined;
+    /** Topmost feature under the cursor — used to resolve a clicked pin. */
+    pick?: (windowPosition: CesiumCartesian2Like) => CesiumPickedFeatureLike | undefined;
+    /**
+     * All features under the cursor (front-to-back). We prefer this over
+     * ``pick`` so a pin partially occluded by a 3D tile is still selectable.
+     */
+    drillPick?: (
+      windowPosition: CesiumCartesian2Like,
+      limit?: number,
+    ) => CesiumPickedFeatureLike[];
     globe?: {
       pick?: (ray: unknown, scene: unknown) => CesiumCartesian3Like | undefined;
+      ellipsoid?: unknown;
     };
     /** Current scene projection — one of the ``SceneMode`` enum values. */
     mode?: number;
@@ -321,6 +389,7 @@ interface CesiumLike {
   ScreenSpaceEventHandler: new (canvas: HTMLCanvasElement) => CesiumScreenSpaceEventHandlerLike;
   ScreenSpaceEventType: {
     MOUSE_MOVE: number;
+    LEFT_CLICK: number;
   };
   Math: {
     toDegrees: (radians: number) => number;
@@ -410,6 +479,9 @@ export function CesiumViewer({
   onViewerReady,
   tilesetOverlayState,
   sceneMode,
+  onPinSelect,
+  anchorDragMode,
+  onMapClick,
 }: CesiumViewerProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -438,6 +510,15 @@ export function CesiumViewer({
   const onCameraChangeRef = useRef(onCameraChange);
   onMouseMoveRef.current = onMouseMove;
   onCameraChangeRef.current = onCameraChange;
+  // Latest click-handling refs so the single LEFT_CLICK input action
+  // (registered once in the viewer effect) always reads the current
+  // callbacks + drag-mode flag without rebuilding the Cesium runtime.
+  const onPinSelectRef = useRef(onPinSelect);
+  const onMapClickRef = useRef(onMapClick);
+  const anchorDragModeRef = useRef<boolean>(anchorDragMode ?? false);
+  onPinSelectRef.current = onPinSelect;
+  onMapClickRef.current = onMapClick;
+  anchorDragModeRef.current = anchorDragMode ?? false;
   // Latest overlay-state ref — used during the *initial* tileset load
   // loop so the first frame respects saved user prefs. The dedicated
   // ``tilesetOverlayState`` effect re-applies on every change, so this
@@ -712,6 +793,97 @@ export function CesiumViewer({
                 scheduleFlush();
               }
             }, cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+            // ── LEFT_CLICK → pin select / anchor placement ──────────────
+            //
+            // Two responsibilities, decided by the latest ``anchorDragMode``
+            // ref so the single registered action handles both without the
+            // viewer rebuilding when the page toggles drag mode:
+            //
+            //   * drag-mode ON  → resolve the globe surface coord and emit
+            //     ``onMapClick`` so the page PATCHes the anchor.
+            //   * drag-mode OFF → drillPick the entity under the cursor,
+            //     read ``_oeGeoHubPinTag``, and emit ``onPinSelect`` so the
+            //     page navigates / expands the cluster / opens the record.
+            if (
+              typeof cesium.ScreenSpaceEventType.LEFT_CLICK === 'number'
+            ) {
+              inputHandler.setInputAction((movement) => {
+                const pos = movement?.position;
+                if (!pos || !viewer) return;
+                // Anchor-placement flow takes precedence over pin select.
+                if (anchorDragModeRef.current) {
+                  const onMapClickCb = onMapClickRef.current;
+                  if (!onMapClickCb) return;
+                  try {
+                    const ellipsoid = viewer.scene?.globe?.ellipsoid;
+                    const cart = viewer.camera?.pickEllipsoid?.(pos, ellipsoid);
+                    if (!cart) return;
+                    const carto = cesium.Cartographic.fromCartesian(cart);
+                    const lat = cesium.Math.toDegrees(carto.latitude);
+                    const lon = cesium.Math.toDegrees(carto.longitude);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+                    onMapClickCb({ lat, lon });
+                  } catch (clickErr) {
+                    // eslint-disable-next-line no-console
+                    console.warn('[geo_hub] anchor map-click pick failed', clickErr);
+                  }
+                  return;
+                }
+                // Pin-select flow.
+                const onPinSelectCb = onPinSelectRef.current;
+                if (!onPinSelectCb) return;
+                try {
+                  const scene = viewer.scene;
+                  let picks: CesiumPickedFeatureLike[] = [];
+                  if (typeof scene?.drillPick === 'function') {
+                    picks = scene.drillPick(pos, 8) ?? [];
+                  } else if (typeof scene?.pick === 'function') {
+                    const single = scene.pick(pos);
+                    if (single) picks = [single];
+                  }
+                  for (const picked of picks) {
+                    const props = picked?.id?.properties;
+                    if (!props) continue;
+                    // Cesium ``PropertyBag`` exposes values via getValue(),
+                    // but our static properties are also readable directly.
+                    let bag: Record<string, unknown> | undefined;
+                    if (typeof props.getValue === 'function') {
+                      try {
+                        bag = props.getValue();
+                      } catch {
+                        bag = undefined;
+                      }
+                    }
+                    const tagFromBag =
+                      bag && typeof bag._oeGeoHubPinTag === 'string'
+                        ? bag._oeGeoHubPinTag
+                        : undefined;
+                    const tagDirect =
+                      typeof props._oeGeoHubPinTag === 'string'
+                        ? props._oeGeoHubPinTag
+                        : undefined;
+                    const tag = tagFromBag ?? tagDirect;
+                    if (!tag) continue;
+                    // Cluster pins carry their member project ids so the
+                    // page can fit-to-bounds on expand.
+                    const rawClusterIds =
+                      (bag && bag._oeGeoHubClusterProjects) ??
+                      props._oeGeoHubClusterProjects;
+                    const clusterProjectIds = Array.isArray(rawClusterIds)
+                      ? rawClusterIds.filter(
+                          (x): x is string => typeof x === 'string',
+                        )
+                      : undefined;
+                    onPinSelectCb({ tag, clusterProjectIds });
+                    return;
+                  }
+                } catch (pickErr) {
+                  // eslint-disable-next-line no-console
+                  console.warn('[geo_hub] pin pick failed', pickErr);
+                }
+              }, cesium.ScreenSpaceEventType.LEFT_CLICK);
+            }
 
             // Pointer leaving the canvas should reset the HUD to "—".
             const canvas = v.scene.canvas;

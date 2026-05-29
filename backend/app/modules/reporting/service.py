@@ -450,6 +450,30 @@ class ReportingService:
         call. This matches the cron-worker contract (a failed render
         should not lose the audit trail of "we tried to render").
         """
+        # If the caller did not supply a data snapshot, assemble one
+        # server-side from the project's live module state. Without this
+        # the renderer falls straight through to its "No data available"
+        # notice and every report a user generates is a blank shell — the
+        # only generation path the UI exposes never sends a snapshot
+        # (W2 audit, /reporting). Best-effort: a failure here degrades to
+        # the empty-snapshot notice rather than failing the whole call.
+        effective_snapshot = data.data_snapshot
+        if effective_snapshot is None:
+            try:
+                effective_snapshot = await self._build_default_snapshot(
+                    data.project_id,
+                    data.report_type,
+                )
+            except Exception:
+                logger.warning(
+                    "reporting.generate_report could not assemble a default "
+                    "data_snapshot for project_id=%s; the report will render "
+                    "the empty-snapshot notice.",
+                    data.project_id,
+                    exc_info=True,
+                )
+                effective_snapshot = None
+
         report = GeneratedReport(
             project_id=data.project_id,
             template_id=data.template_id,
@@ -458,7 +482,7 @@ class ReportingService:
             generated_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S"),
             generated_by=uuid.UUID(user_id) if user_id else None,
             format=data.format,
-            data_snapshot=data.data_snapshot,
+            data_snapshot=effective_snapshot,
             metadata_=data.metadata,
         )
         report = await self.report_repo.create(report)
@@ -482,7 +506,7 @@ class ReportingService:
                 title=data.title,
                 project_name=project_name,
                 template_data=template_data,
-                data_snapshot=data.data_snapshot,
+                data_snapshot=effective_snapshot,
                 generated_at=report.generated_at,
             )
 
@@ -574,6 +598,137 @@ class ReportingService:
                 exc_info=True,
             )
         return str(project_id)
+
+    async def _build_default_snapshot(
+        self,
+        project_id: uuid.UUID,
+        report_type: str,
+    ) -> dict | None:
+        """Assemble a ``data_snapshot`` from the project's live module state.
+
+        Used when ``generate_report`` is called without an explicit
+        snapshot (the only path the /reporting UI exercises). Returns a
+        dict keyed by the renderer's section IDs (``header``, ``kpi``,
+        ``schedule``, ``risk``, ``issues``, ``summary``, ``cashflow`` …)
+        so the body actually contains numbers instead of the
+        "No data available" notice.
+
+        Every figure is sourced from data the dashboards already compute:
+        the most recent :class:`KPISnapshot` (CPI/SPI/budget/schedule/risk
+        and open-item counts) plus the finance dashboard (payable /
+        receivable / budget / cash-flow with its ISO currency code). Money
+        values always carry their currency code, per the platform money
+        rule.
+
+        Returns ``None`` when neither a KPI snapshot nor finance data is
+        available, so the caller still gets the explicit empty-snapshot
+        notice rather than a misleading half-empty report.
+        """
+        from app.modules.projects.repository import ProjectRepository
+
+        snapshot: dict[str, dict] = {}
+
+        # ── Project header + resolved currency ──
+        project = None
+        currency = ""
+        try:
+            project = await ProjectRepository(self.session).get_by_id(project_id)
+        except Exception:
+            project = None
+        if project is not None:
+            currency = (getattr(project, "currency", "") or "").strip().upper()
+            header: dict[str, object] = {
+                "name": getattr(project, "name", "") or "",
+                "status": getattr(project, "status", "") or "",
+            }
+            if getattr(project, "phase", None):
+                header["phase"] = project.phase
+            if getattr(project, "planned_start_date", None):
+                header["planned_start"] = project.planned_start_date
+            if getattr(project, "planned_end_date", None):
+                header["planned_end"] = project.planned_end_date
+            snapshot["header"] = header
+            snapshot["overview"] = dict(header)
+
+        # ── KPI snapshot → kpi / schedule / risk / issues sections ──
+        kpi = await self.get_latest_kpi(project_id)
+        if kpi is not None:
+            kpi_block: dict[str, object] = {}
+            if kpi.cpi is not None:
+                kpi_block["cpi"] = kpi.cpi
+            if kpi.spi is not None:
+                kpi_block["spi"] = kpi.spi
+            if kpi.budget_consumed_pct is not None:
+                kpi_block["budget_consumed_pct"] = f"{kpi.budget_consumed_pct}%"
+            if kpi.snapshot_date:
+                kpi_block["as_of"] = kpi.snapshot_date
+            if kpi_block:
+                snapshot["kpi"] = kpi_block
+
+            if kpi.schedule_progress_pct is not None:
+                snapshot["schedule"] = {"progress_pct": f"{kpi.schedule_progress_pct}%"}
+                snapshot["overview"] = {
+                    **snapshot.get("overview", {}),
+                    "schedule_progress_pct": f"{kpi.schedule_progress_pct}%",
+                }
+
+            if kpi.risk_score_avg is not None:
+                snapshot["risk"] = {"risk_score_avg": kpi.risk_score_avg}
+
+            issues_block = {
+                "open_rfis": kpi.open_rfis,
+                "open_submittals": kpi.open_submittals,
+                "open_defects": kpi.open_defects,
+                "open_observations": kpi.open_observations,
+            }
+            if any(v for v in issues_block.values()):
+                snapshot["issues"] = issues_block
+
+        # ── Finance dashboard → summary / cashflow sections ──
+        try:
+            from app.modules.finance.service import FinanceService
+
+            dash = await FinanceService(self.session).get_dashboard(project_id=project_id)
+            dash_data = dash.model_dump() if hasattr(dash, "model_dump") else dict(dash)
+            fin_currency = (dash_data.get("currency") or currency or "").strip().upper()
+
+            def _money(value: object) -> str:
+                num = value if value is not None else 0
+                return f"{num} {fin_currency}".strip()
+
+            summary_block: dict[str, object] = {}
+            if dash_data.get("total_budget_revised") is not None:
+                summary_block["budget"] = _money(dash_data.get("total_budget_revised"))
+            if dash_data.get("total_committed") is not None:
+                summary_block["committed"] = _money(dash_data.get("total_committed"))
+            if dash_data.get("total_actual") is not None:
+                summary_block["actual"] = _money(dash_data.get("total_actual"))
+            if dash_data.get("budget_consumed_pct") is not None:
+                summary_block["budget_consumed_pct"] = f"{dash_data.get('budget_consumed_pct')}%"
+            if summary_block:
+                snapshot["summary"] = summary_block
+
+            cashflow_block: dict[str, object] = {}
+            if dash_data.get("total_payable") is not None:
+                cashflow_block["payable"] = _money(dash_data.get("total_payable"))
+            if dash_data.get("total_receivable") is not None:
+                cashflow_block["receivable"] = _money(dash_data.get("total_receivable"))
+            if dash_data.get("cash_flow_net") is not None:
+                cashflow_block["net_cash_flow"] = _money(dash_data.get("cash_flow_net"))
+            if cashflow_block:
+                snapshot["cashflow"] = cashflow_block
+        except Exception:
+            logger.debug(
+                "reporting._build_default_snapshot: finance dashboard unavailable for %s",
+                project_id,
+                exc_info=True,
+            )
+
+        # ``report_type`` is accepted for forward-compatibility (a future
+        # type-specific assembler can branch on it); today every type
+        # draws from the same KPI + finance source set above.
+        _ = report_type
+        return snapshot or None
 
     # ── KPI Auto-Recalculation ───────────────────────────────────────────
 

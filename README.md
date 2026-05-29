@@ -339,6 +339,82 @@ Each block below is a short GIF cut from the full walkthrough above — same ord
 
 ---
 
+## A Look Inside
+
+A quick tour of the main workspaces. Every screen is the real application running the seven-country demo that ships with a fresh install.
+
+<table>
+<tr>
+<td align="center" width="50%">
+<strong>Portfolio Dashboard</strong><br/>
+<em>Every project on one live map, with multi-currency totals that are grouped by currency, never blended.</em><br/><br/>
+<img src="docs/screenshots/gallery/portfolio-dashboard.jpg" alt="Portfolio dashboard with world map and KPIs" width="420" />
+</td>
+<td align="center" width="50%">
+<strong>Projects</strong><br/>
+<em>Localized projects worldwide. Each card carries its site map, BIM / DWG / PDF badges and live value.</em><br/><br/>
+<img src="docs/screenshots/gallery/projects.jpg" alt="Projects overview with localized project cards" width="420" />
+</td>
+</tr>
+<tr>
+<td align="center">
+<strong>BOQ Editor</strong><br/>
+<em>Keyboard-first bill of quantities with sections, assemblies, a live quality score and grand total.</em><br/><br/>
+<img src="docs/screenshots/gallery/boq-editor.jpg" alt="Bill of Quantities editor" width="420" />
+</td>
+<td align="center">
+<strong>Cost Database</strong><br/>
+<em>55,000+ priced items across 11 regional databases, bilingual, searchable by code, unit or class.</em><br/><br/>
+<img src="docs/screenshots/gallery/cost-database.jpg" alt="Regional cost databases" width="420" />
+</td>
+</tr>
+<tr>
+<td align="center">
+<strong>3D BIM Viewer</strong><br/>
+<em>Federated models in the browser with a category and storey breakdown. Converted through DDC, no IfcOpenShell.</em><br/><br/>
+<img src="docs/screenshots/gallery/bim-3d-viewer.jpg" alt="3D BIM viewer with element summary" width="420" />
+</td>
+<td align="center">
+<strong>Clash Detection</strong><br/>
+<em>Geometric coordination across federated models, with a clash matrix and BCF export.</em><br/><br/>
+<img src="docs/screenshots/gallery/clash-detection.jpg" alt="Clash detection across federated models" width="420" />
+</td>
+</tr>
+<tr>
+<td align="center">
+<strong>PDF Takeoff</strong><br/>
+<em>Drop a drawing, let AI extract the quantities, then push them straight into the BOQ.</em><br/><br/>
+<img src="docs/screenshots/gallery/pdf-takeoff.jpg" alt="AI-assisted PDF takeoff" width="420" />
+</td>
+<td align="center">
+<strong>AI Estimate</strong><br/>
+<em>Turn text, a photo, a PDF or a spreadsheet into a scoped BOQ in seconds, with confidence scores.</em><br/><br/>
+<img src="docs/screenshots/gallery/ai-estimate.jpg" alt="AI quick estimate" width="420" />
+</td>
+</tr>
+<tr>
+<td align="center">
+<strong>Validation</strong><br/>
+<em>Built-in DIN 276, NRM and MasterFormat rules score every BOQ with a traffic-light report.</em><br/><br/>
+<img src="docs/screenshots/gallery/validation.jpg" alt="Validation report with traffic-light score" width="420" />
+</td>
+<td align="center">
+<strong>Cross-Project Analytics</strong><br/>
+<em>Portfolio KPIs grouped by currency: budget, actuals and variance, project by project.</em><br/><br/>
+<img src="docs/screenshots/gallery/analytics.jpg" alt="Cross-project analytics grouped by currency" width="420" />
+</td>
+</tr>
+<tr>
+<td align="center" colspan="2">
+<strong>Finance &amp; Earned Value</strong><br/>
+<em>Budgets, invoices, payments and earned value tracked against the estimate.</em><br/><br/>
+<img src="docs/screenshots/gallery/finance.jpg" alt="Finance and earned value management" width="420" />
+</td>
+</tr>
+</table>
+
+---
+
 ## Key Features
 
 ### <picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme-icons/graph-dark.svg"><img src="docs/readme-icons/graph-light.svg" width="14" align="center" alt=""></picture> Bill of Quantities (BOQ) Management

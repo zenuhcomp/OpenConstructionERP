@@ -811,6 +811,114 @@ const GITHUB_REPO = 'datadrivenconstruction/OpenConstructionERP';
 const MAX_BODY_BYTES = 7800;
 
 /**
+ * Route prefix → human component name, longest-prefix-wins.
+ *
+ * The bug report previously derived the "component" from a raw pathname,
+ * which named the wrong screen (e.g. a deep-linked `/bim/<uuid>` reported as
+ * the root). This table maps the current route to the screen the user is
+ * actually on so a filed report points the maintainer at the right surface
+ * (#168). Order does not matter — ``deriveComponentFromRoute`` picks the
+ * longest matching prefix, so `/bim/federations` beats `/bim`.
+ */
+const ROUTE_COMPONENT_MAP: ReadonlyArray<readonly [string, string]> = [
+  ['/bim/federations', 'BIM Federations'],
+  ['/bim/rules', 'BIM Rules'],
+  ['/bim', 'BIM Viewer'],
+  ['/clash', 'Clash Detection'],
+  ['/coordination', 'Model Coordination'],
+  ['/assets', 'Asset Register'],
+  ['/data-explorer', 'Data Explorer'],
+  ['/match-elements', 'Match Elements'],
+  ['/boq', 'BOQ'],
+  ['/templates', 'BOQ Templates'],
+  ['/costs', 'Cost Database'],
+  ['/catalog', 'Resource Catalog'],
+  ['/assemblies', 'Assemblies'],
+  ['/validation', 'Validation'],
+  ['/compliance', 'Compliance'],
+  ['/quantities', 'Quantity Takeoff'],
+  ['/takeoff', 'PDF Takeoff'],
+  ['/dwg-takeoff', 'DWG Takeoff'],
+  ['/schedule', 'Schedule'],
+  ['/5d', '5D Cost Model'],
+  ['/analytics', 'Analytics'],
+  ['/dashboards', 'Dashboards'],
+  ['/reporting', 'Reporting'],
+  ['/reports', 'Reports'],
+  ['/tendering', 'Tendering'],
+  ['/changeorders', 'Change Orders'],
+  ['/photos', 'Project Photos'],
+  ['/files', 'Files'],
+  ['/risks', 'Risk Register'],
+  ['/markups', 'Markups'],
+  ['/punchlist', 'Punch List'],
+  ['/field-reports', 'Field Reports'],
+  ['/finance', 'Finance'],
+  ['/procurement', 'Procurement'],
+  ['/safety', 'Safety'],
+  ['/contacts', 'Contacts'],
+  ['/tasks', 'Tasks'],
+  ['/rfi', 'RFI'],
+  ['/submittals', 'Submittals'],
+  ['/correspondence', 'Correspondence'],
+  ['/cde', 'CDE'],
+  ['/transmittals', 'Transmittals'],
+  ['/meetings', 'Meetings'],
+  ['/inspections', 'Inspections'],
+  ['/ncr', 'NCR'],
+  ['/users', 'User Management'],
+  ['/admin', 'Admin'],
+  ['/approval-routes', 'Approval Routes'],
+  ['/modules', 'Modules'],
+  ['/setup', 'Setup'],
+  ['/settings', 'Settings'],
+  ['/integrations', 'Integrations'],
+  ['/about', 'About'],
+  ['/project-intelligence', 'Project Intelligence'],
+  ['/service', 'Service & Maintenance'],
+  ['/equipment', 'Equipment & Fleet'],
+  ['/daily-diary', 'Daily Diary'],
+  ['/portal', 'Subcontractor Portal'],
+  ['/resources', 'Resources & Crew'],
+  ['/contracts', 'Contracts'],
+  ['/ai-estimate', 'AI Quick Estimate'],
+  ['/ai-agents', 'AI Agents'],
+  ['/advisor', 'AI Cost Advisor'],
+  ['/chat', 'AI Chat'],
+  ['/projects', 'Projects'],
+];
+
+/**
+ * Resolve the human-readable component/screen name for a pathname.
+ *
+ * Picks the longest matching prefix from ``ROUTE_COMPONENT_MAP`` so nested
+ * routes resolve to the most specific screen. A pathname inside a project
+ * (``/projects/<id>/finance``) is matched by stripping the project prefix
+ * first, then falling back to the project route. ``/`` (root) and anything
+ * unknown resolve to a sensible generic ("Dashboard").
+ */
+export function deriveComponentFromRoute(pathname: string): string {
+  if (!pathname || pathname === '/') return 'Dashboard';
+  // Nested project routes carry the feature after /projects/<id>/. Match the
+  // feature segment first so /projects/<id>/finance reports as "Finance"
+  // rather than "Projects".
+  const projectNested = pathname.match(/^\/projects\/[^/]+\/(.+)$/);
+  const candidate = projectNested ? `/${projectNested[1]}` : pathname;
+  let best: string | null = null;
+  let bestLen = -1;
+  for (const [prefix, name] of ROUTE_COMPONENT_MAP) {
+    if (
+      (candidate === prefix || candidate.startsWith(prefix + '/')) &&
+      prefix.length > bestLen
+    ) {
+      best = name;
+      bestLen = prefix.length;
+    }
+  }
+  return best ?? 'Dashboard';
+}
+
+/**
  * Build the GitHub "new issue" URL pre-filled with environment + last error.
  *
  * Returns `{ url, body }` so callers can fall back to clipboard when the
@@ -818,7 +926,9 @@ const MAX_BODY_BYTES = 7800;
  * contains user JWT, email, or other PII — `getLastError()` returns
  * already-anonymized strings via `errorLogger.anonymize()`.
  */
-function buildBugReportUrl(t: (key: string, opts?: { defaultValue?: string }) => string): {
+function buildBugReportUrl(
+  t: (key: string, opts?: { defaultValue?: string; [k: string]: unknown }) => string,
+): {
   url: string;
   body: string;
   title: string;
@@ -829,12 +939,15 @@ function buildBugReportUrl(t: (key: string, opts?: { defaultValue?: string }) =>
     ? `\`\`\`\n${last.message}\n${stackLines}\n\`\`\``
     : t('app.report_bug_no_error', { defaultValue: '_No error captured during this session._' });
 
+  const component = deriveComponentFromRoute(window.location.pathname);
+
   const body = [
     '### Description',
     '<!-- describe what you were doing -->',
     '',
     '### Environment',
     `- App version: ${APP_VERSION}`,
+    `- Component: ${component}`,
     `- Page: ${window.location.pathname}${window.location.search}`,
     `- User agent: ${navigator.userAgent}`,
     `- Build: ${APP_BUILD_FINGERPRINT}`,
@@ -855,7 +968,12 @@ function buildBugReportUrl(t: (key: string, opts?: { defaultValue?: string }) =>
     encoded = encodeURIComponent(safeBody);
   }
 
-  const title = t('app.report_bug_title_default', { defaultValue: 'Bug report from in-app menu' });
+  // Name the screen in the title so triage knows the affected surface at a
+  // glance (#168). i18n interpolation keeps the component verbatim.
+  const title = t('app.report_bug_title_component', {
+    defaultValue: '[{{component}}] Bug report from in-app menu',
+    component,
+  });
   const encodedTitle = encodeURIComponent(title);
   const url = GITHUB_REPO
     ? `https://github.com/${GITHUB_REPO}/issues/new?title=${encodedTitle}&body=${encoded}`

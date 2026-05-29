@@ -321,7 +321,16 @@ class QMSService:
         self,
         inspection_id: uuid.UUID,
         data: InspectionSignatureCreate,
+        *,
+        default_signer_user_id: uuid.UUID | None = None,
     ) -> QMSInspectionSignature:
+        """Record a sign-off against an inspection.
+
+        The signer is resolved as ``data.signer_user_id`` when supplied
+        (sign on behalf of another member), otherwise ``default_signer_user_id``
+        — the authenticated caller. This lets the UI "sign as me" without
+        hand-typing a UUID.
+        """
         inspection = await self.repo.get_inspection(inspection_id)
         if inspection is None:
             raise ValueError(f"Inspection {inspection_id} not found")
@@ -329,24 +338,47 @@ class QMSService:
             raise ValueError(
                 f"Cannot sign an inspection in status '{inspection.status}'",
             )
+        signer_user_id = data.signer_user_id or default_signer_user_id
+        if signer_user_id is None:
+            raise ValueError("signer_user_id is required")
         # Dedup: one (user, role) signature per inspection. Two distinct
         # roles on the same user are still allowed (e.g. GC inspector +
         # designer reviewer when one person wears both hats).
         existing = await self.repo.list_signatures(inspection_id)
         for prior in existing:
-            if prior.signer_user_id == data.signer_user_id and prior.signer_role == data.signer_role:
+            if prior.signer_user_id == signer_user_id and prior.signer_role == data.signer_role:
                 raise ValueError(
                     f"Signer has already signed this inspection in role '{data.signer_role}'",
                 )
         sig = QMSInspectionSignature(
             inspection_id=inspection_id,
-            signer_user_id=data.signer_user_id,
+            signer_user_id=signer_user_id,
             signer_role=data.signer_role,
             signed_at=_utc_now_iso(),
             signature_method=data.signature_method,
             comments=data.comments,
         )
         return await self.repo.add_signature(sig)
+
+    async def required_signatures(self, inspection: QMSInspection) -> int:
+        """Resolve how many signatures this inspection needs to complete.
+
+        Mirrors :meth:`complete_inspection`: an inspection linked to an ITP
+        item inherits that item's ``signatories_required`` (default 1), so
+        the UI can show ``collected/required`` and gate the Complete button.
+        """
+        required = 1
+        if inspection.itp_item_id is not None:
+            item = await self.repo.get_itp_item(inspection.itp_item_id)
+            if item is not None:
+                required = item.signatories_required
+        return required
+
+    async def list_signatures(
+        self,
+        inspection_id: uuid.UUID,
+    ) -> list[QMSInspectionSignature]:
+        return await self.repo.list_signatures(inspection_id)
 
     async def complete_inspection(
         self,
@@ -688,13 +720,33 @@ class QMSService:
             raise ValueError(
                 f"Cannot escalate an NCR in terminal status '{ncr.status}'",
             )
-        if ncr.linked_variation_id is not None and variation_id is None:
+        if variation_id is None:
             raise ValueError(
-                "NCR is already linked to a variation; pass an explicit variation_id to re-link",
+                "Escalation requires an existing variation order id "
+                "(variation_id); the QMS module does not fabricate one",
             )
-        # Generate a UUID if caller did not supply one — production glue
-        # code would replace this with a real ChangeOrder lookup.
-        var_id = variation_id or uuid.uuid4()
+        if ncr.linked_variation_id is not None and ncr.linked_variation_id != variation_id:
+            raise ValueError(
+                "NCR is already linked to a different variation; unlink it first",
+            )
+        # Validate the variation exists and belongs to the same project so
+        # the link always points at a real VariationOrder row. Read-only
+        # lazy import keeps QMS loadable without the variations module in
+        # minimal test fixtures.
+        try:
+            from app.modules.variations.repository import VariationOrderRepository
+
+            vo_repo = VariationOrderRepository(self.session)
+            variation = await vo_repo.get_by_id(variation_id)
+        except ImportError:
+            variation = None
+        if variation is None:
+            raise ValueError(f"Variation {variation_id} not found")
+        if getattr(variation, "project_id", None) != ncr.project_id:
+            raise ValueError(
+                "Variation belongs to a different project than the NCR",
+            )
+        var_id = variation_id
         await self.repo.update_ncr_fields(ncr_id, linked_variation_id=var_id)
         await self.session.refresh(ncr)
 
@@ -1041,6 +1093,79 @@ class QMSService:
             )
         return ""
 
+    async def _project_currency_and_fx(
+        self,
+        project_id: uuid.UUID,
+    ) -> tuple[str, dict[str, str]]:
+        """Load the project base currency and its FX map ``{code: rate}``.
+
+        ``rate`` is units of base currency per 1 unit of the foreign
+        currency (the same convention BOQ uses). Returns ``("", {})`` if
+        the project can't be loaded so the COPQ computation degrades
+        gracefully rather than raising.
+        """
+        try:
+            from app.modules.projects.repository import ProjectRepository
+
+            proj_repo = ProjectRepository(self.session)
+            project = await proj_repo.get_by_id(project_id)
+        except Exception:  # noqa: BLE001 — defensive log-and-degrade
+            logger.exception(
+                "QMS COPQ: project lookup failed for %s",
+                project_id,
+            )
+            return "", {}
+        if project is None:
+            return "", {}
+        base = (getattr(project, "currency", "") or "").strip().upper()
+        fx_map: dict[str, str] = {}
+        raw = getattr(project, "fx_rates", None)
+        if isinstance(raw, list):
+            for entry in raw:
+                if not isinstance(entry, dict):
+                    continue
+                code = str(entry.get("code") or "").strip().upper()
+                rate = str(entry.get("rate") or "").strip()
+                if code and rate:
+                    fx_map[code] = rate
+        return base, fx_map
+
+    async def _ncr_cost_total_in_base(
+        self,
+        project_id: uuid.UUID,
+        *,
+        requested_currency: str = "",
+    ) -> tuple[Decimal, str, dict[str, Decimal]]:
+        """Sum NCR cost impacts converted into the project base currency.
+
+        Mirrors ``boq.service._position_total_in_base``: each per-currency
+        bucket priced in a non-base currency contributes
+        ``amount * fx_rates[code]``. A bucket whose currency has no FX rate
+        is summed in its own units anyway (never dropped) so a missing rate
+        degrades visibly. Returns ``(total_in_base, base_currency,
+        per_currency_breakdown)`` — the breakdown lets the UI surface a
+        mixed-currency warning when conversion was incomplete.
+        """
+        by_currency = await self.repo.sum_ncr_cost_impact_by_currency(project_id)
+        base, fx_map = await self._project_currency_and_fx(project_id)
+        if requested_currency:
+            base = requested_currency.strip().upper()
+        total = Decimal("0")
+        for code, amount in by_currency.items():
+            if code and base and code != base:
+                rate = fx_map.get(code)
+                if rate:
+                    try:
+                        factor = Decimal(str(rate))
+                    except (ArithmeticError, ValueError):
+                        factor = Decimal("1")
+                    if factor > 0:
+                        total += amount * factor
+                        continue
+            # Same currency, no base known, or missing rate — add raw.
+            total += amount
+        return total, base, by_currency
+
     async def compute_copq(
         self,
         project_id: uuid.UUID,
@@ -1055,16 +1180,19 @@ class QMSService:
         """
         per_punch = rework_cost_per_punch or _DEFAULT_REWORK_COST_PER_PUNCH
 
-        ncr_total_raw = await self.repo.sum_ncr_cost_impact(project_id)
-        # SQLite coalesce of Numeric to integer/float — coerce to Decimal.
-        ncr_total = Decimal(str(ncr_total_raw or 0))
+        # FX-convert each NCR currency bucket into the project base currency
+        # rather than coalesce-summing mixed currencies (project money rule).
+        ncr_total, base_currency, _breakdown = await self._ncr_cost_total_in_base(
+            project_id,
+            requested_currency=currency,
+        )
         open_punch = await self.repo.count_open_punch(project_id)
         rework_total = per_punch * Decimal(open_punch)
         copq_total = ncr_total + rework_total
 
         resolved_currency = await self._resolve_project_currency(
             project_id,
-            currency,
+            currency or base_currency,
         )
 
         logger.info(
@@ -1119,15 +1247,19 @@ class QMSService:
         warranty = Decimal(str(warranty_cost or 0))
         delay = Decimal(str(delay_penalty_cost or 0))
 
-        ncr_total_raw = await self.repo.sum_ncr_cost_impact(project_id)
-        ncr_total = Decimal(str(ncr_total_raw or 0))
+        # FX-convert each NCR currency bucket into the project base currency
+        # rather than coalesce-summing mixed currencies (project money rule).
+        ncr_total, base_currency, _breakdown = await self._ncr_cost_total_in_base(
+            project_id,
+            requested_currency=currency,
+        )
         open_punch = await self.repo.count_open_punch(project_id)
         rework_total = per_punch * Decimal(open_punch)
         copq_total = ncr_total + rework_total + warranty + delay
 
         resolved_currency = await self._resolve_project_currency(
             project_id,
-            currency,
+            currency or base_currency,
         )
 
         logger.info(

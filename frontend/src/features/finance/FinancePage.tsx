@@ -117,23 +117,46 @@ interface Invoice {
   updated_at: string;
 }
 
-type InvoiceWire = Omit<Invoice, 'counterparty_name'> & {
+// The API (InvoiceResponse) emits the canonical wire names —
+// invoice_direction / invoice_date / currency_code / amount_total — rather
+// than the legacy display aliases the table reads (direction / issue_date /
+// currency / amount). The list/table columns and totals consume the display
+// aliases, so normaliseInvoice MUST map every one of them, not just the
+// counterparty name. Reading inv.amount / inv.currency / inv.issue_date off a
+// raw wire row otherwise yields undefined (em-dash amount, blank date).
+type InvoiceWire = Omit<
+  Invoice,
+  'counterparty_name' | 'direction' | 'issue_date' | 'amount' | 'currency'
+> & {
   counterparty_name?: string | null;
   contact_id?: string | null;
+  direction?: 'payable' | 'receivable';
+  invoice_direction?: 'payable' | 'receivable';
+  issue_date?: string | null;
+  invoice_date?: string | null;
+  amount?: number | string | null;
   amount_total?: string | null;
+  currency?: string | null;
+  currency_code?: string | null;
 };
 
 function normaliseInvoice(i: InvoiceWire): Invoice {
+  const amountRaw = i.amount_total ?? i.amount;
   return {
     ...i,
     counterparty_name: i.counterparty_name ?? i.contact_id ?? '',
+    direction: i.invoice_direction ?? i.direction ?? 'payable',
+    issue_date: i.invoice_date ?? i.issue_date ?? '',
+    amount: amountRaw != null ? Number(amountRaw) : 0,
+    currency: i.currency_code ?? i.currency ?? '',
   } as Invoice;
 }
 
 interface Payment {
   id: string;
   invoice_id: string;
-  invoice_number: string;
+  // Enriched server-side from the parent invoice (PaymentResponse.invoice_number).
+  invoice_number?: string | null;
   // Backend serialises Decimal as string ("250000.00") per Wave 8 sweep.
   // Accept both for back-compat with older fixtures.
   amount: string | number;
@@ -141,9 +164,11 @@ interface Payment {
   currency?: string;
   currency_code?: string;
   payment_date: string;
-  method: string;
-  reference: string;
-  status: string;
+  reference?: string | null;
+  // Derived lifecycle label from PaymentResponse: "completed" | "refunded".
+  // (A payment is an immutable ledger entry, so it has no pending state.)
+  status?: string;
+  is_refund?: boolean;
   created_at: string;
 }
 
@@ -290,9 +315,16 @@ interface FinanceDashboardData {
   budget_warning_level: string;
   total_payments: number;
   cash_flow_net: number;
-  /** Dominant project currency resolved server-side (budgets → invoices).
-   *  Empty string when no financial record carries a currency yet. */
+  /** Base currency the totals are expressed in. For a project-scoped
+   *  dashboard the server FX-converts every foreign record into this
+   *  currency via Project.fx_rates; empty when no record carries one. */
   currency: string;
+  /** True when financial records span more than one currency (totals are
+   *  still in `currency`, converted where an FX rate exists). */
+  mixed_currencies?: boolean;
+  /** Foreign currency codes present but with no FX rate configured — their
+   *  amounts are summed unconverted, so the total is approximate. */
+  missing_fx_rates?: string[];
 }
 
 function FinanceSummaryCards({ projectId }: { projectId: string }) {
@@ -314,17 +346,18 @@ function FinanceSummaryCards({ projectId }: { projectId: string }) {
   // backend cannot resolve one (no priced records yet) MoneyDisplay still
   // renders, falling back to the user's preferred currency for the symbol.
   //
-  // Wave-10 follow-up: backend ``/v1/finance/dashboard/`` collapses mixed
-  // currencies to a single "dominant" code server-side, so we cannot do
-  // a per-currency split here yet (the per-currency totals are not in
-  // the payload). When the backend grows a ``totals_by_currency`` array
-  // — see /v1/property-dev/dashboards/cashflow_waterfall/ for the shape
-  // — switch these cards to <MultiCurrencyTotal variant="kpi">. The
-  // single-currency MoneyDisplay below is preserved as a transitional
-  // fallback. Tracked separately from this PR.
+  // The backend now FX-converts every foreign-currency record into the
+  // project base currency (via Project.fx_rates, mirroring boq.service) and
+  // returns the totals already expressed in `currency`, so the single-
+  // currency cards below are correct. When records span more than one
+  // currency it also returns `mixed_currencies` / `missing_fx_rates` so we
+  // can surface an honest "converted / approximate" hint rather than passing
+  // off a blended number as a native-currency sum.
   const currency = dashboard?.currency || undefined;
   const consumedPct = Number(dashboard?.budget_consumed_pct ?? 0);
   const warningLevel = dashboard?.budget_warning_level ?? 'normal';
+  const mixedCurrencies = !!dashboard?.mixed_currencies;
+  const missingFx = dashboard?.missing_fx_rates ?? [];
 
   if (
     !dashboard ||
@@ -398,6 +431,27 @@ function FinanceSummaryCards({ projectId }: { projectId: string }) {
           </Card>
         ))}
       </div>
+
+      {/* Mixed-currency honesty hint. When records span several currencies
+          the totals above are FX-converted into the project currency; if a
+          currency has no configured rate it was summed unconverted, so we
+          flag the figure as approximate rather than presenting it as exact. */}
+      {mixedCurrencies && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+          {missingFx.length > 0
+            ? t('finance.mixed_currency_missing_fx', {
+                defaultValue:
+                  'Totals are converted to {{currency}}. No FX rate is set for {{codes}}, so amounts in those currencies are added unconverted and the total is approximate.',
+                currency: currency || '',
+                codes: missingFx.join(', '),
+              })
+            : t('finance.mixed_currency_converted', {
+                defaultValue:
+                  'Records span multiple currencies; totals are converted to {{currency}} using the project exchange rates.',
+                currency: currency || '',
+              })}
+        </div>
+      )}
 
       {/* Budget consumption — makes the budget→actual money flow legible at
           a glance and surfaces the over-budget risk the cards only imply. */}
@@ -1583,7 +1637,9 @@ function InvoicesTab({ projectId }: { projectId: string }) {
       subtotal,
       tax,
       amount: total,
-      currency: inv.currency_code || inv.currency || 'EUR',
+      // Never hardcode EUR — fall back to the project's resolved currency so
+      // an editor on a BRL/USD/etc. project keeps that currency (task #217).
+      currency: inv.currency_code || inv.currency || projectCurrency || '',
       description: inv.notes ?? inv.description ?? '',
     });
     setInvoiceErrors({});
@@ -2447,7 +2503,7 @@ function PaymentsTab({
     return { total, currency };
   }, [payments]);
 
-  if (isLoading) return <SkeletonTable rows={5} columns={6} />;
+  if (isLoading) return <SkeletonTable rows={5} columns={5} />;
 
   if (isError) return <RecoveryCard error={error} onRetry={() => refetch()} />;
 
@@ -2502,9 +2558,6 @@ function PaymentsTab({
                 {t('finance.amount', { defaultValue: 'Amount' })}
               </th>
               <th className="px-4 py-3 text-left font-medium text-content-tertiary">
-                {t('finance.method', { defaultValue: 'Method' })}
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-content-tertiary">
                 {t('finance.reference', { defaultValue: 'Reference' })}
               </th>
               <th className="px-4 py-3 text-center font-medium text-content-tertiary">
@@ -2519,7 +2572,7 @@ function PaymentsTab({
                 className="border-b border-border-light hover:bg-surface-secondary/30 transition-colors"
               >
                 <td className="px-4 py-3 font-mono text-xs text-content-primary">
-                  {p.invoice_number}
+                  {p.invoice_number || '\u2014'}
                 </td>
                 <td className="px-4 py-3 text-content-secondary">
                   <DateDisplay value={p.payment_date} />
@@ -2527,21 +2580,21 @@ function PaymentsTab({
                 <td className="px-4 py-3 text-right">
                   <MoneyDisplay amount={p.amount} currency={p.currency_code || p.currency} />
                 </td>
-                <td className="px-4 py-3 text-content-secondary capitalize">
-                  {p.method}
-                </td>
                 <td className="px-4 py-3 text-content-secondary font-mono text-xs">
                   {p.reference || '\u2014'}
                 </td>
                 <td className="px-4 py-3 text-center">
-                  <Badge
-                    variant={p.status === 'completed' ? 'success' : 'warning'}
-                    size="sm"
-                  >
-                    {t(`finance.payment_status_${p.status}`, {
-                      defaultValue: p.status,
-                    })}
-                  </Badge>
+                  {(() => {
+                    // PaymentResponse derives status server-side: "completed"
+                    // for a forward payment, "refunded" for a refund. Fall
+                    // back to the is_refund flag for older payloads.
+                    const status = p.status || (p.is_refund ? 'refunded' : 'completed');
+                    return (
+                      <Badge variant={status === 'refunded' ? 'warning' : 'success'} size="sm">
+                        {t(`finance.payment_status_${status}`, { defaultValue: status })}
+                      </Badge>
+                    );
+                  })()}
                 </td>
               </tr>
             ))}
@@ -2555,7 +2608,7 @@ function PaymentsTab({
                 <td className="px-4 py-3 text-right">
                   <MoneyDisplay amount={paymentTotals.total} currency={paymentTotals.currency} />
                 </td>
-                <td colSpan={3} />
+                <td colSpan={2} />
               </tr>
             </tfoot>
           )}

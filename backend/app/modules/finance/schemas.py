@@ -289,6 +289,15 @@ class PaymentResponse(BaseModel):
     reference: str | None = None
     idempotency_key: str | None = None
     is_refund: bool = False
+    # Enriched server-side from the parent invoice so the payments table can
+    # show a human-readable reference instead of a raw invoice UUID. Resolved
+    # in the router (mirrors the counterparty-name enrichment on invoices).
+    invoice_number: str | None = None
+    # Derived lifecycle label. Payments are immutable ledger entries created
+    # when an invoice is paid, so a forward payment is "completed" and a
+    # refund is "refunded". Lets the UI render a status badge without
+    # inventing a column the model never stored.
+    status: str = "completed"
     metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
@@ -530,11 +539,22 @@ class FinanceDashboardResponse(BaseModel):
     budget_warning_level: str = "normal"  # "normal" | "caution" | "critical"
     total_payments: Decimal = Decimal("0")
     cash_flow_net: float = 0.0
-    # Dominant project currency (budget lines preferred, invoices as
-    # fallback). Empty string when no financial record carries a currency
-    # yet — the UI then renders amounts without a currency symbol rather
-    # than mislabelling them (task #217).
+    # Base currency the totals above are expressed in. For a project-scoped
+    # dashboard this is the project's own currency and every foreign-currency
+    # record has been FX-converted into it via Project.fx_rates; for a
+    # cross-project rollup it is the dominant currency. Empty string when no
+    # financial record carries a currency yet — the UI then renders amounts
+    # without a currency symbol rather than mislabelling them (task #217).
     currency: str = ""
+    # True when financial records span more than one currency. The totals are
+    # still expressed in ``currency`` (converted where an FX rate exists), but
+    # the UI can surface a "mixed currencies" hint so the figure isn't read as
+    # a single native-currency sum.
+    mixed_currencies: bool = False
+    # Foreign currency codes present on records but with no FX rate configured
+    # on the project. Their amounts are summed unconverted (never dropped), so
+    # the UI can warn that the total is approximate until a rate is supplied.
+    missing_fx_rates: list[str] = Field(default_factory=list)
 
     @field_serializer(
         "total_payable",

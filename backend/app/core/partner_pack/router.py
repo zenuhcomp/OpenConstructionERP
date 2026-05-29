@@ -6,14 +6,32 @@ import logging
 from importlib import resources
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, Field
 
+from app.core.partner_pack.apply import (
+    apply_pack,
+    build_preview,
+    get_applied_info,
+    unapply,
+)
 from app.core.partner_pack.discovery import (
     discover_packs,
     get_active_pack,
     get_active_pack_module_name,
     get_pack_by_slug,
+    read_pack_file,
+    reset_cache,
 )
+from app.dependencies import RequirePermission
+
+_IMAGE_MEDIA_TYPES = {
+    "svg": "image/svg+xml",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +59,82 @@ def list_installed() -> dict[str, Any]:
         "active_slug": active.slug if active else None,
         "installed": [m.to_public_dict() for m in discover_packs()],
     }
+
+
+# ── In-app apply / update / un-apply ────────────────────────────────────────
+
+
+class ApplyRequest(BaseModel):
+    """Body for POST /apply."""
+
+    slug: str = Field(..., description="Pack slug to apply.")
+    confirm_disables: bool = Field(
+        default=False,
+        description="Allow the apply to DISABLE modules the pack wants hidden.",
+    )
+    install_demo: bool = Field(
+        default=True,
+        description="Also install the pack's flagship country demo project (idempotent).",
+    )
+
+
+@router.get("/applied", summary="Currently applied pack + update status")
+def applied_status() -> dict[str, Any]:
+    """Return which pack is applied in-app and whether a newer version exists."""
+    return get_applied_info()
+
+
+@router.get("/apply-preview/{slug}", summary="Dry-run preview of applying a pack")
+def apply_preview(slug: str) -> dict[str, Any]:
+    """Return the field-by-field effect plan without changing anything."""
+    try:
+        return build_preview(slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post(
+    "/apply",
+    summary="Apply a pack to this installation (admin)",
+    dependencies=[Depends(RequirePermission("admin"))],
+)
+async def apply(body: ApplyRequest, request: Request) -> dict[str, Any]:
+    """Apply the pack: enable its modules, co-brand, record defaults."""
+    try:
+        return await apply_pack(
+            body.slug,
+            confirm_disables=body.confirm_disables,
+            install_demo=body.install_demo,
+            app=request.app,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post(
+    "/unapply",
+    summary="Remove the applied pack (admin)",
+    dependencies=[Depends(RequirePermission("admin"))],
+)
+async def unapply_pack(request: Request) -> dict[str, Any]:
+    """Drop co-branding and restore any modules the apply disabled."""
+    return await unapply(app=request.app)
+
+
+@router.post(
+    "/rescan",
+    summary="Re-scan installed packs without a restart (admin)",
+    dependencies=[Depends(RequirePermission("admin"))],
+)
+def rescan() -> dict[str, Any]:
+    """Bust the discovery cache so on-disk packs are re-read.
+
+    Note: brand-new pip-installed (entry-point) packs may still need a restart;
+    this reliably picks up source-checkout packs under ``packs/``.
+    """
+    reset_cache()
+    packs = discover_packs()
+    return {"count": len(packs), "slugs": [m.slug for m in packs]}
 
 
 def _read_pack_resource(filename: str) -> bytes | None:
@@ -89,6 +183,30 @@ def partner_logo() -> Response:
         content=data,
         media_type=media_type,
         # Logos rarely change; cache aggressively but allow revalidation.
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@router.get("/logo/{slug}", summary="Stream a specific pack's logo by slug")
+def partner_logo_by_slug(slug: str) -> Response:
+    """Stream any discovered pack's logo (not just the active one).
+
+    The /modules Partner Packs grid uses this to render each company's real
+    logo. Returns 404 if the pack is not installed or ships no logo file.
+    """
+    m = get_pack_by_slug(slug)
+    if not m:
+        raise HTTPException(status_code=404, detail=f"Pack '{slug}' not installed")
+    data = read_pack_file(slug, m.branding.logo_path)
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Pack '{slug}' has no logo at {m.branding.logo_path!r}",
+        )
+    ext = m.branding.logo_path.rsplit(".", 1)[-1].lower()
+    return Response(
+        content=data,
+        media_type=_IMAGE_MEDIA_TYPES.get(ext, "application/octet-stream"),
         headers={"Cache-Control": "public, max-age=86400"},
     )
 

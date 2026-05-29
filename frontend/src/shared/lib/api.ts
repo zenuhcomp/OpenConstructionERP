@@ -24,6 +24,32 @@ const BASE_URL = '/api';
  */
 export const API_BASE = BASE_URL;
 
+/**
+ * Default client-side request timeouts (ms).
+ *
+ * Most interactive reads/writes resolve in well under a second; a snappy
+ * default keeps a stalled endpoint from blocking the UI for a minute and a
+ * half (the old 44.3s GET budget combined with a React-Query retry meant a
+ * single hung GET could freeze a screen for ~88s). The long budget is kept
+ * for genuinely heavy operations (CWICR import, AI estimation, CAD/BIM
+ * conversion) and must be opted into explicitly via `longRunning: true`.
+ */
+const DEFAULT_GET_TIMEOUT_MS = 15_000;
+const DEFAULT_MUTATION_TIMEOUT_MS = 30_000;
+const LONG_RUNNING_TIMEOUT_MS = 300_000; // 5 min — import / AI / CAD only
+
+/**
+ * Request init accepted by the typed API helpers.
+ *
+ * Extends the standard `RequestInit` with an opt-in `longRunning` flag that
+ * raises the abort timeout to {@link LONG_RUNNING_TIMEOUT_MS} for heavy
+ * import / AI / CAD operations. Omit it for normal interactive calls so a
+ * stalled request fails fast with a clear timeout error.
+ */
+export interface ApiRequestInit extends RequestInit {
+  longRunning?: boolean;
+}
+
 /** Retrieve the stored JWT token from the auth store. */
 function getToken(): string | null {
   return useAuthStore.getState().accessToken;
@@ -230,7 +256,7 @@ async function request<TResponse>(
   method: string,
   path: string,
   body?: unknown,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<TResponse> {
   const headers = buildHeaders(init?.headers);
 
@@ -238,12 +264,25 @@ async function request<TResponse>(
     headers.set('Content-Type', 'application/json');
   }
 
+  // Abort budget: fast by default, long only when explicitly opted in for
+  // heavy import / AI / CAD work. GET and mutations get distinct defaults.
+  const timeoutMs = init?.longRunning
+    ? LONG_RUNNING_TIMEOUT_MS
+    : method === 'GET'
+      ? DEFAULT_GET_TIMEOUT_MS
+      : DEFAULT_MUTATION_TIMEOUT_MS;
+  const controller = new AbortController();
+  // Only attribute an abort to our own timeout when we actually own the
+  // signal — a caller-supplied signal aborts for its own reasons.
+  const ownsSignal = init?.signal === undefined;
+  let didTimeout = false;
+  const timeoutId = setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, timeoutMs);
+
   let response: Response;
   try {
-    // 5 minute timeout for long operations (CWICR import, AI estimation, CAD conversion)
-    const controller = new AbortController();
-    const timeoutMs = method === 'GET' ? 44_300 : 300_000; // ~44s GET, 5 min POST
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     response = await fetch(`${BASE_URL}${path}`, {
       ...init,
       method,
@@ -253,6 +292,27 @@ async function request<TResponse>(
     });
     clearTimeout(timeoutId);
   } catch (err) {
+    clearTimeout(timeoutId);
+    // A timeout fired by our own controller (not a caller-supplied signal).
+    // Surface it as a clear, actionable timeout error rather than a generic
+    // "Failed to fetch", and notify the user so the screen doesn't just sit
+    // on a spinner.
+    if (didTimeout && ownsSignal) {
+      const message = i18next.t('errors.timeout', {
+        defaultValue: 'The request took too long and was cancelled. Please try again.',
+      });
+      logError(new Error(`Request timeout after ${timeoutMs}ms: ${method} ${path}`), 'network', {
+        method,
+        path,
+        timeoutMs,
+      });
+      useToastStore.getState().addToast({
+        type: 'error',
+        title: i18next.t('errors.timeout_title', { defaultValue: 'Request timed out' }),
+        message,
+      });
+      throw new Error(message);
+    }
     // Log network errors
     logError(
       err instanceof Error ? err : new Error(String(err)),
@@ -357,7 +417,7 @@ async function request<TResponse>(
  */
 export async function apiGet<TResponse>(
   path: string,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<TResponse> {
   return request<TResponse>('GET', path, undefined, init);
 }
@@ -373,7 +433,7 @@ export async function apiGet<TResponse>(
 export async function apiPost<TResponse, TBody = unknown>(
   path: string,
   body?: TBody,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<TResponse> {
   return request<TResponse>('POST', path, body, init);
 }
@@ -384,7 +444,7 @@ export async function apiPost<TResponse, TBody = unknown>(
 export async function apiPatch<TResponse, TBody = unknown>(
   path: string,
   body?: TBody,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<TResponse> {
   return request<TResponse>('PATCH', path, body, init);
 }
@@ -395,7 +455,7 @@ export async function apiPatch<TResponse, TBody = unknown>(
 export async function apiPut<TResponse, TBody = unknown>(
   path: string,
   body?: TBody,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<TResponse> {
   return request<TResponse>('PUT', path, body, init);
 }
@@ -405,7 +465,7 @@ export async function apiPut<TResponse, TBody = unknown>(
  */
 export async function apiDelete<TResponse = void>(
   path: string,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<TResponse> {
   return request<TResponse>('DELETE', path, undefined, init);
 }

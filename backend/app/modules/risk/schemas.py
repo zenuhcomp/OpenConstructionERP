@@ -90,7 +90,7 @@ class RiskCreate(BaseModel):
     description: str = Field(default="", max_length=5000)
     category: str = Field(
         default="technical",
-        pattern=r"^(technical|financial|schedule|regulatory|environmental|safety)$",
+        pattern=r"^(technical|financial|schedule|regulatory|environmental|safety|procurement)$",
     )
     probability: float = Field(default=0.5, ge=0.0, le=1.0)
     impact_cost: Decimal = Field(default=Decimal("0"), ge=0)
@@ -128,7 +128,7 @@ class RiskUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=5000)
     category: str | None = Field(
         default=None,
-        pattern=r"^(technical|financial|schedule|regulatory|environmental|safety)$",
+        pattern=r"^(technical|financial|schedule|regulatory|environmental|safety|procurement)$",
     )
     probability: float | None = Field(default=None, ge=0.0, le=1.0)
     impact_cost: Decimal | None = Field(default=None, ge=0)

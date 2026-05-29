@@ -26,6 +26,8 @@ interface CostSource {
   code: string;
   description: string;
   rate: number;
+  /** ISO currency of the source rate. May be empty for legacy rows. */
+  currency?: string;
   unit: string;
   region: string;
 }
@@ -104,6 +106,59 @@ function renderMarkdown(text: string) {
   });
 }
 
+/* ── Provider detection ──────────────────────────────────────────── */
+
+/**
+ * Provider catalogue used for "is AI configured" + active-provider detection.
+ * `key` is the settings flag prefix (`<key>_api_key_set`); `match` are tokens
+ * looked for in `preferred_model` to map a model preference back to a provider.
+ */
+const PROVIDER_DISPLAY: ReadonlyArray<{ key: string; label: string; match: string[] }> = [
+  { key: 'anthropic', label: 'Anthropic Claude', match: ['claude', 'anthropic'] },
+  { key: 'openai', label: 'OpenAI', match: ['gpt', 'openai'] },
+  { key: 'gemini', label: 'Google Gemini', match: ['gemini', 'google'] },
+  { key: 'openrouter', label: 'OpenRouter', match: ['openrouter', 'router'] },
+  { key: 'mistral', label: 'Mistral AI', match: ['mistral'] },
+  { key: 'groq', label: 'Groq', match: ['groq', 'llama'] },
+  { key: 'deepseek', label: 'DeepSeek', match: ['deepseek'] },
+  { key: 'together', label: 'Together AI', match: ['together'] },
+  { key: 'fireworks', label: 'Fireworks AI', match: ['fireworks'] },
+  { key: 'perplexity', label: 'Perplexity', match: ['perplexity', 'sonar'] },
+  { key: 'cohere', label: 'Cohere', match: ['cohere', 'command'] },
+  { key: 'ai21', label: 'AI21 Labs', match: ['ai21', 'jamba'] },
+  { key: 'xai', label: 'xAI Grok', match: ['xai', 'grok'] },
+  { key: 'zhipu', label: 'Zhipu AI', match: ['zhipu', 'glm'] },
+  { key: 'baidu', label: 'Baidu ERNIE', match: ['baidu', 'ernie'] },
+  { key: 'yandex', label: 'Yandex GPT', match: ['yandex'] },
+  { key: 'gigachat', label: 'GigaChat', match: ['gigachat'] },
+  { key: 'kimi', label: 'Kimi', match: ['kimi', 'moonshot'] },
+  { key: 'ollama', label: 'Ollama', match: ['ollama'] },
+  { key: 'vllm', label: 'vLLM', match: ['vllm'] },
+];
+
+/**
+ * Derive the active-provider display name shown in the status pill.
+ *
+ * The settings API has no `provider` field; the active provider is implied by
+ * `preferred_model` (mapped via PROVIDER_DISPLAY.match) and, failing that, the
+ * first provider whose key is configured.
+ */
+function resolveActiveProvider(
+  s: Record<string, unknown>,
+  configured: ReadonlyArray<{ key: string; label: string }>,
+): string {
+  const preferred = String(s.preferred_model || '').toLowerCase();
+  if (preferred) {
+    const byModel = PROVIDER_DISPLAY.find((p) => p.match.some((m) => preferred.includes(m)));
+    // Only trust the model->provider mapping when that provider actually has a
+    // configured key; otherwise fall through to the first configured one.
+    if (byModel && configured.some((c) => c.key === byModel.key)) {
+      return byModel.label;
+    }
+  }
+  return configured.length > 0 ? configured[0]!.label : '';
+}
+
 /* ── Typing Indicator (3 dots) ───────────────────────────────────── */
 
 function TypingDots() {
@@ -179,7 +234,18 @@ function ChatBubble({
                 {s.code}: {s.description.slice(0, 50)}
                 {s.description.length > 50 ? '…' : ''}{' '}
                 <span className="font-medium">
-                  {s.rate} /{s.unit}
+                  {s.currency
+                    ? t('ai.advisor_source_rate', {
+                        defaultValue: '{{rate}} {{currency}}/{{unit}}',
+                        rate: s.rate,
+                        currency: s.currency,
+                        unit: s.unit,
+                      })
+                    : t('ai.advisor_source_rate_nocur', {
+                        defaultValue: '{{rate}}/{{unit}}',
+                        rate: s.rate,
+                        unit: s.unit,
+                      })}
                 </span>
               </p>
             ))}
@@ -282,6 +348,10 @@ export function AdvisorPage() {
       inputRef.current?.focus();
     },
     onError: (err) => {
+      // A cancelled in-flight request (user navigated away or fired a new
+      // send) surfaces as a DOMException with name 'AbortError'. That is not
+      // a failure — don't show a phantom error bubble or toast for it.
+      if (err.name === 'AbortError') return;
       addToast({
         type: 'error',
         title: t('ai.advisor_error', { defaultValue: 'AI Advisor Error' }),
@@ -309,16 +379,18 @@ export function AdvisorPage() {
   useEffect(() => {
     apiGet<Record<string, unknown>>('/v1/ai/settings/')
       .then((s) => {
-        const hasKey =
-          !!s.anthropic_api_key_set ||
-          !!s.openai_api_key_set ||
-          !!s.gemini_api_key_set ||
-          !!s.openrouter_api_key_set ||
-          !!s.mistral_api_key_set ||
-          !!s.groq_api_key_set ||
-          !!s.deepseek_api_key_set;
-        setAiConfigured(hasKey);
-        setAiProvider((s.provider as string) || '');
+        // Every provider whose key is set (and decryptable) reports a
+        // `<provider>_api_key_set` boolean. Treat the AI as configured when
+        // ANY of them is true — the previous list omitted half the providers
+        // (together/fireworks/perplexity/cohere/ai21/xai/kimi/zhipu/...),
+        // making those users see a false "not configured" warning.
+        const flag = (key: string) => !!s[`${key}_api_key_set`];
+        const configured = PROVIDER_DISPLAY.filter((p) => flag(p.key));
+        setAiConfigured(configured.length > 0);
+        // Derive the active provider from the preferred model first, falling
+        // back to the first configured key. AISettingsResponse has no
+        // `provider` field, so reading it always yielded '' (pill said "AI").
+        setAiProvider(resolveActiveProvider(s, configured));
       })
       .catch(() => setAiConfigured(false));
   }, []);

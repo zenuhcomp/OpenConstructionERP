@@ -23,10 +23,10 @@
  * map config to load.
  */
 
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Globe2,
   MapPin,
@@ -669,6 +669,7 @@ function GeoSearchOverlay({
 
 export function GeoHubPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const activeProjectId = useProjectContextStore((s) => s.activeProjectId);
   const [cursorCoords, setCursorCoords] = useState<GeoCursorCoords | null>(
     null,
@@ -752,6 +753,46 @@ export function GeoHubPage() {
       projects,
     }),
     [projects],
+  );
+
+  // Pin clicks: a single project pin deep-links into its project map; a
+  // cluster bubble flies the camera to the cluster centroid (closer
+  // altitude) so it visually expands into its members. Cross-module /
+  // search pins are a no-op on the global view (no source records here).
+  const handlePinSelect = useCallback(
+    (sel: { tag: string; clusterProjectIds?: string[] }) => {
+      const { tag, clusterProjectIds } = sel;
+      if (tag.startsWith('project:')) {
+        const projectId = tag.slice('project:'.length);
+        if (projectId) navigate(`/projects/${projectId}/geo`);
+        return;
+      }
+      if (tag.startsWith('cluster:')) {
+        // Compute the centroid of the cluster members and fly closer so
+        // the bubble breaks apart into individual pins.
+        const memberIds = new Set(clusterProjectIds ?? []);
+        const members = projects.filter((p) => memberIds.has(p.project_id));
+        if (members.length === 0) return;
+        let sumLat = 0;
+        let sumLon = 0;
+        let n = 0;
+        for (const m of members) {
+          const lat = Number(m.lat);
+          const lon = Number(m.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+          sumLat += lat;
+          sumLon += lon;
+          n += 1;
+        }
+        if (n === 0) return;
+        setFlyToTarget({
+          key: `cluster:${tag}:${Date.now()}`,
+          lat: sumLat / n,
+          lon: sumLon / n,
+        });
+      }
+    },
+    [navigate, projects],
   );
 
   // 404 from /api/v1/geo-hub/projects means the running backend is older
@@ -918,6 +959,7 @@ export function GeoHubPage() {
             }
             flyToTarget={flyToTarget}
             searchPin={searchPin}
+            onPinSelect={handlePinSelect}
             onMouseMove={setCursorCoords}
             onCameraChange={setCameraState}
             onViewerReady={setCesiumRuntime}

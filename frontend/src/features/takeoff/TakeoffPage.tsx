@@ -209,7 +209,9 @@ function DropZone({
       if (disabled) return;
 
       const files = Array.from(e.dataTransfer.files).filter(
-        (f) => (f.type === 'application/pdf' || f.type.startsWith('image/')) && f.size <= MAX_FILE_SIZE_BYTES,
+        (f) =>
+          (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) &&
+          f.size <= MAX_FILE_SIZE_BYTES,
       );
       if (files.length > 0) {
         onFilesSelected(files);
@@ -227,7 +229,9 @@ function DropZone({
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files || []).filter(
-        (f) => (f.type === 'application/pdf' || f.type.startsWith('image/')) && f.size <= MAX_FILE_SIZE_BYTES,
+        (f) =>
+          (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) &&
+          f.size <= MAX_FILE_SIZE_BYTES,
       );
       if (files.length > 0) {
         onFilesSelected(files);
@@ -245,7 +249,7 @@ function DropZone({
       <div
         role="button"
         tabIndex={0}
-        aria-label={t('takeoff.upload_aria', { defaultValue: 'Upload PDF or image takeoff file' })}
+        aria-label={t('takeoff.upload_aria', { defaultValue: 'Upload PDF takeoff file' })}
         onClick={handleClick}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') handleClick();
@@ -274,21 +278,18 @@ function DropZone({
           <FileUp size={26} strokeWidth={1.5} />
         </div>
         <p className="text-sm font-semibold text-content-primary">
-          {t('takeoff.drop_file_here', 'Drop your PDF or image here')}
+          {t('takeoff.drop_file_here', 'Drop your PDF here')}
         </p>
         <p className="text-[11px] text-content-quaternary">
-          {t('takeoff.file_limit', 'PDF, JPG, PNG')}
+          {t('takeoff.file_limit', 'PDF')}
         </p>
         <div className="flex items-center gap-2 mt-1">
           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-800/30">.pdf</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-800/30">.jpg</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-secondary text-content-quaternary border border-border-light">.png</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-secondary text-content-quaternary border border-border-light">.tiff</span>
         </div>
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/pdf,.pdf,image/*,.jpg,.jpeg,.png,.tiff"
+          accept="application/pdf,.pdf"
           multiple
           onChange={handleFileChange}
           className="hidden"
@@ -297,7 +298,7 @@ function DropZone({
       </div>
       <p className="text-[11px] text-content-tertiary mt-3">
         {t('takeoff.formats_detailed', {
-          defaultValue: 'PDF construction drawings \u00B7 JPG / PNG photos \u00B7 TIFF scans. AI will extract walls, slabs, doors, and other elements with quantities.',
+          defaultValue: 'PDF construction drawings \u2014 vector floor plans, sections and scans. AI will extract walls, slabs, doors, and other elements with quantities.',
         })}
       </p>
     </div>
@@ -2086,6 +2087,8 @@ export function TakeoffPage() {
                   initialPdfUrl={viewerDoc?.url}
                   initialPdfName={viewerDoc?.name}
                   initialMeasurementId={initialMeasurementId}
+                  recentDocuments={serverDocuments}
+                  onOpenRecentDocument={handleOpenDocInViewer}
                 />
               </Suspense>
             )}
@@ -2104,13 +2107,13 @@ export function TakeoffPage() {
           <input
             ref={filmstripUploadRef}
             type="file"
-            accept="application/pdf,.pdf,image/*,.jpg,.jpeg,.png,.tiff"
+            accept="application/pdf,.pdf"
             multiple
             className="hidden"
             onChange={(e) => {
               const files = Array.from(e.target.files || []).filter(
                 (f) =>
-                  (f.type === 'application/pdf' || f.type.startsWith('image/')) &&
+                  (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) &&
                   f.size <= MAX_FILE_SIZE_BYTES,
               );
               if (files.length > 0) handleFilesSelected(files);

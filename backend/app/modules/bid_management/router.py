@@ -896,6 +896,43 @@ async def create_comparison(
     return BidComparisonResponse.model_validate(comparison)
 
 
+@router.post("/comparisons/get-or-create", response_model=BidComparisonResponse)
+async def get_or_create_comparison(
+    data: BidComparisonCreate,
+    session: SessionDep,
+    user_id: CurrentUserId,
+    _perm: None = Depends(RequirePermission("bid_management.create")),
+) -> BidComparisonResponse:
+    """Idempotent comparison creation — returns the existing one if present.
+
+    Lets the leveling UI re-run "Compute Leveling" without hitting the 409
+    that plain ``create_comparison`` raises once a comparison exists.
+    """
+    await _verify_package_access(session, data.package_id, user_id)
+    svc = BidManagementService(session)
+    comparison = await svc.get_or_create_comparison(data)
+    return BidComparisonResponse.model_validate(comparison)
+
+
+@router.get(
+    "/bid-packages/{package_id}/comparison",
+    response_model=BidComparisonResponse | None,
+)
+async def get_package_comparison(
+    package_id: uuid.UUID,
+    session: SessionDep,
+    user_id: CurrentUserId,
+    _perm: None = Depends(RequirePermission("bid_management.read")),
+) -> BidComparisonResponse | None:
+    """Return the package's single comparison header, or ``null`` if none."""
+    await _verify_package_access(session, package_id, user_id)
+    svc = BidManagementService(session)
+    comparison = await svc.get_comparison_for_package(package_id)
+    if comparison is None:
+        return None
+    return BidComparisonResponse.model_validate(comparison)
+
+
 @router.patch("/comparisons/{comparison_id}", response_model=BidComparisonResponse)
 async def update_comparison(
     comparison_id: uuid.UUID,

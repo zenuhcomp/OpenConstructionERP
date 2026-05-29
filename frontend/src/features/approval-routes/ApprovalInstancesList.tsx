@@ -11,23 +11,14 @@ import { useQuery } from '@tanstack/react-query';
 import { ListChecks, Search } from 'lucide-react';
 
 import { Badge, Card, EmptyState, SkeletonTable } from '@/shared/ui';
-import { approvalRoutesKeys, listInstances } from './api';
+import { approvalRoutesKeys, getMeta, listInstances } from './api';
+import { kindLabel } from './labels';
 import type { ApprovalInstance, InstanceStatus } from './types';
 
-const TARGET_KINDS = [
-  'markup',
-  'submittal',
-  'rfi',
-  'file',
-  'variation',
-  'change_order',
-  'document',
-  'inspection',
-];
-
+// Mirrors models.INSTANCE_STATUSES — ``pending`` is the active state
+// (there is no separate ``in_progress``).
 const STATUSES: InstanceStatus[] = [
   'pending',
-  'in_progress',
   'approved',
   'rejected',
   'cancelled',
@@ -66,6 +57,15 @@ export function ApprovalInstancesList({
 
   const effectiveKind = pinnedKind ?? (kindFilter || null);
 
+  // Target kinds come straight from the backend whitelist so the picker
+  // can never drift from the validated set.
+  const { data: meta } = useQuery({
+    queryKey: approvalRoutesKeys.meta(),
+    queryFn: () => getMeta(),
+    staleTime: 10 * 60_000,
+  });
+  const targetKinds = meta?.target_kinds ?? [];
+
   const { data: instances = [], isLoading } = useQuery({
     queryKey: approvalRoutesKeys.instances(
       effectiveKind,
@@ -86,7 +86,6 @@ export function ApprovalInstancesList({
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
-      (i.route_name ?? '').toLowerCase().includes(q) ||
       i.target_id.toLowerCase().includes(q) ||
       i.target_kind.toLowerCase().includes(q)
     );
@@ -100,13 +99,16 @@ export function ApprovalInstancesList({
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value)}
             className="h-8 rounded-md border border-border bg-surface-primary px-2 text-xs focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue cursor-pointer"
+            aria-label={t('approvalRoutes.filter_kind', {
+              defaultValue: 'Filter by kind',
+            })}
           >
             <option value="">
               {t('approvalRoutes.all_kinds', { defaultValue: 'All target kinds' })}
             </option>
-            {TARGET_KINDS.map((k) => (
+            {targetKinds.map((k) => (
               <option key={k} value={k}>
-                {k}
+                {kindLabel(t, k)}
               </option>
             ))}
           </select>
@@ -115,6 +117,9 @@ export function ApprovalInstancesList({
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as InstanceStatus | '')}
           className="h-8 rounded-md border border-border bg-surface-primary px-2 text-xs focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue cursor-pointer"
+          aria-label={t('approvalRoutes.filter_status', {
+            defaultValue: 'Filter by status',
+          })}
         >
           <option value="">
             {t('approvalRoutes.all_statuses', { defaultValue: 'All statuses' })}
@@ -122,10 +127,7 @@ export function ApprovalInstancesList({
           {STATUSES.map((s) => (
             <option key={s} value={s}>
               {t(`approvalRoutes.status_${s}`, {
-                defaultValue:
-                  s === 'in_progress'
-                    ? 'In progress'
-                    : s.charAt(0).toUpperCase() + s.slice(1),
+                defaultValue: s.charAt(0).toUpperCase() + s.slice(1),
               })}
             </option>
           ))}
@@ -139,6 +141,7 @@ export function ApprovalInstancesList({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('common.search', { defaultValue: 'Search…' })}
+            aria-label={t('common.search', { defaultValue: 'Search…' })}
             className="h-8 w-full pl-7 rounded-md border border-border bg-surface-primary text-xs focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
           />
         </div>
@@ -166,9 +169,6 @@ export function ApprovalInstancesList({
         <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b border-border-light bg-surface-secondary/30">
-              <th className="px-3 py-2 text-left text-2xs font-semibold uppercase tracking-wider text-content-tertiary">
-                {t('approvalRoutes.col_route', { defaultValue: 'Route' })}
-              </th>
               <th className="px-3 py-2 text-left text-2xs font-semibold uppercase tracking-wider text-content-tertiary">
                 {t('approvalRoutes.col_target', { defaultValue: 'Target' })}
               </th>
@@ -198,19 +198,11 @@ export function ApprovalInstancesList({
 function InstanceRow({ instance }: { instance: ApprovalInstance }) {
   const { t } = useTranslation();
   const { variant } = statusBadge(instance.status);
-  const activeStep = instance.steps[instance.current_step_index];
   return (
     <tr className="hover:bg-surface-secondary/40 transition-colors">
-      <td className="px-3 py-2.5 text-sm text-content-primary truncate max-w-[240px]">
-        {instance.route_name || (
-          <span className="text-content-tertiary italic">
-            {t('approvalRoutes.unnamed_route', { defaultValue: 'Unnamed route' })}
-          </span>
-        )}
-      </td>
       <td className="px-3 py-2.5 text-xs text-content-secondary">
         <span className="inline-flex items-center gap-1">
-          <span className="capitalize">{instance.target_kind}</span>
+          <span>{kindLabel(t, instance.target_kind)}</span>
           <span className="text-content-tertiary tabular-nums">
             {instance.target_id.slice(0, 8)}…
           </span>
@@ -220,23 +212,17 @@ function InstanceRow({ instance }: { instance: ApprovalInstance }) {
         <Badge variant={variant} size="sm">
           {t(`approvalRoutes.status_${instance.status}`, {
             defaultValue:
-              instance.status === 'in_progress'
-                ? 'In progress'
-                : instance.status.charAt(0).toUpperCase() + instance.status.slice(1),
+              instance.status.charAt(0).toUpperCase() + instance.status.slice(1),
           })}
         </Badge>
       </td>
       <td className="px-3 py-2.5 text-xs text-content-secondary tabular-nums">
-        {t('approvalRoutes.step_n_of_m', {
-          defaultValue: 'Step {{n}}/{{m}}',
-          n: Math.max(0, instance.current_step_index) + 1,
-          m: instance.steps.length,
-        })}
-        {activeStep?.approver_role && (
-          <span className="text-content-tertiary ml-1">
-            · {activeStep.approver_role}
-          </span>
-        )}
+        {instance.status === 'pending'
+          ? t('approvalRoutes.step_n', {
+              defaultValue: 'Step {{n}}',
+              n: instance.current_step_ordinal,
+            })
+          : '—'}
       </td>
       <td className="px-3 py-2.5 text-xs text-content-tertiary">
         {new Date(instance.started_at).toLocaleDateString()}

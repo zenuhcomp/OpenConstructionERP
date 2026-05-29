@@ -72,7 +72,13 @@ class RulePackStats(BaseModel):
 
 
 class SmartViewStats(BaseModel):
-    """Smart-view inventory split by scope."""
+    """Smart-view inventory split by scope.
+
+    ``project_count`` is a true per-project figure. ``user_count`` is
+    GLOBAL ("personal views, all projects") — user-scoped views carry no
+    project link, so the UI must label it accordingly rather than
+    implying it is project-scoped.
+    """
 
     user_count: int = 0
     project_count: int = 0
@@ -132,10 +138,22 @@ class TradeMatrixResponse(BaseModel):
 
 
 class TimelineEvent(BaseModel):
-    """One activity-stream entry."""
+    """One activity-stream entry.
+
+    The label is built CLIENT-SIDE from ``type`` + ``params`` so the UI
+    can localise it via i18next. ``params`` carries the interpolation
+    values (``name``, ``total``, ``status`` …) the label template needs;
+    the set of keys depends on ``type``. ``summary`` is retained as a
+    pre-rendered English fallback for non-UI consumers (API exports,
+    log lines) — the React timeline ignores it in favour of ``params``.
+    """
 
     ts: datetime
     type: str
+    # Interpolation params for the client-built label (name / total /
+    # status …). Plain JSON scalars only — never a pre-rendered string.
+    params: dict[str, str | int | None] = Field(default_factory=dict)
+    # Pre-rendered English fallback for non-UI consumers (exports / logs).
     summary: str
     user_id: str | None = None
     # Optional deep-link target the UI can route to (e.g. /clash, /bcf).

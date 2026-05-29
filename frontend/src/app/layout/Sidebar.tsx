@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { CustomBranding } from './CustomBranding';
 import { useTranslation } from 'react-i18next';
@@ -79,6 +80,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useModuleStore } from '@/stores/useModuleStore';
+import { apiGet } from '@/shared/lib/api';
 import { UpdateNotification } from '@/shared/ui/UpdateChecker';
 import { useViewModeStore } from '@/stores/useViewModeStore';
 import { useRecentStore } from '@/stores/useRecentStore';
@@ -509,6 +511,98 @@ const ALL_NAV_ITEMS: Record<string, NavItem> = (() => {
   return map;
 })();
 
+/** Minimal shape of a backend module entry returned by `GET /v1/modules/`.
+ *  We only read the fields needed to reconcile sidebar visibility with the
+ *  server-side enabled/disabled state set on the System Modules tab. */
+interface BackendModuleState {
+  name: string;
+  enabled: boolean;
+  is_core: boolean;
+}
+
+/** Maps a sidebar route (`NavItem.to`, query string stripped) to the backend
+ *  module manifest name (`oe_*`) that powers it. When that backend module is
+ *  *explicitly* disabled on the System Modules tab, the route below is hidden
+ *  so the sidebar never links to a 404/blank surface (the two enable systems
+ *  — frontend `useModuleStore` and the backend module loader — were
+ *  previously unreconciled, leaving disabled-backend routes live and broken).
+ *
+ *  Only optional (non-core) modules that own a sidebar route need an entry;
+ *  core modules (Dashboard, Projects, BOQ, Costs, Settings, Modules, Users)
+ *  can never be disabled and are intentionally absent. Routes not listed here
+ *  are never gated by backend state (fail-open). */
+const ROUTE_BACKEND_MODULE: Record<string, string> = {
+  // Takeoff
+  '/takeoff': 'oe_takeoff',
+  '/dwg-takeoff': 'oe_dwg_takeoff',
+  '/bim': 'oe_bim_hub',
+  '/data-explorer': 'oe_cad',
+  // Model coordination
+  '/coordination': 'oe_coordination_hub',
+  '/bim/federations': 'oe_bim_hub',
+  '/clash': 'oe_clash',
+  '/bim/rules': 'oe_bim_requirements',
+  '/requirements/matrix': 'oe_requirements',
+  '/geo': 'oe_geo_hub',
+  // AI & tools
+  '/ai-agents': 'oe_ai_agents',
+  '/advisor': 'oe_ai',
+  '/chat': 'oe_erp_chat',
+  // Commercial
+  '/crm': 'oe_crm',
+  '/contracts': 'oe_contracts',
+  '/subcontractors': 'oe_subcontractors',
+  '/bid-management': 'oe_bid_management',
+  '/tendering': 'oe_tendering',
+  '/variations': 'oe_variations',
+  '/supplier-catalogs': 'oe_supplier_catalogs',
+  // Real estate development
+  '/property-dev': 'oe_property_dev',
+  '/accommodation': 'oe_accommodation',
+  // Planning
+  '/schedule': 'oe_schedule',
+  '/schedule-advanced': 'oe_schedule_advanced',
+  '/tasks': 'oe_tasks',
+  '/5d': 'oe_costmodel',
+  '/risks': 'oe_risk',
+  // Field operations
+  '/daily-diary': 'oe_daily_diary',
+  '/field-reports': 'oe_fieldreports',
+  '/equipment': 'oe_equipment',
+  '/resources': 'oe_resources',
+  '/service': 'oe_service',
+  '/portal': 'oe_portal',
+  // Quality
+  '/validation': 'oe_validation',
+  '/inspections': 'oe_inspections',
+  '/ncr': 'oe_ncr',
+  '/punchlist': 'oe_punchlist',
+  '/qms': 'oe_qms',
+  // Safety & HSE
+  '/safety': 'oe_safety',
+  '/hse-advanced': 'oe_hse_advanced',
+  '/carbon': 'oe_carbon',
+  // Communication
+  '/contacts': 'oe_contacts',
+  '/meetings': 'oe_meetings',
+  '/rfi': 'oe_rfi',
+  '/submittals': 'oe_submittals',
+  '/transmittals': 'oe_transmittals',
+  '/correspondence': 'oe_correspondence',
+  // Documentation
+  '/cde': 'oe_cde',
+  '/markups': 'oe_markups',
+  // Finance & procurement
+  '/finance': 'oe_finance',
+  '/procurement': 'oe_procurement',
+  '/changeorders': 'oe_changeorders',
+  // Analytics & reports
+  '/reports': 'oe_reporting',
+  '/bi-dashboards': 'oe_bi_dashboards',
+  '/reporting': 'oe_reporting',
+  '/architecture': 'oe_architecture_map',
+};
+
 // localStorage key for collapsed state
 const COLLAPSED_KEY = 'oe_sidebar_collapsed';
 const PINNED_KEY = 'oe_sidebar_pinned';
@@ -664,6 +758,40 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const toggleIconified = useSidebarCollapseStore((s) => s.toggle);
   const isRTL = useIsRTL();
   const userRole = useAuthStore((s) => s.userRole);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  // Backend module enabled-state. The System Modules tab disables/enables
+  // server-side plugins; without this, a backend-disabled module's sidebar
+  // route stayed live and broke on click. We share the `['system-modules']`
+  // query key with the Modules page so a successful toggle there invalidates
+  // this query and the sidebar updates immediately. Fail-open: if the fetch
+  // errors or is still loading, no route is hidden.
+  const { data: backendModules } = useQuery({
+    queryKey: ['system-modules'],
+    queryFn: () => apiGet<BackendModuleState[]>('/v1/modules/'),
+    enabled: isAuthenticated,
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+  });
+
+  // Set of backend module names that are EXPLICITLY disabled (non-core).
+  const disabledBackendModules = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of backendModules ?? []) {
+      if (!m.is_core && !m.enabled) set.add(m.name);
+    }
+    return set;
+  }, [backendModules]);
+
+  // True when the sidebar route's backing backend module is disabled.
+  const isRouteBackendDisabled = useCallback(
+    (to: string) => {
+      const path = to.split('?')[0]!;
+      const moduleName = ROUTE_BACKEND_MODULE[path];
+      return moduleName ? disabledBackendModules.has(moduleName) : false;
+    },
+    [disabledBackendModules],
+  );
 
   // Role-gate the admin grid. Items without a `roleGate` always show;
   // gated items only render when the current JWT role matches. The
@@ -845,6 +973,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const pinnedItems: NavItem[] = pinned
     .map((route) => ALL_NAV_ITEMS[route])
     .filter((item): item is NavItem => Boolean(item))
+    .filter((item) => !isRouteBackendDisabled(item.to))
     .filter((item) => editMode || !hiddenModules.includes(item.to));
 
   // Pick a single winning route for highlighting. Without this, both
@@ -1128,6 +1257,10 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               (!item.moduleKey || isModuleEnabled(item.moduleKey)) &&
               (!item.advancedOnly || isAdvanced) &&
               (!item.adminOnly || userRole === 'admin') &&
+              // Backend-disabled gate — a System Module switched off on the
+              // Modules page hides its sidebar route here so we never link
+              // to a broken/blank surface.
+              !isRouteBackendDisabled(item.to) &&
               // Menu-editor filter — in normal mode, drop user-hidden
               // rows; in edit mode `effectiveHidden` is empty so every
               // row renders (muted via the editingHidden state below).

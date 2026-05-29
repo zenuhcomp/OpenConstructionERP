@@ -94,14 +94,22 @@ async def create_kpi_snapshot(
 @router.post("/kpi/recalculate-all/", status_code=200)
 async def recalculate_all_kpis(
     user_id: CurrentUserId,
-    _perm: None = Depends(RequirePermission("reporting.create")),
+    _perm: None = Depends(RequirePermission("reporting.distribute")),
     service: ReportingService = Depends(_get_service),
 ) -> dict:
-    """Recalculate KPI snapshots for all active projects (admin only).
+    """Recalculate KPI snapshots for ALL active projects (MANAGER+).
 
     Queries finance, safety, RFI, submittals, schedule, and risk modules
     to produce up-to-date KPI values.  Creates or updates one KPISnapshot
     per project for today's date.
+
+    Gated at ``reporting.distribute`` (MANAGER) rather than the per-row
+    ``reporting.create`` (EDITOR): this is a portfolio-wide,
+    cross-tenant recompute that ignores per-project membership and runs
+    O(projects x 6 module queries). The privileged blast radius warrants
+    the manager tier, mirroring how scheduling/distribution is gated
+    (W2 audit, /reporting). The frontend hides the trigger for roles
+    below manager so it is never a dead control.
     """
     return await service.auto_recalculate_kpis()
 

@@ -251,6 +251,34 @@ class BuyerRepository(_BaseRepo):
         result = await self.session.execute(base)
         return result.scalar_one()
 
+    async def sum_contract_value_by_currency(
+        self, development_id: uuid.UUID, *, status_in: list[str] | None = None
+    ) -> dict[str, Decimal]:
+        """Sum buyer contract values GROUPED BY each buyer's own currency.
+
+        Buyers in a single development may legitimately contract in
+        different currencies (``Buyer.currency`` is chosen freely at
+        convert/contract time). Blending them into one number and
+        labelling it with the development currency fabricates a
+        cross-currency total, so callers should consume this per-currency
+        breakdown instead of :meth:`sum_contract_value`.
+        """
+        base = (
+            select(Buyer.currency, func.coalesce(func.sum(Buyer.contract_value), 0))
+            .where(Buyer.development_id == development_id)
+            .group_by(Buyer.currency)
+        )
+        if status_in:
+            base = base.where(Buyer.status.in_(status_in))
+        result = await self.session.execute(base)
+        out: dict[str, Decimal] = {}
+        for currency, total in result.all():
+            code = (currency or "").strip()
+            if not code:
+                continue
+            out[code] = out.get(code, Decimal("0")) + Decimal(str(total or 0))
+        return out
+
 
 # ── Buyer Selection ─────────────────────────────────────────────────────
 

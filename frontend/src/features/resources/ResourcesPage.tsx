@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   useQuery,
-  useQueries,
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
@@ -52,14 +51,14 @@ import {
 import { DateDisplay } from '@/shared/ui/DateDisplay';
 import { MoneyDisplay } from '@/shared/ui/MoneyDisplay';
 import { useToastStore } from '@/stores/useToastStore';
-import { getErrorMessage } from '@/shared/lib/api';
+import { getErrorMessage, ApiError } from '@/shared/lib/api';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import {
   listResources,
   getResourceDashboard,
-  listAssignmentsForResource,
+  getBoard,
   listBoardConflicts,
   confirmAssignment,
   cancelAssignment,
@@ -84,6 +83,7 @@ import {
   type RequestPriority,
   type Assignment,
   type AssignmentStatus,
+  type WindowType,
   type BoardConflict,
   type Skill,
 } from './api';
@@ -105,6 +105,112 @@ const ASSIGN_VARIANT: Record<AssignmentStatus, 'neutral' | 'blue' | 'success' | 
   completed: 'neutral',
   cancelled: 'error',
 };
+
+/* ─── Enum → i18n label helpers ───────────────────────────────────────────
+ *
+ * Badges across this page were rendering raw snake_case enum tokens
+ * (e.g. 'in_progress', 'subcontractor', 'on_leave') verbatim, so non-English
+ * locales and screen readers saw machine identifiers instead of human text.
+ * These helpers route each enum value through the SAME i18n keys the adjacent
+ * <select> options already use, falling back to the raw value for any
+ * unmapped token so nothing ever renders blank.
+ */
+type TFn = (key: string, opts?: Record<string, unknown>) => string;
+
+function resourceTypeLabel(t: TFn, v: ResourceType | string): string {
+  const map: Record<string, string> = {
+    person: t('resources.type_person', { defaultValue: 'Person' }),
+    crew: t('resources.type_crew', { defaultValue: 'Crew' }),
+    equipment: t('resources.type_equipment', { defaultValue: 'Equipment' }),
+    subcontractor: t('resources.type_subcontractor', { defaultValue: 'Subcontractor' }),
+  };
+  return map[v] ?? v;
+}
+
+function resourceStatusLabel(t: TFn, v: ResourceStatus | string): string {
+  const map: Record<string, string> = {
+    active: t('resources.status_active', { defaultValue: 'Active' }),
+    on_leave: t('resources.status_on_leave', { defaultValue: 'On leave' }),
+    inactive: t('resources.status_inactive', { defaultValue: 'Inactive' }),
+  };
+  return map[v] ?? v;
+}
+
+function assignmentStatusLabel(t: TFn, v: AssignmentStatus | string): string {
+  const map: Record<string, string> = {
+    proposed: t('resources.status_proposed', { defaultValue: 'Proposed' }),
+    confirmed: t('resources.status_confirmed', { defaultValue: 'Confirmed' }),
+    in_progress: t('resources.status_in_progress', { defaultValue: 'In progress' }),
+    completed: t('resources.status_completed', { defaultValue: 'Completed' }),
+    cancelled: t('resources.status_cancelled', { defaultValue: 'Cancelled' }),
+  };
+  return map[v] ?? v;
+}
+
+function requestStatusLabel(t: TFn, v: RequestStatus | string): string {
+  const map: Record<string, string> = {
+    open: t('resources.req_status_open', { defaultValue: 'Open' }),
+    fulfilled: t('resources.req_status_fulfilled', { defaultValue: 'Fulfilled' }),
+    cancelled: t('resources.req_status_cancelled', { defaultValue: 'Cancelled' }),
+  };
+  return map[v] ?? v;
+}
+
+function requestPriorityLabel(t: TFn, v: RequestPriority | string): string {
+  const map: Record<string, string> = {
+    low: t('resources.priority_low', { defaultValue: 'Low' }),
+    med: t('resources.priority_med', { defaultValue: 'Medium' }),
+    high: t('resources.priority_high', { defaultValue: 'High' }),
+    critical: t('resources.priority_critical', { defaultValue: 'Critical' }),
+  };
+  return map[v] ?? v;
+}
+
+function windowTypeLabel(t: TFn, v: WindowType | string): string {
+  const map: Record<string, string> = {
+    available: t('resources.window_available', { defaultValue: 'Available' }),
+    unavailable: t('resources.window_unavailable', { defaultValue: 'Unavailable' }),
+    holiday: t('resources.window_holiday', { defaultValue: 'Holiday' }),
+    sick: t('resources.window_sick', { defaultValue: 'Sick leave' }),
+  };
+  return map[v] ?? v;
+}
+
+function certStatusLabel(t: TFn, v: string): string {
+  const map: Record<string, string> = {
+    valid: t('resources.cert_status_valid', { defaultValue: 'Valid' }),
+    expired: t('resources.cert_status_expired', { defaultValue: 'Expired' }),
+    revoked: t('resources.cert_status_revoked', { defaultValue: 'Revoked' }),
+  };
+  return map[v] ?? v;
+}
+
+/**
+ * Resolve a display message from a propose/fulfill error.
+ *
+ * The propose_assignment / fulfill_request endpoints return their conflict
+ * (409) and skill-mismatch (422) details as an OBJECT detail
+ * (`{ message, conflicts }` / `{ message, missing }`). The shared error
+ * extractor only understands string/array `detail`, so it discards the rich
+ * message and the toast falls back to a generic "this conflicts with existing
+ * data". Read the object detail's `message` here so the user sees the real,
+ * actionable reason; fall back to the shared resolver for everything else.
+ */
+function resourceErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.body && typeof err.body === 'object') {
+    const detail = (err.body as { detail?: unknown }).detail;
+    if (
+      detail &&
+      typeof detail === 'object' &&
+      !Array.isArray(detail) &&
+      typeof (detail as { message?: unknown }).message === 'string'
+    ) {
+      const msg = (detail as { message: string }).message;
+      if (msg.trim().length > 0) return msg;
+    }
+  }
+  return getErrorMessage(err);
+}
 
 const inputCls =
   'h-9 w-full rounded-lg border border-border bg-surface-primary px-3 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue';
@@ -1324,7 +1430,7 @@ function ResourceTable({
                   </td>
                   <td className="px-4 py-2">
                     <Badge variant={TYPE_VARIANT[r.resource_type]} size="sm">
-                      {r.resource_type}
+                      {resourceTypeLabel(t, r.resource_type)}
                     </Badge>
                   </td>
                   <td className="px-4 py-2">
@@ -1339,7 +1445,7 @@ function ResourceTable({
                       dot
                       size="sm"
                     >
-                      {r.status}
+                      {resourceStatusLabel(t, r.status)}
                     </Badge>
                   </td>
                   <td className="px-4 py-2 text-right">
@@ -2107,7 +2213,7 @@ function RequestRow({
       <td className="px-4 py-2.5">
         <Badge variant={PRIORITY_VARIANT[r.priority]} size="sm">
           {PriorityIcon && <PriorityIcon size={10} className="inline mr-1" />}
-          {r.priority}
+          {requestPriorityLabel(t, r.priority)}
         </Badge>
       </td>
       <td className="px-4 py-2.5">
@@ -2145,7 +2251,7 @@ function RequestRow({
       </td>
       <td className="px-4 py-2.5">
         <Badge variant={REQUEST_STATUS_VARIANT[r.status]} dot size="sm">
-          {r.status}
+          {requestStatusLabel(t, r.status)}
         </Badge>
       </td>
       <td className="px-4 py-2.5 text-right">
@@ -2638,7 +2744,7 @@ function FulfillRequestModal({
       });
       onFulfilled();
     } catch (err) {
-      addToast({ type: 'error', title: getErrorMessage(err) });
+      addToast({ type: 'error', title: resourceErrorMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -2676,7 +2782,7 @@ function FulfillRequestModal({
             <DateDisplay value={request.end_at} /> ·{' '}
             {request.quantity} ×{' '}
             <Badge variant={PRIORITY_VARIANT[request.priority]} size="sm">
-              {request.priority}
+              {requestPriorityLabel(t, request.priority)}
             </Badge>
           </p>
         </WideModalField>
@@ -2699,7 +2805,7 @@ function FulfillRequestModal({
             </option>
             {resources.map((r) => (
               <option key={r.id} value={r.id}>
-                {r.code} — {r.name} ({r.resource_type})
+                {r.code} — {r.name} ({resourceTypeLabel(t, r.resource_type)})
               </option>
             ))}
           </select>
@@ -2781,34 +2887,42 @@ function AssignmentsTab({
     return m;
   }, [resources]);
 
-  // Fan-out assignments across resources (limited to first 50 to keep the
-  // request count bounded). Each per-resource query is keyed by resource
-  // id so React Query can invalidate them individually on mutation.
-  const samples = resources.slice(0, 50);
-  const assignmentQs = useQueries({
-    queries: samples.map((r) => ({
-      queryKey: ['resources', 'assignments', r.id] as const,
-      queryFn: () => listAssignmentsForResource(r.id, { limit: 50 }),
-      staleTime: 30_000,
-    })),
+  // Load assignments for ALL resources in one org-wide dispatcher query
+  // instead of fanning out per-resource (which previously capped at the
+  // first 50 resources and silently dropped assignments for resource #51+).
+  // The board returns resources + their assignments for the window in a
+  // single round-trip, keeping the list, header count and the side
+  // Conflicts panel over the same population. The window starts at the
+  // beginning of the current week and extends ~6 months out to cover the
+  // "upcoming" assignments the header advertises.
+  const boardWindow = useMemo(() => {
+    const start = startOfWeek();
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 6);
+    return { start, end: end.toISOString() };
+  }, []);
+
+  const boardQ = useQuery({
+    queryKey: ['resources', 'assignments', 'board', boardWindow.start, boardWindow.end],
+    queryFn: () => getBoard({ start: boardWindow.start, end: boardWindow.end }),
+    staleTime: 30_000,
   });
 
-  const isLoading = assignmentQs.some((q) => q.isLoading);
+  const isLoading = boardQ.isLoading;
 
   // Flatten + sort by start date ascending so "next up" is at the top.
   type FlatAssignment = Assignment & { resource_name: string };
   const flat: FlatAssignment[] = useMemo(() => {
     const out: FlatAssignment[] = [];
-    assignmentQs.forEach((q, idx) => {
-      const r = samples[idx];
-      if (!r || !q.data) return;
-      for (const a of q.data) {
-        out.push({ ...a, resource_name: r.name });
+    for (const entry of boardQ.data?.entries ?? []) {
+      const name = entry.resource.name ?? idToName[entry.resource.id] ?? '';
+      for (const a of entry.assignments) {
+        out.push({ ...a, resource_name: name });
       }
-    });
+    }
     out.sort((a, b) => (a.start_at < b.start_at ? -1 : a.start_at > b.start_at ? 1 : 0));
     return out;
-  }, [assignmentQs, samples]);
+  }, [boardQ.data, idToName]);
 
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | ''>('');
   const filtered = useMemo(
@@ -3123,7 +3237,7 @@ function AssignmentsTab({
                           </td>
                           <td className="px-3 py-1.5">
                             <Badge variant={ASSIGN_VARIANT[a.status]} dot size="sm">
-                              {a.status}
+                              {assignmentStatusLabel(t, a.status)}
                             </Badge>
                           </td>
                           <td className="px-3 py-1.5 text-right">
@@ -3588,7 +3702,7 @@ function ResourceDrawer({
                   label={t('resources.col_type')}
                   value={
                     <Badge variant={TYPE_VARIANT[data.resource.resource_type]} size="sm">
-                      {data.resource.resource_type}
+                      {resourceTypeLabel(t, data.resource.resource_type)}
                     </Badge>
                   }
                 />
@@ -3600,7 +3714,7 @@ function ResourceDrawer({
                       dot
                       size="sm"
                     >
-                      {data.resource.status}
+                      {resourceStatusLabel(t, data.resource.status)}
                     </Badge>
                   }
                 />
@@ -3679,7 +3793,7 @@ function ResourceDrawer({
                         className="flex items-center justify-between py-1.5"
                       >
                         <span className="text-content-secondary">
-                          {w.window_type}
+                          {windowTypeLabel(t, w.window_type)}
                           {w.note ? ` · ${w.note}` : ''}
                         </span>
                         <span className="text-content-tertiary text-xs">
@@ -3710,7 +3824,7 @@ function ResourceDrawer({
                             variant={c.status === 'valid' ? 'success' : 'warning'}
                             size="sm"
                           >
-                            {c.status}
+                            {certStatusLabel(t, c.status)}
                           </Badge>
                         </div>
                         {c.valid_until && (
@@ -3768,6 +3882,13 @@ function AssignmentTable({
   busy: boolean;
 }) {
   const { t } = useTranslation();
+  const userRole = useAuthStore((s) => s.userRole);
+  // Confirm maps to resources.confirm_assignment (MANAGER); Decline maps to
+  // cancel which is resources.assign (EDITOR). Hide affordances the user
+  // cannot exercise so they don't click a button that always 403s.
+  const canConfirm = userRole === 'admin' || userRole === 'manager';
+  const canDecline =
+    userRole === 'admin' || userRole === 'manager' || userRole === 'editor';
   return (
     <div className="overflow-x-auto rounded border border-border-light">
       <table className="w-full text-sm">
@@ -3804,32 +3925,36 @@ function AssignmentTable({
               </td>
               <td className="px-3 py-1.5">
                 <Badge variant={ASSIGN_VARIANT[a.status]} dot size="sm">
-                  {a.status}
+                  {assignmentStatusLabel(t, a.status)}
                 </Badge>
               </td>
               <td className="px-3 py-1.5 text-right">
-                {a.status === 'proposed' && (
+                {a.status === 'proposed' && (canConfirm || canDecline) ? (
                   <div className="inline-flex gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<CheckCircle2 size={12} />}
-                      onClick={() => onConfirm(a.id)}
-                      disabled={busy}
-                    >
-                      {t('resources.confirm', { defaultValue: 'Confirm' })}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<XCircle size={12} />}
-                      onClick={() => onDecline(a.id)}
-                      disabled={busy}
-                    >
-                      {t('resources.decline', { defaultValue: 'Decline' })}
-                    </Button>
+                    {canConfirm && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<CheckCircle2 size={12} />}
+                        onClick={() => onConfirm(a.id)}
+                        disabled={busy}
+                      >
+                        {t('resources.confirm', { defaultValue: 'Confirm' })}
+                      </Button>
+                    )}
+                    {canDecline && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<XCircle size={12} />}
+                        onClick={() => onDecline(a.id)}
+                        disabled={busy}
+                      >
+                        {t('resources.decline', { defaultValue: 'Decline' })}
+                      </Button>
+                    )}
                   </div>
-                )}
+                ) : null}
               </td>
             </tr>
           ))}
@@ -4238,7 +4363,7 @@ function ProposeAssignmentModal({
       qc.invalidateQueries({ queryKey: ['resources'] });
       onClose();
     } catch (err) {
-      addToast({ type: 'error', title: getErrorMessage(err) });
+      addToast({ type: 'error', title: resourceErrorMessage(err) });
     } finally {
       setBusy(false);
     }

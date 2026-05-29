@@ -11,9 +11,15 @@ Endpoints
 * ``GET    /dsl/rules/{rule_pk}`` — read a single rule.
 * ``DELETE /dsl/rules/{rule_pk}`` — remove a rule (owner-only).
 
-All endpoints require an authenticated caller; the DI overrides used
-in tests inject a synthetic payload so the router is exercisable
-without standing up the full auth stack.
+The compile / list / get / delete verbs are RBAC-gated — a user-authored
+rule is registered into the global validation engine and runs against
+project data, so authoring or deleting one is a privileged action a
+read-only VIEWER must not be able to take (``compliance.rule.create`` /
+``compliance.rule.delete`` → MANAGER, ``compliance.rule.read`` → EDITOR).
+The read-only natural-language helper endpoints (``from-nl``,
+``nl-patterns``, ``validate-syntax``) have no side effects and stay
+auth-only. The DI overrides used in tests inject a synthetic payload so
+the router is exercisable without standing up the full auth stack.
 """
 
 from __future__ import annotations
@@ -23,13 +29,13 @@ import uuid
 from typing import Annotated, Any
 
 import yaml
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.validation.dsl import (
     list_supported_patterns,
     parse_nl_to_dsl,
 )
-from app.dependencies import CurrentUserPayload, SessionDep
+from app.dependencies import CurrentUserPayload, RequirePermission, SessionDep
 from app.modules.compliance.manifest import manifest
 from app.modules.compliance.repository import ComplianceDSLRepository
 from app.modules.compliance.schemas import (
@@ -129,6 +135,7 @@ async def validate_syntax(
     response_model=DSLRuleOut,
     status_code=status.HTTP_201_CREATED,
     summary="Compile, persist and register a DSL rule",
+    dependencies=[Depends(RequirePermission("compliance.rule.create"))],
 )
 async def compile_rule_endpoint(
     body: DSLCompileRequest,
@@ -161,6 +168,7 @@ async def compile_rule_endpoint(
     "/dsl/rules",
     response_model=DSLRuleListResponse,
     summary="List compliance DSL rules visible to the caller",
+    dependencies=[Depends(RequirePermission("compliance.rule.read"))],
 )
 async def list_rules(
     payload: CurrentUserPayload,
@@ -189,6 +197,7 @@ async def list_rules(
     "/dsl/rules/{rule_pk}",
     response_model=DSLRuleOut,
     summary="Read a single compliance DSL rule",
+    dependencies=[Depends(RequirePermission("compliance.rule.read"))],
 )
 async def get_rule(
     rule_pk: uuid.UUID,
@@ -212,6 +221,7 @@ async def get_rule(
     "/dsl/rules/{rule_pk}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a compliance DSL rule (owner only)",
+    dependencies=[Depends(RequirePermission("compliance.rule.delete"))],
 )
 async def delete_rule(
     rule_pk: uuid.UUID,

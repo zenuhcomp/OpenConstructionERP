@@ -2679,28 +2679,190 @@ async def get_model_geometry(
             },
         )
 
+    # ── No geometry blob on storage — disambiguate by model status ──────────
+    #
+    # A bare "geometry_missing" 404 used to fire here for FOUR very different
+    # situations, which left the viewer unable to tell a transient "still
+    # converting" from a permanent data loss.  We branch on the persisted
+    # BimModel status (the source of truth, set by _process_cad_in_background
+    # / retry) so the frontend can show the right message and so a genuine
+    # data problem stays distinguishable from a model that simply has no 3D
+    # yet.  Known status values: processing, needs_converter, ready,
+    # degraded, error (see models.py + the status assignments in this file).
+    #
+    # Response shape stays backward-compatible: still HTTP 404, still a JSON
+    # body with `error` / `category` / `request_id` / `model_id` / `message`
+    # / `remediation`.  We only swap the stable `error` code (and add a
+    # `model_status` echo) so the FE can branch on it.
+    model_status = (model.status or "").lower()
+
+    if model_status == "processing":
+        # Conversion is still queued/running — the blob will appear once the
+        # background worker finishes. Transient, the FE should keep polling.
+        logger.info(
+            "BIM geometry requested while conversion still running "
+            "(request_id=%s, model_id=%s, project_id=%s, status=%s)",
+            request_id,
+            model_id,
+            project_id,
+            model_status,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "geometry_pending",
+                "category": "not_ready",
+                "request_id": request_id,
+                "model_id": str(model_id),
+                "model_status": model_status,
+                "message": (
+                    "3D geometry is still being generated for this model."
+                ),
+                "remediation": (
+                    "Conversion is in progress. The viewer will load "
+                    "automatically once the CAD converter finishes — this "
+                    "usually takes from a few seconds to a couple of minutes "
+                    "depending on file size. No action is needed."
+                ),
+            },
+            headers={"X-Request-Id": request_id},
+        )
+
+    if model_status == "error":
+        # Conversion failed outright — no blob will ever appear without a
+        # successful retry. error_message carries the converter diagnosis.
+        logger.info(
+            "BIM geometry requested for a model whose conversion failed "
+            "(request_id=%s, model_id=%s, project_id=%s, status=%s)",
+            request_id,
+            model_id,
+            project_id,
+            model_status,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "geometry_failed",
+                "category": "conversion_failed",
+                "request_id": request_id,
+                "model_id": str(model_id),
+                "model_status": model_status,
+                "conversion_error": model.error_message or None,
+                "message": (
+                    "3D geometry could not be generated: the CAD conversion "
+                    "of this model failed."
+                ),
+                "remediation": (
+                    "Open the model in the BIM tab and click Retry to run the "
+                    "conversion again. If it keeps failing the source file may "
+                    "be corrupt or unsupported — re-export it from your CAD "
+                    "tool, or contact info@datadrivenconstruction.io and "
+                    "quote the Request ID below."
+                ),
+            },
+            headers={"X-Request-Id": request_id},
+        )
+
+    if model_status == "needs_converter":
+        # The model legitimately has no 3D on this server: the DDC converter
+        # required for this format (e.g. RVT) is not installed, so geometry
+        # was never produced. Recoverable, but no mesh exists today.
+        logger.info(
+            "BIM geometry requested but no converter produced a mesh "
+            "(request_id=%s, model_id=%s, project_id=%s, status=%s)",
+            request_id,
+            model_id,
+            project_id,
+            model_status,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "geometry_absent",
+                "category": "no_geometry",
+                "request_id": request_id,
+                "model_id": str(model_id),
+                "model_status": model_status,
+                "message": (
+                    "This model has no 3D geometry: the converter required "
+                    "for its format is not available on this server."
+                ),
+                "remediation": (
+                    "Install the matching BIM converter under "
+                    "Settings → BIM Converters, then open the model and click "
+                    "Retry to generate 3D geometry. Until then only the "
+                    "model's metadata is available, not a 3D view."
+                ),
+            },
+            headers={"X-Request-Id": request_id},
+        )
+
+    if model_status == "ready":
+        # Status promises geometry but the blob is gone — a genuine,
+        # unexpected data problem worth reporting. This is the ONLY case
+        # that keeps the legacy "geometry_missing" code.
+        logger.warning(
+            "BIM geometry MISSING for a ready model — blob gone from storage "
+            "(request_id=%s, model_id=%s, project_id=%s, status=%s)",
+            request_id,
+            model_id,
+            project_id,
+            model_status,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "geometry_missing",
+                "category": "not_found",
+                "request_id": request_id,
+                "model_id": str(model_id),
+                "model_status": model_status,
+                "message": (
+                    "This model is marked ready but its 3D geometry file is "
+                    "no longer on the server."
+                ),
+                "remediation": (
+                    "The geometry was generated but the file appears to have "
+                    "been deleted from storage. Re-upload the source CAD/BIM "
+                    "file to regenerate it. If the file was not deleted "
+                    "manually this is a server-side data problem — contact "
+                    "info@datadrivenconstruction.io and quote the Request ID "
+                    "below."
+                ),
+            },
+            headers={"X-Request-Id": request_id},
+        )
+
+    # Any other status (degraded, demo/seed rows, or an unknown future
+    # value): the model never reliably carried a 3D mesh on this server.
+    # `degraded` normally DOES ship geometry, so a missing blob there is
+    # surprising — but it is not a hard "ready" promise, so we report it as
+    # "absent" (no 3D to show) rather than the data-loss "missing" code,
+    # keeping "geometry_missing" reserved for the ready-but-gone case above.
     logger.warning(
-        "BIM geometry not found on storage (request_id=%s, model_id=%s, project_id=%s)",
+        "BIM geometry not found on storage for non-ready model "
+        "(request_id=%s, model_id=%s, project_id=%s, status=%s)",
         request_id,
         model_id,
         project_id,
+        model_status or "unknown",
     )
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail={
-            "error": "geometry_missing",
-            "category": "not_found",
+            "error": "geometry_absent",
+            "category": "no_geometry",
             "request_id": request_id,
             "model_id": str(model_id),
-            "message": ("No 3D geometry file is attached to this model on the server."),
+            "model_status": model_status or "unknown",
+            "message": ("No 3D geometry is available for this model."),
             "remediation": (
-                "Either the model was uploaded but the CAD converter never "
-                "produced a 3D mesh (the source file may be 2D-only or "
-                "may have crashed the converter), or the file was deleted "
-                "manually from storage. Try re-uploading the source file. "
-                "If the same source file repeatedly produces no geometry, "
-                "contact info@datadrivenconstruction.io and quote the "
-                "Request ID below."
+                "This model does not currently have a 3D mesh on the server — "
+                "it may be a non-3D row, a demo entry, or an import that "
+                "produced no geometry. Re-upload the source CAD/BIM file to "
+                "generate geometry. If the same source repeatedly produces no "
+                "geometry, contact info@datadrivenconstruction.io and quote "
+                "the Request ID below."
             ),
         },
         headers={"X-Request-Id": request_id},

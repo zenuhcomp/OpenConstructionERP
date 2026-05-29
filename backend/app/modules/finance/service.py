@@ -56,6 +56,63 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _project_fx_map(project: object | None) -> dict[str, str]:
+    """Project the ``Project.fx_rates`` JSON list into ``{code: rate}``.
+
+    Mirrors :func:`app.modules.boq.service._project_fx_map` — defensive
+    against missing attribute / malformed entries so callers can always
+    pass the result through :func:`_convert_to_base` without further guards.
+    A rate is "units of base currency per 1 unit of the foreign currency".
+    """
+    if project is None:
+        return {}
+    raw = getattr(project, "fx_rates", None)
+    if not isinstance(raw, list):
+        return {}
+    out: dict[str, str] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        code = str(entry.get("code") or "").strip().upper()
+        rate = str(entry.get("rate") or "").strip()
+        if code and rate:
+            out[code] = rate
+    return out
+
+
+def _convert_to_base(
+    amounts_by_currency: dict[str, float],
+    *,
+    base_currency: str,
+    fx_rates_map: dict[str, str],
+) -> tuple[float, list[str]]:
+    """Convert per-currency subtotals into the project base currency.
+
+    Mirrors :func:`app.modules.boq.service._position_total_in_base`: an amount
+    priced in a non-base currency contributes ``amount * fx_rates_map[code]``.
+    A blank currency code is treated as already-base. A foreign currency with
+    no configured FX rate is summed in its own units anyway (never zeroed) so
+    the rollup degrades visibly, and its code is returned in the second tuple
+    element so the caller can surface a "missing FX rate" hint.
+    """
+    base = (base_currency or "").strip().upper()
+    total = Decimal("0")
+    missing: list[str] = []
+    for code, amount in amounts_by_currency.items():
+        norm = (code or "").strip().upper()
+        value = _safe_decimal(amount)
+        if norm and norm != base:
+            fx = fx_rates_map.get(norm)
+            if fx:
+                rate = _safe_decimal(fx, Decimal("1"))
+                if rate > 0:
+                    value = value * rate
+            elif norm not in missing:
+                missing.append(norm)
+        total += value
+    return round(float(total), 2), missing
+
+
 # ── Allowed status transitions ──────────────────────────────────────────────
 #
 # Kept in addition to :mod:`app.core.fsm.registry` for backwards compatibility:
@@ -665,11 +722,17 @@ class FinanceService:
         self,
         *,
         invoice_id: uuid.UUID | None = None,
+        project_id: uuid.UUID | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Payment], int]:
-        """List payments with optional invoice filter."""
-        return await self.payments_repo.list(invoice_id=invoice_id, limit=limit, offset=offset)
+        """List payments with optional invoice / project filter."""
+        return await self.payments_repo.list(
+            invoice_id=invoice_id,
+            project_id=project_id,
+            limit=limit,
+            offset=offset,
+        )
 
     # ── Budgets ──────────────────────────────────────────────────────────────
 
@@ -818,9 +881,26 @@ class FinanceService:
             budget_agg = await self.budgets.aggregate_for_dashboard(
                 project_id=data.project_id,
             )
-            derived_bac = Decimal(str(budget_agg["total_budget_revised"] or budget_agg["total_budget_original"]))
-            derived_ac = Decimal(str(budget_agg["total_actual"]))
-            derived_committed = Decimal(str(budget_agg["total_committed"]))
+            # Budget totals come back per-currency; convert each into the
+            # project base currency (Project.fx_rates) before deriving EVM
+            # baselines so a multi-currency project doesn't blend currencies.
+            from app.modules.projects.repository import ProjectRepository
+
+            project = await ProjectRepository(self.session).get_by_id(data.project_id)
+            base_ccy = (getattr(project, "currency", "") or "").strip().upper() if project else ""
+            fx_map = _project_fx_map(project)
+
+            def _budget_base(amounts: dict[str, float]) -> Decimal:
+                converted, _ = _convert_to_base(
+                    amounts, base_currency=base_ccy, fx_rates_map=fx_map
+                )
+                return Decimal(str(converted))
+
+            revised = _budget_base(budget_agg["revised_by_currency"])
+            original = _budget_base(budget_agg["original_by_currency"])
+            derived_bac = revised or original
+            derived_ac = _budget_base(budget_agg["actual_by_currency"])
+            derived_committed = _budget_base(budget_agg["committed_by_currency"])
             # PV approximation: planned spend up to snapshot date is the
             # revised baseline (matches dashboard behaviour where plan
             # equals revised budget). EV approximation: committed work
@@ -926,24 +1006,71 @@ class FinanceService:
         """
         from app.modules.finance.schemas import FinanceDashboardResponse
 
-        # ── Invoices (SQL aggregation) ─────────────────────────────────
-        inv_agg = await self.invoices.aggregate_for_dashboard(
-            project_id=project_id,
-        )
-        total_payable = inv_agg["total_payable"]
-        total_receivable = inv_agg["total_receivable"]
-        total_overdue = inv_agg["total_overdue"]
+        # ── Per-currency aggregates ────────────────────────────────────
+        inv_agg = await self.invoices.aggregate_for_dashboard(project_id=project_id)
+        budget_agg = await self.budgets.aggregate_for_dashboard(project_id=project_id)
+        payments_by_currency = await self.payments_repo.aggregate_by_currency(project_id=project_id)
         overdue_count = inv_agg["overdue_count"]
         status_counts = inv_agg["status_counts"]
 
-        # ── Budgets (SQL aggregation) ──────────────────────────────────
-        budget_agg = await self.budgets.aggregate_for_dashboard(
-            project_id=project_id,
-        )
-        total_budget_original = budget_agg["total_budget_original"]
-        total_budget_revised = budget_agg["total_budget_revised"]
-        total_committed = budget_agg["total_committed"]
-        total_actual = budget_agg["total_actual"]
+        # ── Resolve the project base currency + FX table ───────────────
+        # When scoped to a single project we convert every foreign-currency
+        # subtotal into the project base currency via Project.fx_rates
+        # (mirrors boq.service). Without a base (cross-project rollup) we fall
+        # back to the dominant currency and leave foreign amounts unconverted,
+        # flagging the mix so the UI does not present a fictitious blended
+        # number as if it were a single currency.
+        base_currency = ""
+        fx_rates_map: dict[str, str] = {}
+        if project_id is not None:
+            from app.modules.projects.repository import ProjectRepository
+
+            project = await ProjectRepository(self.session).get_by_id(project_id)
+            if project is not None:
+                base_currency = (getattr(project, "currency", "") or "").strip().upper()
+                fx_rates_map = _project_fx_map(project)
+
+        # Dominant currency: prefer budget lines, fall back to invoices.
+        dominant_currency = budget_agg.get("currency") or inv_agg.get("currency") or ""
+        currency = base_currency or dominant_currency
+
+        # Collect every currency actually in play across all financial records
+        # so we can flag mixed-currency dashboards honestly.
+        currencies_in_play = {
+            c
+            for grp in (
+                inv_agg["payable_by_currency"],
+                inv_agg["receivable_by_currency"],
+                inv_agg["overdue_by_currency"],
+                budget_agg["original_by_currency"],
+                budget_agg["revised_by_currency"],
+                budget_agg["committed_by_currency"],
+                budget_agg["actual_by_currency"],
+                payments_by_currency,
+            )
+            for c in grp
+            if c
+        }
+        mixed_currencies = len(currencies_in_play) > 1
+        missing: set[str] = set()
+
+        def _to_base(amounts: dict[str, float]) -> float:
+            converted, miss = _convert_to_base(
+                amounts, base_currency=currency, fx_rates_map=fx_rates_map
+            )
+            missing.update(miss)
+            return converted
+
+        # ── Invoices ───────────────────────────────────────────────────
+        total_payable = _to_base(inv_agg["payable_by_currency"])
+        total_receivable = _to_base(inv_agg["receivable_by_currency"])
+        total_overdue = _to_base(inv_agg["overdue_by_currency"])
+
+        # ── Budgets ────────────────────────────────────────────────────
+        total_budget_original = _to_base(budget_agg["original_by_currency"])
+        total_budget_revised = _to_base(budget_agg["revised_by_currency"])
+        total_committed = _to_base(budget_agg["committed_by_currency"])
+        total_actual = _to_base(budget_agg["actual_by_currency"])
 
         total_variance = total_budget_revised - total_actual
         budget_consumed_pct = total_actual / total_budget_revised * 100 if total_budget_revised > 0 else 0.0
@@ -956,14 +1083,11 @@ class FinanceService:
         else:
             warning_level = "normal"
 
-        # ── Payments (SQL aggregation) ─────────────────────────────────
-        total_payments = await self.payments_repo.aggregate_total()
+        # ── Payments ───────────────────────────────────────────────────
+        total_payments = _to_base(payments_by_currency)
 
         # Net cash flow: receivable payments received minus payable payments made
         cash_flow_net = total_receivable - total_payable
-
-        # Dominant currency: prefer budget lines, fall back to invoices.
-        currency = budget_agg.get("currency") or inv_agg.get("currency") or ""
 
         return FinanceDashboardResponse(
             total_payable=round(total_payable, 2),
@@ -984,6 +1108,8 @@ class FinanceService:
             total_payments=round(total_payments, 2),
             cash_flow_net=round(cash_flow_net, 2),
             currency=currency,
+            mixed_currencies=mixed_currencies,
+            missing_fx_rates=sorted(missing),
         ).model_dump()
 
     # ── Ledger (R7 double-entry) ──────────────────────────────────────────────

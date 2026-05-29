@@ -319,9 +319,15 @@ class ChangeOrderSummary(BaseModel):
     total_cost_impact: str = "0"
     total_time_impact_days: int = 0
     total_schedule_impact_days: int = 0
-    # Resolved by the repository from the project / CO rows. Empty only
-    # when neither carries a currency — never a literal "EUR" (task #217).
+    # The project's BASE currency — the only currency ``total_cost_impact`` /
+    # ``total_approved_amount`` are expressed in. Empty only when the project
+    # carries no currency — never a literal "EUR" (task #217).
     currency: str = ""
+    # Approved change orders priced in a FOREIGN currency that has no FX rate
+    # in ``Project.fx_rates`` are excluded from the base-currency total (money
+    # rule: never blend currencies without conversion) and surfaced here,
+    # grouped by their own ISO code as decimal strings, e.g. {"USD": "5000.00"}.
+    unconverted_by_currency: dict[str, str] = Field(default_factory=dict)
 
     _coerce_decimal = field_validator("total_approved_amount", "total_cost_impact", mode="before")(
         lambda cls, v: _decimal_to_str(v)

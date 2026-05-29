@@ -6,38 +6,41 @@
 // Mirrors backend/app/modules/approval_routes/schemas.py — keep in sync.
 // A *Route* is a reusable workflow template (steps with approver role/user
 // + decision mode + optional SLA). An *Instance* is a running workflow on
-// a specific target (markup, submittal, RFI, file, …).
+// a specific target (markup, submittal, RFI, …).
+//
+// IMPORTANT: every field below maps 1:1 to a Pydantic response model on
+// the backend. The instance row is flat — it carries `step_states` (one
+// decision row per approver per step), NOT an expanded per-step ladder.
+// The UI joins `step_states` against the route's `steps` (fetched via
+// getRoute) to render the ladder, and derives the active step from
+// `current_step_ordinal` (1-based).
 
 /** Decision mode for a step — how many approvers must approve before it
- *  closes. ``all`` = unanimous, ``any`` = first one wins, ``majority`` =
- *  > 50 % of pinned approvers. */
+ *  closes. ``all`` = every distinct approver who acted (role steps degrade
+ *  to "any" — see backend note), ``any`` = first one wins, ``majority`` =
+ *  > 50 % of approvers who acted. */
 export type RouteStepMode = 'all' | 'any' | 'majority';
 
-/** Status of a running instance. */
-export type InstanceStatus =
-  | 'pending'
-  | 'in_progress'
-  | 'approved'
-  | 'rejected'
-  | 'cancelled';
+/** Lifecycle status of a running instance. Mirrors
+ *  models.INSTANCE_STATUSES — there is no separate "in_progress" state;
+ *  ``pending`` IS the active state. */
+export type InstanceStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
-/** Per-step status inside an instance. */
-export type InstanceStepStatus =
-  | 'pending'
-  | 'active'
-  | 'approved'
-  | 'rejected'
-  | 'skipped';
+/** Per-step decision recorded in a StepState row. Mirrors
+ *  models.STEP_DECISIONS. */
+export type StepDecisionState = 'pending' | 'approved' | 'rejected';
 
-/** Outcome a user can submit via the decide endpoint. */
-export type StepDecision = 'approve' | 'reject';
+/** Outcome a user submits via the decide endpoint — exactly what the
+ *  backend DecisionSubmit.decision Literal accepts. */
+export type StepDecision = 'approved' | 'rejected';
 
 /** A template step — pinned to a role OR a specific user (mutually
- *  exclusive). One of the two must be set. */
+ *  exclusive). One of the two must be set. ``ordinal`` is 1-based and
+ *  dense (1, 2, 3, …). */
 export interface RouteStep {
   id: string;
   route_id: string;
-  sort_order: number;
+  ordinal: number;
   approver_role: string | null;
   approver_user_id: string | null;
   mode: RouteStepMode;
@@ -50,17 +53,17 @@ export interface ApprovalRoute {
   project_id: string | null;
   target_kind: string;
   name: string;
-  description: string | null;
   is_active: boolean;
   steps: RouteStep[];
+  created_by: string | null;
   created_at: string;
   updated_at: string;
-  created_by_id: string | null;
 }
 
-/** Payload shape when creating/updating a step inside a route. */
+/** Payload shape when creating/updating a step inside a route. ``ordinal``
+ *  is 1-based and required on create (the backend enforces dense ordinals). */
 export interface RouteStepPayload {
-  sort_order?: number;
+  ordinal: number;
   approver_role?: string | null;
   approver_user_id?: string | null;
   mode: RouteStepMode;
@@ -71,68 +74,54 @@ export interface ApprovalRouteCreatePayload {
   project_id?: string | null;
   target_kind: string;
   name: string;
-  description?: string | null;
   is_active?: boolean;
   steps: RouteStepPayload[];
 }
 
+/** Patch payload. ``steps`` is optional — when supplied the whole step
+ *  list is replaced server-side (delete + reinsert). target_kind and
+ *  project_id are immutable on the backend and are not part of the patch. */
 export interface ApprovalRouteUpdatePayload {
   name?: string;
-  description?: string | null;
   is_active?: boolean;
   steps?: RouteStepPayload[];
 }
 
-/** One assigned approver inside a running instance step. Populated by the
- *  backend by expanding the role/user pin against the project team. */
-export interface InstanceStepAssignee {
-  user_id: string;
-  user_email?: string | null;
-  user_name?: string | null;
-  decided_at: string | null;
-  decision: StepDecision | null;
-  comment: string | null;
-}
-
-/** One step inside a running instance — mirrors the template step but
- *  carries decision state and a snapshot of the approvers picked at
- *  start-time. */
-export interface InstanceStep {
+/** One per-approver decision row inside a running instance. Mirrors
+ *  StepStateResponse. ``decision`` is one of pending/approved/rejected. */
+export interface StepState {
   id: string;
   instance_id: string;
-  sort_order: number;
-  approver_role: string | null;
+  step_id: string;
   approver_user_id: string | null;
-  mode: RouteStepMode;
-  sla_hours: number | null;
-  status: InstanceStepStatus;
-  assignees: InstanceStepAssignee[];
-  closed_at: string | null;
+  decision: StepDecisionState;
+  comment: string | null;
+  decided_at: string | null;
+  created_at: string;
 }
 
-/** A running approval workflow on a specific target. */
+/** A running approval workflow on a specific target. Flat shape — the
+ *  ladder is reconstructed by the UI from the route's steps + these
+ *  step_states. */
 export interface ApprovalInstance {
   id: string;
   route_id: string;
-  route_name: string | null;
-  project_id: string | null;
   target_kind: string;
   target_id: string;
+  current_step_ordinal: number;
   status: InstanceStatus;
-  current_step_index: number;
-  steps: InstanceStep[];
-  started_by_id: string | null;
   started_at: string;
-  closed_at: string | null;
-  cancelled_reason: string | null;
+  completed_at: string | null;
+  started_by: string | null;
+  created_at: string;
+  updated_at: string;
+  step_states: StepState[];
 }
 
 export interface InstanceCreatePayload {
   route_id: string;
   target_kind: string;
   target_id: string;
-  /** Optional one-off note shown next to the started-at audit row. */
-  note?: string | null;
 }
 
 export interface InstanceDecidePayload {
@@ -143,4 +132,12 @@ export interface InstanceDecidePayload {
 
 export interface InstanceCancelPayload {
   reason?: string | null;
+}
+
+/** Metadata payload from GET /approval-routes/meta — single source of
+ *  truth for the validated whitelists so the UI never drifts from the DB. */
+export interface ApprovalRoutesMeta {
+  target_kinds: string[];
+  step_modes: RouteStepMode[];
+  instance_statuses: InstanceStatus[];
 }

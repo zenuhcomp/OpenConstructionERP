@@ -130,7 +130,9 @@ export function CreateBOQModal({ open, onClose, defaultProjectId }: CreateBOQMod
             label={t('boq.name_label', { defaultValue: 'BOQ Name' })}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Main Building — Structural Works"
+            placeholder={t('boq.name_placeholder', {
+              defaultValue: 'e.g. Main Building - Structural Works',
+            })}
             required aria-required="true"
             autoFocus
           />

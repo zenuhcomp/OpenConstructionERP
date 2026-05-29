@@ -110,10 +110,23 @@ def user_b() -> uuid.UUID:
     return uuid.uuid4()
 
 
-def _set_acting_user(user_id: uuid.UUID, tenant_id: str | None = None) -> None:
+def _set_acting_user(
+    user_id: uuid.UUID,
+    tenant_id: str | None = None,
+    *,
+    role: str = "admin",
+) -> None:
+    # The compile / list / get / delete verbs are RBAC-gated
+    # (``compliance.rule.*``). This bare test app mounts only the router
+    # and never runs the module ``on_startup`` that registers those
+    # permissions, so we act as ``admin`` to exercise the tenant-scoping
+    # logic through the admin-bypass path. Owner-only / tenant isolation
+    # are still enforced at the service layer and asserted below.
     _current_user_payload.clear()
     _current_user_payload["sub"] = str(user_id)
     _current_user_payload["tenant_id"] = tenant_id or str(user_id)
+    _current_user_payload["role"] = role
+    _current_user_payload["permissions"] = []
 
 
 _GOOD_DSL = (
@@ -284,3 +297,61 @@ async def test_delete_rule_owner_only(
     # And subsequent GET is 404.
     resp_after = await client.get(f"/api/v1/compliance/dsl/rules/{rule_pk}")
     assert resp_after.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_compile_or_delete(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+) -> None:
+    """A VIEWER is rejected by the rule-builder write/delete RBAC gate."""
+    from app.modules.compliance.permissions import (
+        register_compliance_permissions,
+    )
+
+    # The bare test app skips module on_startup, so register the gate's
+    # permissions explicitly to drive the non-admin live-registry path.
+    register_compliance_permissions()
+
+    _set_acting_user(user_a, role="viewer")
+
+    compile_resp = await client.post(
+        "/api/v1/compliance/dsl/compile",
+        json={"definition_yaml": _make_dsl("viewer"), "activate": True},
+    )
+    assert compile_resp.status_code == 403, compile_resp.text
+
+    list_resp = await client.get("/api/v1/compliance/dsl/rules")
+    # Listing requires EDITOR — a VIEWER is also denied.
+    assert list_resp.status_code == 403, list_resp.text
+
+    delete_resp = await client.delete(
+        f"/api/v1/compliance/dsl/rules/{uuid.uuid4()}",
+    )
+    assert delete_resp.status_code == 403, delete_resp.text
+
+
+@pytest.mark.asyncio
+async def test_editor_can_read_but_not_create(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+) -> None:
+    """An EDITOR can list rules but cannot author one (MANAGER+)."""
+    from app.modules.compliance.permissions import (
+        register_compliance_permissions,
+    )
+
+    register_compliance_permissions()
+
+    _set_acting_user(user_a, role="editor")
+
+    # EDITOR satisfies compliance.rule.read.
+    list_resp = await client.get("/api/v1/compliance/dsl/rules")
+    assert list_resp.status_code == 200, list_resp.text
+
+    # ...but not compliance.rule.create (MANAGER).
+    compile_resp = await client.post(
+        "/api/v1/compliance/dsl/compile",
+        json={"definition_yaml": _make_dsl("editor"), "activate": True},
+    )
+    assert compile_resp.status_code == 403, compile_resp.text

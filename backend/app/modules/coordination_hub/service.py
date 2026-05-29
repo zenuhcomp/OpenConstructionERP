@@ -396,9 +396,15 @@ class CoordinationHubService:
             select(func.count(BIMRequirementSet.id)).where(BIMRequirementSet.project_id == project_id),
             label="rule_pack_installed",
         )
-        # Active vs inactive requirement rows. The hub treats active = pass
-        # candidates, inactive = explicitly disabled (i.e. "soft fail"); a
-        # real evaluation engine result would override this if available.
+        # Active vs disabled requirement rows. These are CONFIGURATION
+        # states (``is_active`` flag), NOT the result of running an
+        # evaluation engine against a model: ``last_check_pass_count`` is
+        # really "rules currently active" and ``last_check_fail_count`` is
+        # "rules explicitly disabled". The UI relabels them honestly
+        # ("active / disabled") and the health banner does NOT treat a
+        # disabled rule as a failing check. A future real-evaluation hook
+        # can populate true pass/fail counts without changing the wire
+        # shape.
         active_q = (
             select(func.count(BIMRequirement.id))
             .join(
@@ -446,14 +452,14 @@ class CoordinationHubService:
             logger.warning("coordination_hub: smart_views unavailable")
             return SmartViewStats()
 
-        # Project-scoped views are addressed by ``scope_id == project_id``.
-        # User-scoped views can't be filtered by project (they're owned
-        # by a user globally) — we count any user-scoped view created by
-        # any member of the project would require a user-project join
-        # that doesn't generalise cheaply. Counting all user-scoped views
-        # is a low-fidelity but defensible "ambient" signal; users with
-        # multiple projects will see the same number across them, which
-        # matches how BIMcollab Zoom surfaces its personal-view drawer.
+        # Project-scoped views are addressed by ``scope_id == project_id``
+        # and are a true per-project count. User-scoped ("personal")
+        # views are owned by a user GLOBALLY and carry no project link,
+        # so ``user_count`` is deliberately an ALL-PROJECTS figure — there
+        # is no cheap user-project join to scope it. The UI must label it
+        # "personal views (all projects)" rather than implying it is
+        # project-scoped; this matches how BIMcollab Zoom surfaces its
+        # personal-view drawer (one global list across projects).
         project_count = await _safe_count(
             self.session,
             select(func.count(SmartView.id)).where(
@@ -742,15 +748,27 @@ class CoordinationHubService:
         rows = await _safe_list(self.session, stmt, label="timeline_clash")
         out: list[TimelineEvent] = []
         for rid, name, ts, by, total, status_ in rows:
+            completed = status_ == "completed"
+            total_int = int(total or 0)
+            status_label = status_ or "pending"
+            summary = (
+                f"Clash run '{name}' completed - {total_int} clashes"
+                if completed
+                else f"Clash run '{name}' - {status_label}"
+            )
             out.append(
                 TimelineEvent(
                     ts=ts,
                     type="clash_run",
-                    summary=(
-                        f"Clash run '{name}' completed — {total} clashes"
-                        if status_ == "completed"
-                        else f"Clash run '{name}' — {status_ or 'pending'}"
-                    ),
+                    params={
+                        "name": name,
+                        "total": total_int,
+                        "status": status_label,
+                        # Sub-type so the client picks the right template
+                        # without re-deriving "completed" from status.
+                        "kind": "completed" if completed else "pending",
+                    },
+                    summary=summary,
                     user_id=str(by) if by else None,
                     target=f"/clash?run={rid}",
                 )
@@ -782,6 +800,7 @@ class CoordinationHubService:
             TimelineEvent(
                 ts=ts,
                 type="federation_created",
+                params={"name": name},
                 summary=f"Federation '{name}' created",
                 user_id=None,
                 target=f"/bim/federations?id={fid}",
@@ -815,6 +834,7 @@ class CoordinationHubService:
             TimelineEvent(
                 ts=ts,
                 type="rule_pack_installed",
+                params={"name": name},
                 summary=f"Rule pack '{name}' installed",
                 user_id=str(by) if by else None,
                 target="/bim/rules?mode=requirements",
@@ -849,6 +869,7 @@ class CoordinationHubService:
             TimelineEvent(
                 ts=ts,
                 type="bcf_export",
+                params={"name": title, "status": status_},
                 summary=f"BCF topic '{title}' ({status_})",
                 user_id=str(by) if by else None,
                 target="/bcf",

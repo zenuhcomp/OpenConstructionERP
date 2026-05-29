@@ -22,10 +22,12 @@ import clsx from 'clsx';
 import { Button, WideModal, WideModalSection } from '@/shared/ui';
 import { useToastStore } from '@/stores/useToastStore';
 import { apiGet } from '@/shared/lib/api';
-import { createRoute, updateRoute } from './api';
+import { approvalRoutesKeys, createRoute, getMeta, updateRoute } from './api';
+import { kindLabel } from './labels';
 import type {
   ApprovalRoute,
   ApprovalRouteCreatePayload,
+  ApprovalRouteUpdatePayload,
   RouteStepMode,
   RouteStepPayload,
 } from './types';
@@ -55,18 +57,28 @@ const KNOWN_ROLES = [
   'subcontractor',
 ];
 
-const KNOWN_TARGET_KINDS = [
+// Fallback whitelist used only until the /meta query resolves — kept in
+// sync with backend models.TARGET_KINDS. The live list comes from the
+// backend so the two can never drift.
+const FALLBACK_TARGET_KINDS = [
   'markup',
   'submittal',
-  'rfi',
-  'file',
-  'variation',
   'change_order',
-  'document',
-  'inspection',
+  'rfi',
+  'contract',
+  'variation',
+  'invoice',
+  'purchase_order',
 ];
 
 const MODE_OPTIONS: RouteStepMode[] = ['all', 'any', 'majority'];
+
+/** Modes available for a role-pinned step. The engine cannot expand a
+ *  role to its members, so ``all`` / ``majority`` would silently degrade
+ *  to "first approval wins"; only ``any`` is enforceable for role steps.
+ *  User-pinned steps are inherently single-approver so any mode behaves
+ *  identically. */
+const ROLE_STEP_MODES: RouteStepMode[] = ['any'];
 
 export interface RouteEditorProps {
   open: boolean;
@@ -128,7 +140,6 @@ export function RouteEditor({
   const isEdit = route != null;
 
   const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
   const [projectId, setProjectId] = useState<string>('');
   const [targetKind, setTargetKind] = useState<string>('markup');
   const [isActive, setIsActive] = useState(true);
@@ -139,24 +150,31 @@ export function RouteEditor({
     if (!open) return;
     if (route) {
       setName(route.name);
-      setDescription(route.description ?? '');
       setProjectId(route.project_id ?? '');
       setTargetKind(route.target_kind);
       setIsActive(route.is_active);
       setSteps(
         [...route.steps]
-          .sort((a, b) => a.sort_order - b.sort_order)
+          .sort((a, b) => a.ordinal - b.ordinal)
           .map(toDraft),
       );
     } else {
       setName('');
-      setDescription('');
       setProjectId(defaultProjectId ?? '');
       setTargetKind(defaultTargetKind ?? 'markup');
       setIsActive(true);
       setSteps([emptyDraftStep()]);
     }
   }, [open, route, defaultProjectId, defaultTargetKind]);
+
+  // Target kinds from the backend whitelist (single source of truth).
+  const { data: meta } = useQuery({
+    queryKey: approvalRoutesKeys.meta(),
+    queryFn: () => getMeta(),
+    staleTime: 10 * 60_000,
+    enabled: open,
+  });
+  const targetKinds = meta?.target_kinds ?? FALLBACK_TARGET_KINDS;
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
@@ -193,7 +211,7 @@ export function RouteEditor({
   });
 
   const updateMut = useMutation({
-    mutationFn: (vars: { id: string; payload: ApprovalRouteCreatePayload }) =>
+    mutationFn: (vars: { id: string; payload: ApprovalRouteUpdatePayload }) =>
       updateRoute(vars.id, vars.payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['approval-routes'] });
@@ -297,24 +315,37 @@ export function RouteEditor({
       });
       return;
     }
-    const stepPayloads: RouteStepPayload[] = steps.map((s, idx) => ({
-      sort_order: idx,
-      approver_role: s.approver_role.trim() || null,
-      approver_user_id: s.approver_user_id.trim() || null,
-      mode: s.mode,
-      sla_hours: s.sla_hours ? parseInt(s.sla_hours, 10) : null,
-    }));
-    const payload: ApprovalRouteCreatePayload = {
-      project_id: projectId || null,
-      target_kind: targetKind.trim(),
-      name: name.trim(),
-      description: description.trim() || null,
-      is_active: isActive,
-      steps: stepPayloads,
-    };
+    // 1-based dense ordinals — the backend rejects 0-based or gapped lists.
+    const stepPayloads: RouteStepPayload[] = steps.map((s, idx) => {
+      const isRoleStep = !s.approver_user_id.trim();
+      // Role steps can only enforce ``any`` (the engine can't expand a
+      // role to its members), so coerce any stale ``all``/``majority``.
+      const mode: RouteStepMode = isRoleStep ? 'any' : s.mode;
+      return {
+        ordinal: idx + 1,
+        approver_role: s.approver_role.trim() || null,
+        approver_user_id: s.approver_user_id.trim() || null,
+        mode,
+        sla_hours: s.sla_hours ? parseInt(s.sla_hours, 10) : null,
+      };
+    });
     if (isEdit && route) {
+      // target_kind and project_id are immutable on the backend, so the
+      // patch only carries name / is_active / steps.
+      const payload: ApprovalRouteUpdatePayload = {
+        name: name.trim(),
+        is_active: isActive,
+        steps: stepPayloads,
+      };
       updateMut.mutate({ id: route.id, payload });
     } else {
+      const payload: ApprovalRouteCreatePayload = {
+        project_id: projectId || null,
+        target_kind: targetKind.trim(),
+        name: name.trim(),
+        is_active: isActive,
+        steps: stepPayloads,
+      };
       createMut.mutate(payload);
     }
   };
@@ -376,17 +407,25 @@ export function RouteEditor({
           <select
             value={targetKind}
             onChange={(e) => setTargetKind(e.target.value)}
-            className="h-9 w-full rounded-md border border-border bg-surface-primary px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue cursor-pointer"
+            disabled={isEdit}
+            className="h-9 w-full rounded-md border border-border bg-surface-primary px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {KNOWN_TARGET_KINDS.map((k) => (
+            {targetKinds.map((k) => (
               <option key={k} value={k}>
-                {k}
+                {kindLabel(t, k)}
               </option>
             ))}
-            {!KNOWN_TARGET_KINDS.includes(targetKind) && (
-              <option value={targetKind}>{targetKind}</option>
+            {!targetKinds.includes(targetKind) && (
+              <option value={targetKind}>{kindLabel(t, targetKind)}</option>
             )}
           </select>
+          {isEdit && (
+            <p className="mt-0.5 text-2xs text-content-tertiary">
+              {t('approvalRoutes.target_kind_locked', {
+                defaultValue: 'Target kind cannot be changed after creation.',
+              })}
+            </p>
+          )}
         </div>
 
         <div>
@@ -396,7 +435,8 @@ export function RouteEditor({
           <select
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            className="h-9 w-full rounded-md border border-border bg-surface-primary px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue cursor-pointer"
+            disabled={isEdit}
+            className="h-9 w-full rounded-md border border-border bg-surface-primary px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <option value="">
               {t('approvalRoutes.global_route', {
@@ -409,22 +449,13 @@ export function RouteEditor({
               </option>
             ))}
           </select>
-        </div>
-
-        <div className="sm:col-span-2">
-          <label className="block text-xs font-medium text-content-secondary mb-1">
-            {t('approvalRoutes.description', { defaultValue: 'Description' })}
-          </label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={2}
-            className="w-full rounded-md border border-border bg-surface-primary px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue"
-            placeholder={t('approvalRoutes.description_placeholder', {
-              defaultValue:
-                'Short note for admins — when to use this route, who it covers, exceptions.',
-            })}
-          />
+          {isEdit && (
+            <p className="mt-0.5 text-2xs text-content-tertiary">
+              {t('approvalRoutes.project_locked', {
+                defaultValue: 'Scope cannot be changed after creation.',
+              })}
+            </p>
+          )}
         </div>
 
         <label className="sm:col-span-2 inline-flex items-center gap-2 text-sm text-content-secondary">
@@ -507,6 +538,10 @@ function StepEditorRow({
 }: StepEditorRowProps) {
   const { t } = useTranslation();
   const userMode = Boolean(step.approver_user_id);
+  // Role steps can only enforce ``any`` (the engine can't expand roles);
+  // user-pinned steps are single-approver so every mode is equivalent —
+  // we still expose the full list there for forward compatibility.
+  const availableModes = userMode ? MODE_OPTIONS : ROLE_STEP_MODES;
   return (
     <div className="rounded-lg border border-border-light bg-surface-secondary/40 p-3">
       <div className="flex items-center gap-2 mb-2">
@@ -645,11 +680,12 @@ function StepEditorRow({
             {t('approvalRoutes.mode', { defaultValue: 'Mode' })}
           </label>
           <select
-            value={step.mode}
+            value={availableModes.includes(step.mode) ? step.mode : availableModes[0]}
             onChange={(e) => onChange('mode', e.target.value as RouteStepMode)}
-            className="h-8 w-full rounded-md border border-border bg-surface-primary px-2 text-xs focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue cursor-pointer"
+            disabled={availableModes.length <= 1}
+            className="h-8 w-full rounded-md border border-border bg-surface-primary px-2 text-xs focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {MODE_OPTIONS.map((m) => (
+            {availableModes.map((m) => (
               <option key={m} value={m}>
                 {t(`approvalRoutes.mode_${m}`, {
                   defaultValue:
@@ -662,6 +698,14 @@ function StepEditorRow({
               </option>
             ))}
           </select>
+          {!userMode && (
+            <p className="mt-0.5 text-2xs text-content-tertiary">
+              {t('approvalRoutes.mode_role_note', {
+                defaultValue:
+                  'Role steps clear on the first approval — the engine does not expand roles to all members.',
+              })}
+            </p>
+          )}
         </div>
 
         {/* SLA */}

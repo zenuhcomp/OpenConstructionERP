@@ -225,7 +225,17 @@ function ContextPickerDialog({ kind, onClose, onPick }: ContextPickerDialogProps
           );
           if (cancelled) return;
           setItems(
-            rows.map((r) => ({ id: r.id, name: r.name, subtitle: r.status ?? null })),
+            rows.map((r) => ({
+              id: r.id,
+              name: r.name,
+              // Translate the raw project status enum so the picker
+              // subtitle doesn't leak machine values like 'in_progress'.
+              subtitle: r.status
+                ? t(`geo_hub.picker.project_status_${r.status}`, {
+                    defaultValue: r.status.replace(/_/g, ' '),
+                  })
+                : null,
+            })),
           );
         } else {
           const rows = await apiGet<

@@ -3,21 +3,23 @@
 //
 // ApprovalInstanceCard — drop-in approval-workflow surface.
 //
-// Any feature (markups, submittals, RFIs, files, …) can mount this and
-// pass ``targetKind`` + ``targetId`` to render the running approval state
-// for that record. Three rendering modes:
+// Any feature (markups, submittals, RFIs, …) can mount this and pass
+// ``targetKind`` + ``targetId`` to render the running approval state for
+// that record. Three rendering modes:
 //
 //   1. No instance exists for the target →
-//      compact "Start approval" card (only shown when a route template
-//      exists for this kind, otherwise nothing renders — the consumer
-//      keeps the slot clean).
+//      compact "Start approval" card (only shown when an active route
+//      template exists for this kind, otherwise nothing renders).
 //   2. Running / closed instance(s) exist →
 //      step-ladder with status pills + decision actions for the active
 //      approver.
 //   3. Loading / error → skeleton + recovery card.
 //
-// The card is self-contained: it owns its data fetch, mutations, and
-// toasts, so callers add it with two props and stop.
+// The backend instance row is flat: it carries `step_states` (one
+// decision row per approver per step) plus a 1-based
+// `current_step_ordinal`. We join those decisions against the route's
+// `steps` (fetched via getRoute) to reconstruct the ladder, since the
+// engine never expands roles into a per-step assignee list.
 
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -45,15 +47,18 @@ import {
   approvalRoutesKeys,
   cancelInstance,
   decideInstance,
+  getRoute,
   listInstances,
   listRoutes,
   startInstance,
 } from './api';
 import type {
   ApprovalInstance,
-  InstanceStep,
-  InstanceStepStatus,
+  ApprovalRoute,
+  RouteStep,
+  RouteStepMode,
   StepDecision,
+  StepState,
 } from './types';
 
 interface MeResponse {
@@ -63,15 +68,17 @@ interface MeResponse {
   role?: string;
 }
 
+/** Derived per-step status used purely for the visual ladder. */
+type LadderStepStatus = 'pending' | 'active' | 'approved' | 'rejected';
+
 const STATUS_BADGE: Record<
-  InstanceStepStatus,
+  LadderStepStatus,
   { variant: 'neutral' | 'blue' | 'success' | 'warning' | 'error'; icon: typeof Circle }
 > = {
   pending: { variant: 'neutral', icon: Circle },
   active: { variant: 'blue', icon: Clock },
   approved: { variant: 'success', icon: CheckCircle2 },
   rejected: { variant: 'error', icon: XCircle },
-  skipped: { variant: 'neutral', icon: Ban },
 };
 
 export interface ApprovalInstanceCardProps {
@@ -88,6 +95,49 @@ export interface ApprovalInstanceCardProps {
   showEmpty?: boolean;
   /** Extra class applied to the outer Card wrapper. */
   className?: string;
+}
+
+/** View-model for one rung of the ladder: the template step joined with
+ *  its decision rows for this instance. */
+interface LadderStep {
+  step: RouteStep;
+  states: StepState[];
+  status: LadderStepStatus;
+  isCurrent: boolean;
+}
+
+function buildLadder(
+  route: ApprovalRoute | undefined,
+  instance: ApprovalInstance,
+): LadderStep[] {
+  if (!route) return [];
+  const byStep = new Map<string, StepState[]>();
+  for (const s of instance.step_states) {
+    const arr = byStep.get(s.step_id) ?? [];
+    arr.push(s);
+    byStep.set(s.step_id, arr);
+  }
+  const steps = [...route.steps].sort((a, b) => a.ordinal - b.ordinal);
+  return steps.map((step) => {
+    const states = byStep.get(step.id) ?? [];
+    const hasReject = states.some((s) => s.decision === 'rejected');
+    const hasApprove = states.some((s) => s.decision === 'approved');
+    const isCurrent =
+      instance.status === 'pending' &&
+      step.ordinal === instance.current_step_ordinal;
+    let status: LadderStepStatus;
+    if (hasReject) {
+      status = 'rejected';
+    } else if (step.ordinal < instance.current_step_ordinal) {
+      // The cursor moved past this step — it was cleared.
+      status = 'approved';
+    } else if (isCurrent) {
+      status = hasApprove ? 'approved' : 'active';
+    } else {
+      status = 'pending';
+    }
+    return { step, states, status, isCurrent };
+  });
 }
 
 export function ApprovalInstanceCard({
@@ -122,14 +172,31 @@ export function ApprovalInstanceCard({
     staleTime: 10_000,
   });
 
+  const instances = instancesQuery.data ?? [];
+  // The single active workflow (the engine rejects a second pending
+  // instance on the same target). ``pending`` IS the active state.
+  const activeInstance = instances.find((i) => i.status === 'pending');
+  const historicalInstances = instances.filter((i) => i !== activeInstance);
+
+  // Fetch the active instance's route so we can render the step ladder —
+  // the instance row only carries step_states, not the template steps.
+  const routeQuery = useQuery({
+    queryKey: activeInstance
+      ? approvalRoutesKeys.route(activeInstance.route_id)
+      : ['approval-routes', 'route', 'none'],
+    queryFn: () => getRoute(activeInstance!.route_id),
+    enabled: Boolean(activeInstance),
+    staleTime: 60_000,
+  });
+
   // Only fetch route templates when we need to show the start picker —
   // saves a request on the hot read path where an instance already
-  // exists.
-  const hasInstance = (instancesQuery.data ?? []).length > 0;
-  const wantsRoutes = !hasInstance && (showStartPicker || showEmpty);
+  // exists. Only active templates can start a workflow.
+  const wantsRoutes = !activeInstance && (showStartPicker || showEmpty);
   const routesQuery = useQuery({
     queryKey: approvalRoutesKeys.routes(projectId, targetKind),
-    queryFn: () => listRoutes({ projectId, targetKind }),
+    queryFn: () =>
+      listRoutes({ projectId, targetKind, includeInactive: false }),
     enabled: Boolean(targetKind && wantsRoutes),
     staleTime: 60_000,
   });
@@ -223,6 +290,12 @@ export function ApprovalInstanceCard({
       }),
   });
 
+  const ladder = useMemo(
+    () =>
+      activeInstance ? buildLadder(routeQuery.data, activeInstance) : [],
+    [activeInstance, routeQuery.data],
+  );
+
   /* ── Render branches ────────────────────────────────────────────── */
 
   if (instancesQuery.isLoading) {
@@ -245,12 +318,6 @@ export function ApprovalInstanceCard({
       </Card>
     );
   }
-
-  const instances = instancesQuery.data ?? [];
-  const activeInstance = instances.find(
-    (i) => i.status === 'in_progress' || i.status === 'pending',
-  );
-  const historicalInstances = instances.filter((i) => i !== activeInstance);
 
   // No running instance — render the "start" affordance.
   if (!activeInstance) {
@@ -332,17 +399,12 @@ export function ApprovalInstanceCard({
   }
 
   // Running instance.
-  const activeStepIndex =
-    activeInstance.current_step_index >= 0
-      ? activeInstance.current_step_index
-      : activeInstance.steps.findIndex((s) => s.status === 'active');
-
   return (
     <Card padding="sm" className={className} data-testid="approval-instance-card">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <p className="text-sm font-semibold text-content-primary truncate">
-            {activeInstance.route_name ||
+            {routeQuery.data?.name ||
               t('approvalRoutes.title', { defaultValue: 'Approval' })}
           </p>
           <InstanceStatusBadge status={activeInstance.status} />
@@ -362,32 +424,35 @@ export function ApprovalInstanceCard({
 
       {expanded && (
         <div className="mt-3 space-y-2">
-          {activeInstance.steps.map((step, idx) => (
-            <StepRow
-              key={step.id}
-              step={step}
-              index={idx}
-              total={activeInstance.steps.length}
-              isCurrent={idx === activeStepIndex}
-              currentUserId={currentUserId}
-              comment={comments[step.id] ?? ''}
-              onCommentChange={(value) =>
-                setComments((p) => ({ ...p, [step.id]: value }))
-              }
-              onDecide={(decision) =>
-                decideMut.mutate({
-                  instanceId: activeInstance.id,
-                  stepId: step.id,
-                  decision,
-                  comment: comments[step.id] ?? '',
-                })
-              }
-              deciding={
-                decideMut.isPending &&
-                decideMut.variables?.stepId === step.id
-              }
-            />
-          ))}
+          {routeQuery.isLoading ? (
+            <Skeleton className="h-12 w-full" />
+          ) : (
+            ladder.map((rung, idx) => (
+              <StepRow
+                key={rung.step.id}
+                rung={rung}
+                index={idx}
+                total={ladder.length}
+                currentUserId={currentUserId}
+                comment={comments[rung.step.id] ?? ''}
+                onCommentChange={(value) =>
+                  setComments((p) => ({ ...p, [rung.step.id]: value }))
+                }
+                onDecide={(decision) =>
+                  decideMut.mutate({
+                    instanceId: activeInstance.id,
+                    stepId: rung.step.id,
+                    decision,
+                    comment: comments[rung.step.id] ?? '',
+                  })
+                }
+                deciding={
+                  decideMut.isPending &&
+                  decideMut.variables?.stepId === rung.step.id
+                }
+              />
+            ))
+          )}
 
           <div className="flex items-center justify-end pt-1">
             <Button
@@ -423,10 +488,7 @@ function InstanceStatusBadge({ status }: { status: ApprovalInstance['status'] })
           ? 'neutral'
           : 'blue';
   const label = t(`approvalRoutes.status_${status}`, {
-    defaultValue:
-      status === 'in_progress'
-        ? 'In progress'
-        : status.charAt(0).toUpperCase() + status.slice(1),
+    defaultValue: status.charAt(0).toUpperCase() + status.slice(1),
   });
   return (
     <Badge variant={variant} size="sm">
@@ -436,10 +498,9 @@ function InstanceStatusBadge({ status }: { status: ApprovalInstance['status'] })
 }
 
 interface StepRowProps {
-  step: InstanceStep;
+  rung: LadderStep;
   index: number;
   total: number;
-  isCurrent: boolean;
   currentUserId: string | null;
   comment: string;
   onCommentChange: (value: string) => void;
@@ -448,10 +509,9 @@ interface StepRowProps {
 }
 
 function StepRow({
-  step,
+  rung,
   index,
   total,
-  isCurrent,
   currentUserId,
   comment,
   onCommentChange,
@@ -459,26 +519,35 @@ function StepRow({
   deciding,
 }: StepRowProps) {
   const { t } = useTranslation();
-  const cfg = STATUS_BADGE[step.status] ?? STATUS_BADGE.pending;
+  const { step, states, status, isCurrent } = rung;
+  const cfg = STATUS_BADGE[status] ?? STATUS_BADGE.pending;
   const StatusIcon = cfg.icon;
 
-  // The current user can act when (a) the step is active, and (b) they
-  // appear in the assignees list with no decision yet. ``approver_user_id``
-  // covers the user-pinned case; ``approver_role`` is expanded to a
-  // populated assignees list by the backend at start-time.
-  const myAssignment = useMemo(() => {
-    if (!currentUserId) return null;
-    return step.assignees.find((a) => a.user_id === currentUserId) ?? null;
-  }, [step.assignees, currentUserId]);
-  const canAct = isCurrent && myAssignment && myAssignment.decision === null;
+  // Whether the current user already recorded a decision on this step.
+  const myDecision = useMemo(
+    () =>
+      currentUserId
+        ? states.find((s) => s.approver_user_id === currentUserId) ?? null
+        : null,
+    [states, currentUserId],
+  );
+
+  // The current user can act when the step is the active one and they
+  // have not already decided. For a user-pinned step only the named user
+  // may act; role steps are open to any approver with the decide
+  // permission (the backend is the authority — a 403 surfaces as a toast).
+  const isNamedApprover =
+    step.approver_user_id != null && step.approver_user_id === currentUserId;
+  const isRoleStep = step.approver_user_id == null;
+  const canAct =
+    isCurrent &&
+    !myDecision &&
+    (isNamedApprover || isRoleStep);
 
   const approverLabel =
     step.approver_role ||
-    (step.assignees.length > 0
-      ? step.assignees
-          .map((a) => a.user_name || a.user_email || a.user_id)
-          .join(', ')
-      : t('approvalRoutes.approver_unassigned', { defaultValue: 'Unassigned' }));
+    step.approver_user_id ||
+    t('approvalRoutes.approver_unassigned', { defaultValue: 'Unassigned' });
 
   return (
     <div
@@ -494,11 +563,10 @@ function StepRow({
           size={14}
           className={clsx(
             'shrink-0',
-            step.status === 'approved' && 'text-semantic-success',
-            step.status === 'rejected' && 'text-semantic-error',
-            step.status === 'active' && 'text-oe-blue',
-            step.status === 'pending' && 'text-content-tertiary',
-            step.status === 'skipped' && 'text-content-tertiary',
+            status === 'approved' && 'text-semantic-success',
+            status === 'rejected' && 'text-semantic-error',
+            status === 'active' && 'text-oe-blue',
+            status === 'pending' && 'text-content-tertiary',
           )}
         />
         <span className="text-xs font-medium text-content-secondary tabular-nums">
@@ -512,20 +580,15 @@ function StepRow({
           {approverLabel}
         </span>
         <Badge variant={cfg.variant} size="sm" className="ml-auto">
-          {t(`approvalRoutes.step_status_${step.status}`, {
-            defaultValue: step.status,
+          {t(`approvalRoutes.step_status_${status}`, {
+            defaultValue: status.charAt(0).toUpperCase() + status.slice(1),
           })}
         </Badge>
       </div>
 
       <p className="mt-1 text-2xs text-content-tertiary">
         {t(`approvalRoutes.mode_${step.mode}`, {
-          defaultValue:
-            step.mode === 'all'
-              ? 'All approvers'
-              : step.mode === 'any'
-                ? 'Any approver'
-                : 'Majority',
+          defaultValue: modeDefault(step.mode),
         })}
         {step.sla_hours != null && (
           <>
@@ -554,7 +617,7 @@ function StepRow({
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => onDecide('reject')}
+              onClick={() => onDecide('rejected')}
               loading={deciding}
               icon={<XCircle size={13} />}
               data-testid={`approval-reject-${step.id}`}
@@ -564,7 +627,7 @@ function StepRow({
             <Button
               size="sm"
               variant="primary"
-              onClick={() => onDecide('approve')}
+              onClick={() => onDecide('approved')}
               loading={deciding}
               icon={<CheckCircle2 size={13} />}
               data-testid={`approval-approve-${step.id}`}
@@ -575,27 +638,30 @@ function StepRow({
         </div>
       )}
 
-      {/* Per-assignee decision audit row (visible once decided). */}
-      {step.assignees.some((a) => a.decision != null) && (
+      {/* Per-decision audit rows (visible once recorded). */}
+      {states.some((s) => s.decision !== 'pending') && (
         <ul className="mt-2 space-y-0.5">
-          {step.assignees
-            .filter((a) => a.decision != null)
-            .map((a) => (
+          {states
+            .filter((s) => s.decision !== 'pending')
+            .map((s) => (
               <li
-                key={a.user_id}
+                key={s.id}
                 className="flex items-center gap-1.5 text-2xs text-content-tertiary"
               >
-                {a.decision === 'approve' ? (
+                {s.decision === 'approved' ? (
                   <CheckCircle2 size={11} className="text-semantic-success" />
                 ) : (
                   <XCircle size={11} className="text-semantic-error" />
                 )}
                 <span className="truncate">
-                  {a.user_name || a.user_email || a.user_id}
+                  {s.approver_user_id ??
+                    t('approvalRoutes.approver_unassigned', {
+                      defaultValue: 'Unassigned',
+                    })}
                 </span>
-                {a.comment && (
+                {s.comment && (
                   <span className="text-content-tertiary truncate">
-                    — {a.comment}
+                    — {s.comment}
                   </span>
                 )}
               </li>
@@ -604,6 +670,12 @@ function StepRow({
       )}
     </div>
   );
+}
+
+function modeDefault(mode: RouteStepMode): string {
+  if (mode === 'all') return 'All approvers';
+  if (mode === 'any') return 'Any approver';
+  return 'Majority';
 }
 
 function HistoryList({ instances }: { instances: ApprovalInstance[] }) {
@@ -621,10 +693,10 @@ function HistoryList({ instances }: { instances: ApprovalInstance[] }) {
             className="flex items-center gap-2 text-xs text-content-secondary"
           >
             <InstanceStatusBadge status={i.status} />
-            <span className="truncate">{i.route_name || i.id.slice(0, 8)}</span>
-            {i.closed_at && (
+            <span className="truncate">{i.id.slice(0, 8)}</span>
+            {i.completed_at && (
               <span className="text-content-tertiary text-2xs ml-auto">
-                {new Date(i.closed_at).toLocaleDateString()}
+                {new Date(i.completed_at).toLocaleDateString()}
               </span>
             )}
           </li>

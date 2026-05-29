@@ -1553,3 +1553,351 @@ async def test_drill_down_forwards_period_and_filters(
     assert seen.get("period_start") == ps
     assert seen.get("period_end") == pe
     assert seen.get("filters") == {"region": "EU"}
+
+
+# ── Financial KPI data-integrity + FX (audit findings #1/#3/#8/#9) ─────
+
+
+@pytest_asyncio.fixture
+async def finance_session() -> AsyncSession:
+    """Session with bi_dashboards + projects + finance + procurement + ncr
+    tables so the financial KPIs can read real source rows."""
+    from app.modules.bi_dashboards import models as _bi
+    from app.modules.finance import models as _fin
+    from app.modules.ncr import models as _ncr
+    from app.modules.procurement import models as _proc
+    from app.modules.projects import models as _proj
+    from app.modules.users import models as _users
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    tables = [
+        _bi.KPIValue.__table__,
+        _users.User.__table__,
+        _proj.Project.__table__,
+        _fin.Invoice.__table__,
+        _fin.Payment.__table__,
+        _proc.PurchaseOrder.__table__,
+        _ncr.NCR.__table__,
+    ]
+    # ``PurchaseOrder`` and ``Invoice`` declare ``lazy="selectin"`` child
+    # relationships (PO items / goods receipts, invoice items), so a bare
+    # ``select(PurchaseOrder)`` / ``select(Invoice)`` eager-loads those child
+    # tables — they must exist or the query raises ``no such table``. Add the
+    # child tables (best-effort: tolerate models that don't expose them) so
+    # the financial KPIs can read their source rows under the in-memory DB.
+    for _mod, _attrs in (
+        (_proc, ("PurchaseOrderItem", "GoodsReceipt", "GoodsReceiptItem")),
+        (_fin, ("InvoiceItem", "InvoiceLine", "InvoiceLineItem")),
+    ):
+        for _attr in _attrs:
+            _cls = getattr(_mod, _attr, None)
+            if _cls is not None and hasattr(_cls, "__table__") and _cls.__table__ not in tables:
+                tables.append(_cls.__table__)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all, tables=tables)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as s:
+        yield s
+    await engine.dispose()
+
+
+async def _make_project(session: AsyncSession, *, currency: str, fx: list | None = None):
+    from app.modules.projects.models import Project
+    from app.modules.users.models import User
+
+    owner = User(
+        email=f"owner-{uuid.uuid4().hex}@example.test",
+        hashed_password="x",
+        full_name="Owner",
+    )
+    session.add(owner)
+    await session.flush()
+    proj = Project(
+        name="P",
+        description="",
+        owner_id=owner.id,
+        currency=currency,
+        fx_rates=fx or [],
+    )
+    session.add(proj)
+    await session.flush()
+    return proj
+
+
+@pytest.mark.asyncio
+async def test_evm_ac_sums_payments_and_pos_with_fx(
+    finance_session: AsyncSession,
+) -> None:
+    """AC is no longer always-zero: it sums settled payments + POs, and
+    foreign-currency rows are converted into the project base currency via
+    fx_rates before being added (no blind mixed-currency sum)."""
+    from app.modules.bi_dashboards import kpis
+    from app.modules.finance.models import Invoice, Payment
+    from app.modules.procurement.models import PurchaseOrder
+
+    # Base EUR; USD trades at 0.90 EUR per 1 USD.
+    proj = await _make_project(
+        finance_session,
+        currency="EUR",
+        fx=[{"code": "USD", "rate": "0.90", "label": "US Dollar"}],
+    )
+    # A payable invoice with a 100 EUR settled payment.
+    inv = Invoice(
+        project_id=proj.id,
+        invoice_direction="payable",
+        invoice_number="INV-1",
+        invoice_date="2026-05-01",
+        currency_code="EUR",
+        amount_total=Decimal("100"),
+    )
+    finance_session.add(inv)
+    await finance_session.flush()
+    finance_session.add(
+        Payment(
+            invoice_id=inv.id,
+            payment_date="2026-05-10",
+            amount=Decimal("100"),
+            currency_code="EUR",
+        ),
+    )
+    # A USD purchase order for 200 USD → 180 EUR after FX.
+    finance_session.add(
+        PurchaseOrder(
+            project_id=proj.id,
+            po_number="PO-1",
+            currency_code="USD",
+            amount_total="200",
+        ),
+    )
+    await finance_session.flush()
+
+    snap = await kpis._evm_snapshot(finance_session, proj.id)
+    # AC = 100 EUR payment + (200 USD * 0.90) = 100 + 180 = 280 EUR
+    assert snap.ac == Decimal("280")
+    assert snap.record_count > 0
+    assert snap.breakdown["currency"] == "EUR"
+
+    # cpi reflects real AC (record count > 0, not the old always-zero path)
+    result = await kpis.compute("cpi", finance_session, project_id=proj.id)
+    assert result.source_record_count > 0
+    assert result.breakdown.get("currency") == "EUR"
+
+
+@pytest.mark.asyncio
+async def test_cash_in_30d_reads_real_invoice_fields(
+    finance_session: AsyncSession,
+) -> None:
+    """cash_in_30d reads amount_total minus settled payments on receivable
+    invoices (the old code read non-existent amount/paid_amount → always 0)."""
+    from app.modules.bi_dashboards import kpis
+    from app.modules.finance.models import Invoice, Payment
+
+    proj = await _make_project(finance_session, currency="EUR")
+    today = datetime.now(UTC).date()
+    inv = Invoice(
+        project_id=proj.id,
+        invoice_direction="receivable",
+        invoice_number="AR-1",
+        invoice_date="2026-05-01",
+        due_date=(today + timedelta(days=10)).isoformat(),
+        currency_code="EUR",
+        amount_total=Decimal("1000"),
+    )
+    finance_session.add(inv)
+    await finance_session.flush()
+    finance_session.add(
+        Payment(
+            invoice_id=inv.id,
+            payment_date="2026-05-15",
+            amount=Decimal("400"),
+            currency_code="EUR",
+        ),
+    )
+    await finance_session.flush()
+
+    result = await kpis.compute("cash_in_30d", finance_session, project_id=proj.id)
+    # Outstanding = 1000 - 400 = 600 due within the 30-day window
+    assert result.value == Decimal("600")
+    assert result.source_record_count == 1
+
+
+@pytest.mark.asyncio
+async def test_copq_groups_by_currency_for_portfolio(
+    finance_session: AsyncSession,
+) -> None:
+    """Portfolio copq groups NCR cost impact by each project's base currency
+    instead of blending differing currencies into one scalar."""
+    from app.modules.bi_dashboards import kpis
+    from app.modules.ncr.models import NCR
+
+    eur_proj = await _make_project(finance_session, currency="EUR")
+    usd_proj = await _make_project(finance_session, currency="USD")
+    finance_session.add(
+        NCR(
+            project_id=eur_proj.id,
+            ncr_number="N-1",
+            title="t",
+            description="d",
+            ncr_type="quality",
+            severity="major",
+            cost_impact="5000",
+        ),
+    )
+    finance_session.add(
+        NCR(
+            project_id=usd_proj.id,
+            ncr_number="N-2",
+            title="t",
+            description="d",
+            ncr_type="quality",
+            severity="major",
+            cost_impact="3000",
+        ),
+    )
+    await finance_session.flush()
+
+    result = await kpis.compute("copq", finance_session, project_id=None)
+    by_cur = result.breakdown.get("by_currency", {})
+    assert by_cur.get("EUR") == "5000"
+    assert by_cur.get("USD") == "3000"
+    assert result.source_record_count == 2
+    # Headline value must be the DOMINANT currency subtotal (5000 EUR > 3000
+    # USD), never the blended 8000 scalar, and the breakdown flags the mix.
+    assert result.value == Decimal("5000")
+    assert result.breakdown.get("currency") == "EUR"
+    assert result.breakdown.get("multi_currency") is True
+
+
+@pytest.mark.asyncio
+async def test_cash_in_30d_portfolio_groups_by_currency(
+    finance_session: AsyncSession,
+) -> None:
+    """Portfolio cash_in_30d groups outstanding receivables by each
+    invoice's own currency rather than blending into one scalar."""
+    from app.modules.bi_dashboards import kpis
+    from app.modules.finance.models import Invoice
+
+    eur_proj = await _make_project(finance_session, currency="EUR")
+    usd_proj = await _make_project(finance_session, currency="USD")
+    today = datetime.now(UTC).date()
+    finance_session.add(
+        Invoice(
+            project_id=eur_proj.id,
+            invoice_direction="receivable",
+            invoice_number="AR-EUR",
+            invoice_date="2026-05-01",
+            due_date=(today + timedelta(days=5)).isoformat(),
+            currency_code="EUR",
+            amount_total=Decimal("1000"),
+        ),
+    )
+    finance_session.add(
+        Invoice(
+            project_id=usd_proj.id,
+            invoice_direction="receivable",
+            invoice_number="AR-USD",
+            invoice_date="2026-05-01",
+            due_date=(today + timedelta(days=5)).isoformat(),
+            currency_code="USD",
+            amount_total=Decimal("400"),
+        ),
+    )
+    await finance_session.flush()
+
+    result = await kpis.compute("cash_in_30d", finance_session, project_id=None)
+    by_cur = result.breakdown.get("by_currency", {})
+    assert by_cur.get("EUR") == "1000"
+    assert by_cur.get("USD") == "400"
+    assert result.breakdown.get("multi_currency") is True
+    # Dominant = EUR 1000 (> USD 400). Never the blended 1400 sum.
+    assert result.value == Decimal("1000")
+    assert result.breakdown.get("currency") == "EUR"
+    assert result.source_record_count == 2
+
+
+@pytest.mark.asyncio
+async def test_cv_portfolio_groups_by_currency(
+    finance_session: AsyncSession,
+) -> None:
+    """Portfolio Cost Variance (EV - AC) is computed per currency from each
+    project's own primitives, not blended across currencies."""
+    from app.modules.bi_dashboards import kpis
+    from app.modules.finance.models import Invoice, Payment
+
+    eur_proj = await _make_project(finance_session, currency="EUR")
+    usd_proj = await _make_project(finance_session, currency="USD")
+    # Each project has actual cost (a settled payment) in its own currency.
+    for proj, code, amt in (
+        (eur_proj, "EUR", "700"),
+        (usd_proj, "USD", "300"),
+    ):
+        inv = Invoice(
+            project_id=proj.id,
+            invoice_direction="payable",
+            invoice_number=f"INV-{code}",
+            invoice_date="2026-05-01",
+            currency_code=code,
+            amount_total=Decimal(amt),
+        )
+        finance_session.add(inv)
+        await finance_session.flush()
+        finance_session.add(
+            Payment(
+                invoice_id=inv.id,
+                payment_date="2026-05-10",
+                amount=Decimal(amt),
+                currency_code=code,
+            ),
+        )
+    await finance_session.flush()
+
+    snap = await kpis._evm_snapshot(finance_session, None)
+    assert snap.is_portfolio is True
+    assert snap.ac_by_currency.get("EUR") == Decimal("700")
+    assert snap.ac_by_currency.get("USD") == Decimal("300")
+
+    result = await kpis.compute("cv", finance_session, project_id=None)
+    by_cur = result.breakdown.get("by_currency", {})
+    # No tasks → EV = 0 in each currency, so CV = -AC per currency.
+    assert by_cur.get("EUR") == "-700"
+    assert by_cur.get("USD") == "-300"
+    assert result.breakdown.get("multi_currency") is True
+    # Dominant by magnitude = EUR (-700). Never the blended -1000 scalar.
+    assert result.value == Decimal("-700")
+    assert result.breakdown.get("currency") == "EUR"
+
+
+@pytest.mark.asyncio
+async def test_dso_uses_invoice_date_and_payment_dates(
+    finance_session: AsyncSession,
+) -> None:
+    """dso reads invoice_date + Payment.payment_date (the old code read
+    non-existent issue_date/paid_at → always 0)."""
+    from app.modules.bi_dashboards import kpis
+    from app.modules.finance.models import Invoice, Payment
+
+    proj = await _make_project(finance_session, currency="EUR")
+    inv = Invoice(
+        project_id=proj.id,
+        invoice_direction="receivable",
+        invoice_number="AR-2",
+        invoice_date="2026-05-01",
+        currency_code="EUR",
+        amount_total=Decimal("500"),
+    )
+    finance_session.add(inv)
+    await finance_session.flush()
+    finance_session.add(
+        Payment(
+            invoice_id=inv.id,
+            payment_date="2026-05-31",
+            amount=Decimal("500"),
+            currency_code="EUR",
+        ),
+    )
+    await finance_session.flush()
+
+    result = await kpis.compute("dso", finance_session, project_id=proj.id)
+    # 2026-05-01 → 2026-05-31 = 30 days
+    assert result.value == Decimal("30")
+    assert result.source_record_count == 1

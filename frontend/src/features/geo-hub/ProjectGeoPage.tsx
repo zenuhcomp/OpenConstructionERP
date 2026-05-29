@@ -21,13 +21,14 @@
  * Cesium viewer stays oblivious of project semantics.
  */
 
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPinned, AlertTriangle, ServerCrash, Loader2 } from 'lucide-react';
 
 import { ApiError } from '@/shared/lib/api';
+import { useToastStore } from '@/stores/useToastStore';
 import { projectsApi } from '@/features/projects/api';
 
 import { AnchorAdjustPanel } from './AnchorAdjustPanel';
@@ -37,6 +38,7 @@ import {
   fetchHsePins,
   fetchPunchlistPins,
   getMapConfig,
+  updateAnchor,
 } from './api';
 import type { GeoCameraState, GeoCursorCoords } from './CesiumViewer';
 import { GeoEmptyState, type GeoEmptyKind } from './GeoEmptyState';
@@ -83,6 +85,9 @@ function emptyStateFor(
 
 export function ProjectGeoPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const addToast = useToastStore((s) => s.addToast);
   const { projectId } = useParams<{ projectId: string }>();
   // Deep-link context — ``?model=<bim_model_or_federation_id>`` focuses the
   // camera onto the matching tileset's boundingSphere once it loads.
@@ -210,6 +215,69 @@ export function ProjectGeoPage() {
     null,
   );
   const [cameraState, setCameraState] = useState<GeoCameraState | null>(null);
+
+  // Pin clicks in the project view jump to the source module so the
+  // documented "click a pin to inspect" interaction works. HSE / punch
+  // pins open their module pages scoped to this project; diary photos
+  // open the project's daily diary.
+  const handlePinSelect = useCallback(
+    (sel: { tag: string }) => {
+      const { tag } = sel;
+      const kind = tag.split(':')[0];
+      if (!projectId) return;
+      if (kind === 'hse') {
+        navigate(`/projects/${projectId}/safety`);
+      } else if (kind === 'punch') {
+        navigate('/punchlist');
+      } else if (kind === 'diary') {
+        navigate(`/projects/${projectId}/daily-diary`);
+      }
+    },
+    [navigate, projectId],
+  );
+
+  // "Drag to adjust" map-click handler — PATCHes the anchor's lat/lon to
+  // the clicked surface coordinate, refreshes the map config, exits drag
+  // mode and toasts. Mirrors the AnchorAdjustPanel docstring's promise
+  // that the parent wires click-on-map -> PATCH.
+  const handleAnchorMapClick = useCallback(
+    async (coords: { lat: number; lon: number }) => {
+      const anchorId = data?.anchor?.id;
+      if (!anchorId) return;
+      try {
+        await updateAnchor(anchorId, {
+          lat: coords.lat.toFixed(8),
+          lon: coords.lon.toFixed(8),
+          // Mark the anchor as manually placed so the source attribution
+          // and drift indicator reflect the user's deliberate override.
+          metadata: {
+            ...(data?.anchor?.metadata ?? {}),
+            geocode_source: 'manual',
+            geocode_precision: 'address',
+          },
+        });
+        addToast({
+          type: 'success',
+          title: t('geo_hub.adjust.moved_success', {
+            defaultValue: 'Anchor moved',
+          }),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: ['geo-hub', 'map-config', projectId],
+        });
+      } catch {
+        addToast({
+          type: 'error',
+          title: t('geo_hub.adjust.moved_failed', {
+            defaultValue: 'Could not move the anchor',
+          }),
+        });
+      } finally {
+        setAnchorDragMode(false);
+      }
+    },
+    [data?.anchor?.id, data?.anchor?.metadata, addToast, t, queryClient, projectId],
+  );
 
   // Apply optional ?phase / ?block / ?dev_id deep-link filters to the
   // tileset list. The map-config endpoint already returns the project's
@@ -428,6 +496,9 @@ export function ProjectGeoPage() {
               pins={pins}
               focusedTilesetId={focusedTilesetId}
               tilesetOverlayState={tilesetOverlay.state}
+              anchorDragMode={anchorDragMode}
+              onMapClick={handleAnchorMapClick}
+              onPinSelect={handlePinSelect}
               onMouseMove={setCursorCoords}
               onCameraChange={setCameraState}
               onViewerReady={setCesiumRuntime}

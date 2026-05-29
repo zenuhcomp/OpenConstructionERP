@@ -21,13 +21,15 @@ Endpoints:
         GET    /pins/?drawing_id=X            — Task/punchlist pins
 """
 
+import ipaddress
 import logging
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response
 
+from app.config import get_settings
 from app.core.rate_limiter import upload_limiter
 from app.dependencies import (
     CurrentUserId,
@@ -262,6 +264,7 @@ async def list_drawings(
     limit: int = Query(default=50, ge=1, le=200),
     user_id: CurrentUserId = None,  # type: ignore[assignment]
     session: SessionDep = None,  # type: ignore[assignment]
+    _perm: None = Depends(RequirePermission("dwg_takeoff.read")),
     service: DwgTakeoffService = Depends(_get_service),
 ) -> list[DwgDrawingResponse]:
     """List drawings for a project.
@@ -459,6 +462,7 @@ async def list_annotations(
     limit: int = Query(default=200, ge=1, le=500),
     user_id: CurrentUserId = None,  # type: ignore[assignment]
     session: SessionDep = None,  # type: ignore[assignment]
+    _perm: None = Depends(RequirePermission("dwg_takeoff.read")),
     service: DwgTakeoffService = Depends(_get_service),
 ) -> list[DwgAnnotationResponse]:
     """List annotations for a drawing.
@@ -545,6 +549,7 @@ async def get_pins(
     drawing_id: uuid.UUID = Query(...),
     user_id: CurrentUserId = None,  # type: ignore[assignment]
     session: SessionDep = None,  # type: ignore[assignment]
+    _perm: None = Depends(RequirePermission("dwg_takeoff.read")),
     service: DwgTakeoffService = Depends(_get_service),
 ) -> list[DwgAnnotationResponse]:
     """Get task/punchlist pins for a drawing.
@@ -638,13 +643,42 @@ async def delete_entity_group(
 # ── Offline Readiness (R3 #9) ────────────────────────────────────────────────
 
 
+def _request_is_loopback(request: Request) -> bool:
+    """Return True when the caller reached us over the loopback interface.
+
+    Used to gate the "your files never leave your computer" trust claim: it
+    is only literally true when the browser and the backend run on the same
+    machine. We read the immediate socket peer (``request.client.host``)
+    rather than any ``X-Forwarded-For`` header, because a forwarded value is
+    attacker-controllable and a reverse proxy in front of a hosted demo
+    would itself connect from loopback — which is exactly the case we must
+    NOT treat as local-only.
+    """
+    client = request.client
+    if client is None or not client.host:
+        return False
+    try:
+        return ipaddress.ip_address(client.host).is_loopback
+    except ValueError:
+        # Non-IP peer (e.g. a UNIX socket name) — treat as not loopback.
+        return False
+
+
 @router.get("/offline-readiness/", response_model=DwgOfflineReadinessResponse)
-async def offline_readiness() -> DwgOfflineReadinessResponse:
+async def offline_readiness(request: Request) -> DwgOfflineReadinessResponse:
     """Probe local-converter availability for the DWG takeoff page.
 
     The backend runs fully offline; this endpoint surfaces whether the
     optional DWG-to-data binary is present so the UI can show an
     "Offline Ready" vs "Install converter" badge.
+
+    ``local_only`` is set True only when the request arrived over loopback
+    AND the server is not a hosted/production deployment, so the strong
+    "files never leave your computer" copy is shown only when it is true.
+    On the hosted demo the UI falls back to honest "processed on your
+    OpenConstructionERP server" wording.
     """
     payload = DwgTakeoffService.get_offline_readiness()
+    settings = get_settings()
+    payload["local_only"] = _request_is_loopback(request) and not settings.is_production
     return DwgOfflineReadinessResponse(**payload)

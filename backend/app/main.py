@@ -724,6 +724,53 @@ async def _seed_demo_account() -> None:
                         except Exception:
                             logger.warning("Failed to install demo %s (skipping)", demo_id)
                     await fb_session.commit()
+
+            # Partner-pack flagship: when a pack is active, also install its
+            # country project so the fresh workspace reflects the partner's
+            # region, currency and classification (runs after either the
+            # showcase snapshot or the fallback seed). Independent session so
+            # a failure never rolls back the base seed.
+            try:
+                from app.core.partner_pack.discovery import get_active_pack
+
+                _pack = get_active_pack()
+                if _pack is not None:
+                    from app.core.demo_projects import PACK_DEMO_PROJECT, install_demo_project
+
+                    _pack_demo = PACK_DEMO_PROJECT.get(_pack.slug)
+                    if _pack_demo:
+                        async with async_session_factory() as pk_session:
+                            try:
+                                pk_result = await install_demo_project(pk_session, _pack_demo)
+                                await pk_session.commit()
+                                logger.info(
+                                    "Partner-pack demo installed: %s for pack %s (%s positions)",
+                                    _pack_demo,
+                                    _pack.slug,
+                                    pk_result.get("positions"),
+                                )
+                            except Exception:
+                                await pk_session.rollback()
+                                logger.warning(
+                                    "Failed to install partner-pack demo %s (skipping)",
+                                    _pack_demo,
+                                )
+            except Exception:
+                logger.debug("Partner-pack demo auto-install skipped", exc_info=True)
+
+            # Restore bundled 3D geometry for the showcase models so the BIM
+            # viewer renders out-of-the-box on lightweight self-hosted installs
+            # (issue #168). The snapshot ships DB rows only; the two hero mesh
+            # blobs are shipped gzip-compressed and decompressed here. Idempotent
+            # and fail-soft — never blocks startup.
+            if showcase_done:
+                try:
+                    from app.scripts.seed_showcase_geometry import seed_showcase_geometry
+
+                    geo_result = await seed_showcase_geometry()
+                    logger.info("Showcase geometry seed: %s", geo_result)
+                except Exception:
+                    logger.debug("Showcase geometry seed skipped", exc_info=True)
     except Exception:
         logger.exception("Failed to seed demo account (non-fatal)")
 
@@ -1264,25 +1311,50 @@ def create_app() -> FastAPI:
         except Exception as exc:
             result["database"] = {"status": "error", "error": str(exc)[:100]}
 
-        # Vector DB check (LanceDB or Qdrant)
-        try:
-            from app.core.vector import vector_status as vs
+        # Vector DB check (LanceDB or Qdrant).
+        #
+        # ``vector_status()`` opens the embedded LanceDB connection / pings the
+        # Qdrant server synchronously; on a cold or slow disk that probe can
+        # block for several seconds. Two problems if we call it inline on the
+        # request coroutine: (1) it stalls the whole event loop, and (2) the
+        # dashboard polls this endpoint, so every poll repeats the cost. Fix:
+        # run the probe in a worker thread (``asyncio.to_thread``) so it never
+        # blocks the loop, and cache the result on ``app.state`` for ~60s so
+        # rapid polls reuse it.
+        import asyncio
 
-            vstat = vs()
-            if vstat.get("connected"):
-                col = vstat.get("cost_collection") or {}
-                result["vector_db"] = {
-                    "status": "connected",
-                    "engine": vstat.get("engine", "lancedb"),
-                    "vectors": col.get("vectors_count", 0),
-                }
-            else:
-                result["vector_db"] = {
-                    "status": "offline",
-                    "engine": vstat.get("engine", "lancedb"),
-                }
-        except Exception:
-            result["vector_db"] = {"status": "offline", "engine": "lancedb"}
+        vector_cache_key = "_vector_status_cache"
+        vector_cache_ttl_s = 60.0
+        cached_vec = getattr(app.state, vector_cache_key, None)
+        if cached_vec and (time.time() - cached_vec["checked_at"]) < vector_cache_ttl_s:
+            result["vector_db"] = cached_vec["data"]
+        else:
+            try:
+                from app.core.vector import vector_status as vs
+
+                # Bound the probe so a wedged backend can never hang the
+                # request beyond a few seconds — the offloaded thread keeps
+                # running but the coroutine returns "offline" promptly.
+                vstat = await asyncio.wait_for(asyncio.to_thread(vs), timeout=8.0)
+                if vstat.get("connected"):
+                    col = vstat.get("cost_collection") or {}
+                    vector_result = {
+                        "status": "connected",
+                        "engine": vstat.get("engine", "lancedb"),
+                        "vectors": col.get("vectors_count", 0),
+                    }
+                else:
+                    vector_result = {
+                        "status": "offline",
+                        "engine": vstat.get("engine", "lancedb"),
+                    }
+            except Exception:
+                vector_result = {"status": "offline", "engine": "lancedb"}
+            result["vector_db"] = vector_result
+            app.state._vector_status_cache = {
+                "data": vector_result,
+                "checked_at": time.time(),
+            }
 
         # AI providers check — env vars first, then database
         providers = []

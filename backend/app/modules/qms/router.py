@@ -57,6 +57,7 @@ from app.modules.qms.schemas import (
     InspectionRead,
     InspectionSignatureCreate,
     InspectionSignatureRead,
+    InspectionSignaturesEnvelope,
     InspectionUpdate,
     ITPItemCreate,
     ITPItemRead,
@@ -139,6 +140,23 @@ async def create_itp_plan(
     except ValueError as exc:
         raise _bad(str(exc)) from exc
     return ITPPlanRead.model_validate(plan)
+
+
+@router.get("/itp-plans/{plan_id}/items", response_model=list[ITPItemRead])
+async def list_itp_items(
+    plan_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    _perm: None = Depends(RequirePermission("qms.itp.read")),
+    service: QMSService = Depends(_get_service),
+) -> list[ITPItemRead]:
+    """‌⁠‍List the control-point items of an ITP plan (IDOR-gated)."""
+    plan = await service.repo.get_itp_plan(plan_id)
+    if plan is None:
+        raise _not_found("ITP plan not found")
+    await verify_project_access(plan.project_id, user_id, session)
+    items = await service.repo.list_itp_items(plan_id)
+    return [ITPItemRead.model_validate(i) for i in items]
 
 
 @router.post("/itp-plans/{plan_id}/items", response_model=ITPItemRead, status_code=201)
@@ -241,11 +259,52 @@ async def sign_inspection(
     if inspection is None:
         raise _not_found("Inspection not found")
     await verify_project_access(inspection.project_id, user_id, session)
+    # When the caller omits signer_user_id we sign as the authenticated
+    # user (the normal "sign as me" flow). The id may still be supplied
+    # to record a sign-off on behalf of another project member.
     try:
-        sig = await service.add_signature(inspection_id, data)
+        default_signer = uuid.UUID(str(user_id))
+    except (ValueError, AttributeError, TypeError):
+        default_signer = None
+    try:
+        sig = await service.add_signature(
+            inspection_id,
+            data,
+            default_signer_user_id=default_signer,
+        )
     except ValueError as exc:
         raise _bad(str(exc)) from exc
     return InspectionSignatureRead.model_validate(sig)
+
+
+@router.get(
+    "/inspections/{inspection_id}/signatures",
+    response_model=InspectionSignaturesEnvelope,
+)
+async def list_inspection_signatures(
+    inspection_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    _perm: None = Depends(RequirePermission("qms.inspection.read")),
+    service: QMSService = Depends(_get_service),
+) -> InspectionSignaturesEnvelope:
+    """‌⁠‍List collected signatures and the count required to complete.
+
+    The required count is inherited from the linked ITP item so the UI can
+    show ``collected/required`` and only enable Complete once satisfied.
+    """
+    inspection = await service.repo.get_inspection(inspection_id)
+    if inspection is None:
+        raise _not_found("Inspection not found")
+    await verify_project_access(inspection.project_id, user_id, session)
+    sigs = await service.list_signatures(inspection_id)
+    required = await service.required_signatures(inspection)
+    return InspectionSignaturesEnvelope(
+        inspection_id=inspection_id,
+        required=required,
+        collected=len(sigs),
+        signatures=[InspectionSignatureRead.model_validate(s) for s in sigs],
+    )
 
 
 @router.post("/inspections/{inspection_id}/complete", response_model=InspectionRead)
@@ -474,6 +533,56 @@ async def add_ncr_action(
     await verify_project_access(ncr.project_id, user_id, session)
     try:
         action = await service.assign_ncr_action(ncr_id, data)
+    except ValueError as exc:
+        raise _bad(str(exc)) from exc
+    return NCRActionRead.model_validate(action)
+
+
+@router.get("/ncrs/{ncr_id}/actions", response_model=list[NCRActionRead])
+async def list_ncr_actions(
+    ncr_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    _perm: None = Depends(RequirePermission("qms.ncr.read")),
+    service: QMSService = Depends(_get_service),
+) -> list[NCRActionRead]:
+    """‌⁠‍List corrective actions for an NCR (IDOR-gated by project)."""
+    ncr = await service.repo.get_ncr(ncr_id)
+    if ncr is None:
+        raise _not_found("NCR not found")
+    await verify_project_access(ncr.project_id, user_id, session)
+    actions = await service.repo.list_ncr_actions(ncr_id)
+    return [NCRActionRead.model_validate(a) for a in actions]
+
+
+@router.post(
+    "/ncrs/{ncr_id}/actions/{action_id}/verify",
+    response_model=NCRActionRead,
+)
+async def verify_ncr_action(
+    ncr_id: uuid.UUID,
+    action_id: uuid.UUID,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    _perm: None = Depends(RequirePermission("qms.ncr.write")),
+    service: QMSService = Depends(_get_service),
+) -> NCRActionRead:
+    """‌⁠‍Mark a corrective action verified ("done").
+
+    When every action on the parent NCR is done the NCR auto-advances to
+    ``verifying`` (see :meth:`QMSService.verify_action`), which unlocks the
+    Close NCR flow. The action is checked to belong to ``ncr_id`` so the
+    URL can't be used to verify an action on a different NCR.
+    """
+    ncr = await service.repo.get_ncr(ncr_id)
+    if ncr is None:
+        raise _not_found("NCR not found")
+    await verify_project_access(ncr.project_id, user_id, session)
+    action = await service.repo.get_ncr_action(action_id)
+    if action is None or action.ncr_id != ncr_id:
+        raise _not_found("Corrective action not found")
+    try:
+        action = await service.verify_action(action_id, verified_by_user_id=user_id)
     except ValueError as exc:
         raise _bad(str(exc)) from exc
     return NCRActionRead.model_validate(action)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import and_, delete, func, select, update
@@ -287,12 +288,49 @@ class QMSRepository:
     # ── Analytics helpers ──────────────────────────────────────────────
 
     async def sum_ncr_cost_impact(self, project_id: uuid.UUID) -> Any:
-        """‌⁠‍Sum cost_impact_amount for non-cancelled NCRs in a project."""
+        """‌⁠‍Sum cost_impact_amount for non-cancelled NCRs in a project.
+
+        .. deprecated::
+            Sums across mixed currencies — callers that build a COPQ total
+            must use :meth:`sum_ncr_cost_impact_by_currency` and FX-convert
+            instead. Retained only for legacy single-currency call sites.
+        """
         stmt = select(func.coalesce(func.sum(QMSNCR.cost_impact_amount), 0)).where(
             QMSNCR.project_id == project_id,
             QMSNCR.status != "cancelled",
         )
         return (await self.session.execute(stmt)).scalar_one()
+
+    async def sum_ncr_cost_impact_by_currency(
+        self,
+        project_id: uuid.UUID,
+    ) -> dict[str, Decimal]:
+        """‌⁠‍Sum cost_impact_amount per currency for non-cancelled NCRs.
+
+        Keeps currencies separate so the service can FX-convert each bucket
+        into the project base currency rather than blindly coalesce-summing
+        amounts in different currencies (the project money rule). The
+        per-NCR ``cost_impact_currency`` is free-form; an empty string keys
+        rows that never had a currency stamped.
+        """
+        stmt = (
+            select(
+                QMSNCR.cost_impact_currency,
+                func.coalesce(func.sum(QMSNCR.cost_impact_amount), 0),
+            )
+            .where(
+                QMSNCR.project_id == project_id,
+                QMSNCR.status != "cancelled",
+                QMSNCR.cost_impact_amount.is_not(None),
+            )
+            .group_by(QMSNCR.cost_impact_currency)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        out: dict[str, Decimal] = {}
+        for code, total in rows:
+            key = (code or "").strip().upper()
+            out[key] = out.get(key, Decimal("0")) + Decimal(str(total or 0))
+        return out
 
     async def count_inspections(self, project_id: uuid.UUID) -> int:
         stmt = select(func.count()).where(QMSInspection.project_id == project_id)

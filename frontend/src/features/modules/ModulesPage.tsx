@@ -39,6 +39,7 @@ import { useTabKeyboardNav } from '@/shared/hooks/useTabKeyboardNav';
 import { apiGet, apiPost, apiDelete } from '@/shared/lib/api';
 import { useToastStore } from '@/stores/useToastStore';
 import { useModuleStore } from '@/stores/useModuleStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { getModulesByCategory } from '@/modules/_registry';
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
@@ -382,27 +383,33 @@ function CompanyProfilesTab() {
     if (!switchingTo) return;
     setIsSwitching(true);
     try {
-      // Apply module toggles
-      const enabledSet = new Set(switchingTo.enabled_modules);
-      // For full_enterprise, enable everything
+      // ── Single authoritative write path ──────────────────────────────
+      // The onboarding endpoint persists company_type + completed AND syncs
+      // module_preferences server-side from `enabled_modules`. We deliberately
+      // do NOT optimistically loop setModuleEnabled() here: that scheduled a
+      // second, debounced PATCH to /me/module-preferences/ which raced this
+      // POST on the SAME metadata.module_preferences JSON (last writer won,
+      // sometimes with the stale store snapshot). One awaited write, then a
+      // read-back, keeps the two in lockstep.
       const isFullEnterprise = switchingTo.key === 'full_enterprise';
+      const enabledModules = isFullEnterprise
+        ? Object.values(getModulesByCategory()).flatMap((mods) => mods.map((m) => m.id))
+        : switchingTo.enabled_modules;
 
-      // Get all toggleable modules from the grouped registry
-      const grouped = getModulesByCategory();
-      for (const mods of Object.values(grouped)) {
-        for (const mod of mods) {
-          const shouldEnable = isFullEnterprise || enabledSet.has(mod.id);
-          setModuleEnabled(mod.id, shouldEnable);
-        }
-      }
-
-      // Persist to server
       await apiPost('/v1/users/me/onboarding/', {
         company_type: switchingTo.key,
-        enabled_modules: switchingTo.enabled_modules,
+        enabled_modules: enabledModules,
         interface_mode: 'advanced',
         completed: true,
       });
+
+      // Reconcile the local module store from the server's canonical
+      // module_preferences (set by the POST above). syncFromServer() updates
+      // localStorage + the reactive store WITHOUT scheduling another server
+      // write, so the sidebar reflects the new profile immediately and there
+      // is no trailing debounced PATCH to race. We await it before the toast
+      // so success only shows once everything has actually landed.
+      await syncFromServer();
 
       // Store profile key locally
       localStorage.setItem('oe_company_type', switchingTo.key);
@@ -425,7 +432,7 @@ function CompanyProfilesTab() {
       setIsSwitching(false);
       setSwitchingTo(null);
     }
-  }, [switchingTo, setModuleEnabled, addToast, t]);
+  }, [switchingTo, syncFromServer, addToast, t]);
 
   const activePreset = presets?.find((p) => p.key === activeProfileKey);
   const activeModuleCount = activePreset?.module_count ?? 0;
@@ -693,6 +700,38 @@ function asStringArray(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string');
 }
 
+/* Renders the partner's real logo (served per-slug from the pack package).
+   Falls back to a brand-coloured monogram + name if the pack ships no logo. */
+function PartnerPackLogo({ pack }: { pack: PartnerPackManifestAPI }) {
+  const [errored, setErrored] = useState(false);
+
+  if (errored) {
+    return (
+      <div className="flex items-center gap-2 min-w-0">
+        <div
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white shadow-xs"
+          style={{ backgroundColor: pack.branding.primary_color }}
+        >
+          <Building2 size={18} strokeWidth={1.75} />
+        </div>
+        <span className="text-sm font-semibold text-content-primary truncate">
+          {pack.partner_name}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={`/api/v1/partner-pack/logo/${encodeURIComponent(pack.slug)}`}
+      alt={`${pack.partner_name} logo`}
+      className="h-9 max-w-[180px] object-contain object-left"
+      loading="lazy"
+      onError={() => setErrored(true)}
+    />
+  );
+}
+
 function PartnerPackCard({ pack, index, isActive }: PartnerPackCardProps) {
   const { t } = useTranslation();
 
@@ -725,32 +764,26 @@ function PartnerPackCard({ pack, index, isActive }: PartnerPackCardProps) {
       />
 
       <div className="pl-2">
-        <div className="flex items-start gap-3">
-          <div
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white shadow-xs"
-            style={{ backgroundColor: pack.branding.primary_color }}
-          >
-            <Building2 size={20} strokeWidth={1.75} />
-          </div>
+        {/* Logo plate — the partner's real logo on a subtle brand-tinted ground */}
+        <div
+          className="mb-2.5 flex h-14 items-center gap-2 rounded-lg px-3"
+          style={{ backgroundColor: `${pack.branding.primary_color}14` }}
+        >
+          <PartnerPackLogo pack={pack} />
+          {isActive && (
+            <Badge variant="success" size="sm" className="ml-auto shrink-0">
+              <Check size={10} className="mr-0.5" />
+              {t('modules.active', { defaultValue: 'Active' })}
+            </Badge>
+          )}
+        </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-content-primary truncate">
-                {pack.partner_name}
-              </span>
-              {isActive && (
-                <Badge variant="success" size="sm">
-                  <Check size={10} className="mr-0.5" />
-                  {t('modules.active', { defaultValue: 'Active' })}
-                </Badge>
-              )}
-            </div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-2xs text-content-tertiary flex-wrap">
-              <span className="font-mono">{pack.slug}</span>
-              <span className="text-border">|</span>
-              <span className="font-mono">v{pack.pack_version}</span>
-            </div>
-          </div>
+        <div className="flex items-center gap-1.5 text-2xs text-content-tertiary flex-wrap">
+          <span className="font-medium text-content-secondary">{pack.partner_name}</span>
+          <span className="text-border">|</span>
+          <span className="font-mono">{pack.slug}</span>
+          <span className="text-border">|</span>
+          <span className="font-mono">v{pack.pack_version}</span>
         </div>
 
         {/* Region / currency badges */}
@@ -1498,9 +1531,12 @@ function DataPackagesTab() {
 function SystemModulesTab() {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
+  const queryClient = useQueryClient();
+  const userRole = useAuthStore((s) => s.userRole);
+  const isAdmin = userRole === 'admin';
   const [togglingModule, setTogglingModule] = useState<string | null>(null);
 
-  const { data: systemModules, refetch, isError: systemError } = useQuery({
+  const { data: systemModules, refetch, isLoading, isError: systemError } = useQuery({
     queryKey: ['system-modules'],
     queryFn: () => apiGet<SystemModule[]>('/v1/modules/'),
     staleTime: 30 * 1000,
@@ -1510,6 +1546,19 @@ function SystemModulesTab() {
   const enabledCount = systemModules?.filter((m) => m.enabled).length ?? 0;
 
   async function handleBackendToggle(mod: SystemModule): Promise<void> {
+    // Enabling/disabling a backend module is admin-only on the server
+    // (RequirePermission("admin")). Guard here so non-admins never fire a
+    // request that 403s — the toggle is also disabled in the UI for them.
+    if (!isAdmin) {
+      addToast({
+        type: 'warning',
+        title: t('modules.admin_only', { defaultValue: 'Admin only' }),
+        message: t('modules.admin_only_modules', {
+          defaultValue: 'Only administrators can enable or disable system modules.',
+        }),
+      });
+      return;
+    }
     if (mod.is_core) {
       addToast({
         type: 'warning',
@@ -1531,7 +1580,11 @@ function SystemModulesTab() {
           ? t('modules.enabled', { defaultValue: '{{name}} enabled', name: mod.display_name })
           : t('modules.disabled', { defaultValue: '{{name}} disabled', name: mod.display_name }),
       });
-      void refetch();
+      // Invalidate the shared ['system-modules'] query so BOTH this tab and
+      // the Sidebar (which reads the same key to gate routes for disabled
+      // backend modules) refetch and stay in sync — without this, disabling
+      // a module left its sidebar route live and broken.
+      void queryClient.invalidateQueries({ queryKey: ['system-modules'] });
     } catch (err) {
       addToast({
         type: 'error',
@@ -1563,6 +1616,33 @@ function SystemModulesTab() {
     );
   }
 
+  // Loading skeleton — keeps the empty-state ("No system modules loaded")
+  // from flashing during the initial fetch.
+  if (isLoading) {
+    return (
+      <div className="animate-card-in" style={{ animationDelay: '60ms' }}>
+        <div className="mb-4 space-y-1.5">
+          <div className="h-4 w-32 rounded bg-surface-secondary animate-pulse" />
+          <div className="h-3 w-2/3 rounded bg-surface-secondary animate-pulse" />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <Card key={i} className="animate-pulse" padding="sm">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 shrink-0 rounded-lg bg-surface-secondary" />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="h-3 w-2/3 rounded bg-surface-secondary" />
+                  <div className="h-2.5 w-1/3 rounded bg-surface-secondary" />
+                </div>
+                <div className="h-5 w-9 shrink-0 rounded-full bg-surface-secondary" />
+              </div>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (!systemModules || systemModules.length === 0) {
     return (
       <div className="py-16 text-center animate-card-in">
@@ -1588,6 +1668,14 @@ function SystemModulesTab() {
             defaultValue: 'System modules are backend plugins loaded from the server. Toggle non-core modules to enable or disable them.',
           })}
         />
+        {!isAdmin && (
+          <p className="mt-1.5 inline-flex items-center gap-1.5 text-2xs text-content-tertiary">
+            <ShieldCheck size={12} className="shrink-0" />
+            {t('modules.system_admin_only_hint', {
+              defaultValue: 'Only administrators can enable or disable system modules.',
+            })}
+          </p>
+        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1644,15 +1732,27 @@ function SystemModulesTab() {
               {!mod.is_core && (
                 <button
                   onClick={() => void handleBackendToggle(mod)}
-                  disabled={togglingModule === mod.name}
+                  disabled={togglingModule === mod.name || !isAdmin}
                   role="switch"
                   aria-checked={mod.enabled}
-                  aria-label={t('modules.toggle_module', {
-                    defaultValue: '{{action}} {{name}}',
-                    action: mod.enabled ? t('common.disable', { defaultValue: 'Disable' }) : t('common.enable', { defaultValue: 'Enable' }),
-                    name: mod.display_name,
-                  })}
-                  className="shrink-0"
+                  title={
+                    isAdmin
+                      ? undefined
+                      : t('modules.admin_only', { defaultValue: 'Admin only' })
+                  }
+                  aria-label={
+                    isAdmin
+                      ? t('modules.toggle_module', {
+                          defaultValue: '{{action}} {{name}}',
+                          action: mod.enabled ? t('common.disable', { defaultValue: 'Disable' }) : t('common.enable', { defaultValue: 'Enable' }),
+                          name: mod.display_name,
+                        })
+                      : t('modules.toggle_module_admin_only', {
+                          defaultValue: '{{name}} — admin only',
+                          name: mod.display_name,
+                        })
+                  }
+                  className={clsx('shrink-0', !isAdmin && 'cursor-not-allowed opacity-50')}
                 >
                   {togglingModule === mod.name ? (
                     <Loader2 size={16} className="animate-spin text-content-tertiary" />

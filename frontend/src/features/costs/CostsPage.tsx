@@ -39,7 +39,7 @@ import { useToastStore } from '@/stores/useToastStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useCostDatabaseStore, REGION_MAP } from '@/stores/useCostDatabaseStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import type { CostItemMetadata } from './api';
+import type { CostItemMetadata, CertaintyBadge as CertaintyBadgeData } from './api';
 import { CertaintyBadge } from './CertaintyBadge';
 import { EscalationCalculator } from './EscalationCalculator';
 import { RegionalAdjustPanel } from './RegionalAdjustPanel';
@@ -68,6 +68,12 @@ interface CostItem {
   description: string;
   unit: string;
   rate: number;
+  /** ISO 4217 code the `rate` is denominated in. CWICR catalogues mix
+   *  EUR / AED / SAR / USD / … — the backend resolves this from the
+   *  region when the source row carried an empty currency. Always render
+   *  the code next to the figure and propagate it onto the BOQ position
+   *  so the FX rollup converts instead of treating it as the base. */
+  currency: string;
   region: string | null;
   classification: Record<string, string>;
   components: CostComponent[];
@@ -586,18 +592,28 @@ export function CostsPage() {
           const results = await apiGet<Array<Record<string, unknown>>>(`/v1/costs/vector/search/?${params}`);
           // Wrap in CostSearchResponse format
           return {
-            items: results.map((r) => ({
-              id: String(r.id ?? ''),
-              code: String(r.code ?? ''),
-              description: String(r.description ?? ''),
-              unit: String(r.unit ?? ''),
-              rate: Number(r.rate ?? 0),
-              region: String(r.region ?? ''),
-              classification: (r.classification ?? {}) as Record<string, string>,
-              components: [],
-              metadata_: {},
-              source: 'cwicr',
-            })),
+            items: results.map((r) => {
+              const itemRegion = String(r.region ?? '');
+              return {
+                id: String(r.id ?? ''),
+                code: String(r.code ?? ''),
+                description: String(r.description ?? ''),
+                unit: String(r.unit ?? ''),
+                rate: Number(r.rate ?? 0),
+                // Vector hits may omit an explicit currency — fall back to
+                // the region's currency so the figure is never rendered
+                // unlabelled.
+                currency:
+                  (r.currency ? String(r.currency) : '') ||
+                  REGION_MAP[itemRegion]?.currency ||
+                  '',
+                region: itemRegion,
+                classification: (r.classification ?? {}) as Record<string, string>,
+                components: [],
+                metadata_: {},
+                source: 'cwicr',
+              };
+            }),
             total: results.length,
             limit: PAGE_SIZE,
             offset: 0,
@@ -674,6 +690,26 @@ export function CostsPage() {
     }
   }, [sortField]);
 
+  // Batch-fetch certainty bands for every visible row in one request.
+  // Previously each row's <CertaintyBadge> fired its own GET (an N+1 on
+  // every page); now we POST the whole page's ids once and pass the
+  // resolved band down as a prop. Stable key (sorted ids) so a re-render
+  // that doesn't change the visible set is a cache hit.
+  const visibleIds = useMemo(() => sortedItems.map((i) => i.id), [sortedItems]);
+  const certaintyKey = useMemo(() => [...visibleIds].sort().join(','), [visibleIds]);
+  const { data: certaintyList } = useQuery<CertaintyBadgeData[]>({
+    queryKey: ['costs', 'certainty', 'batch', certaintyKey],
+    queryFn: () => apiPost<CertaintyBadgeData[], { ids: string[] }>('/v1/costs/certainty/batch/', { ids: visibleIds }),
+    enabled: visibleIds.length > 0,
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const certaintyById = useMemo(() => {
+    const m = new Map<string, CertaintyBadgeData>();
+    for (const c of certaintyList ?? []) m.set(c.cost_item_id, c);
+    return m;
+  }, [certaintyList]);
+
   // Active filter count & clear all
   const activeFilterCount = [query, unit, source, category].filter(Boolean).length + (region ? 1 : 0) + (specialTab ? 1 : 0);
 
@@ -705,6 +741,11 @@ export function CostsPage() {
   const handleCategoryChange = useCallback((value: string) => {
     setCategory(value);
     setOffset(0);
+    // The legacy category dropdown and the classification-tree sidebar
+    // both filter on collection — running them together double-filters.
+    // Selecting a category clears any active tree path so the two stay
+    // mutually exclusive (the tree's onSelect already clears `category`).
+    if (value) setClassificationPath('');
   }, []);
 
   const handleRegionChange = useCallback(
@@ -770,6 +811,44 @@ export function CostsPage() {
 
   // Current region info for subtitle
   const regionInfo = region ? REGION_MAP[region] : null;
+  // Fallback currency for rows whose own `currency` is empty — derived
+  // from the active region's catalogue. Empty when "All regions" + no
+  // per-row currency, in which case the bare formatted number is shown.
+  const regionCurrency = regionInfo?.currency ?? '';
+
+  // Currency-aware money formatter. Catalogues mix EUR / AED / SAR / USD,
+  // so a bare number is ambiguous — always render the ISO code. Falls
+  // back to the plain number formatter only when no currency is known at
+  // all (so we never crash on an unknown / empty code).
+  const fmtMoney = (n: number, currency?: string | null) => {
+    const code = (currency || regionCurrency || '').trim().toUpperCase();
+    if (!code) return fmt(n);
+    try {
+      return new Intl.NumberFormat(getIntlLocale(), {
+        style: 'currency',
+        currency: code,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(n);
+    } catch {
+      // Non-ISO / unsupported code — keep the figure legible and still
+      // show the raw code rather than dropping it silently.
+      return `${fmt(n)} ${code}`;
+    }
+  };
+
+  // Localized label for a category dropdown entry. CWICR ships the
+  // `collection` token as frozen-German all-caps (e.g. "BAUARBEITEN").
+  // A per-token i18n key (`costs.category_label.<TOKEN>`) lets translators
+  // override it, with a title-cased humanized fallback so the raw token is
+  // never shown uppercase. Unknown/custom tokens humanize gracefully.
+  const categoryLabel = (cat: string): string => {
+    const humanized = cat
+      .toLowerCase()
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    return t(`costs.category_label.${cat}`, { defaultValue: humanized });
+  };
 
   return (
     <div className="w-full animate-fade-in">
@@ -994,7 +1073,11 @@ export function CostsPage() {
               }`}
             >
               <Sparkles size={14} />
-              <span className="hidden sm:inline">{semanticSearch ? 'AI' : 'AI'}</span>
+              <span className="hidden sm:inline">
+                {semanticSearch
+                  ? t('costs.ai_search_on', { defaultValue: 'AI: on' })
+                  : t('costs.ai_search_off', { defaultValue: 'AI search' })}
+              </span>
             </button>
           </div>
 
@@ -1049,7 +1132,7 @@ export function CostsPage() {
                 </option>
                 {categories.map((cat) => (
                   <option key={cat} value={cat}>
-                    {cat}
+                    {categoryLabel(cat)}
                   </option>
                 ))}
               </select>
@@ -1166,12 +1249,15 @@ export function CostsPage() {
                         copiedId={copiedId}
                         isSelected={selectedIds.has(item.id)}
                         isFavourite={favourites.has(item.id)}
+                        band={certaintyById.get(item.id) ?? null}
+                        regionCurrency={regionCurrency}
                         onSelect={() => toggleSelect(item.id)}
                         onToggle={() => setExpandedId(isExpanded ? null : item.id)}
                         onCopy={() => handleCopyRate(item)}
                         onToggleFavourite={() => toggleFavourite(item.id)}
                         onDelete={(id) => deleteMutation.mutate(id)}
                         fmt={fmt}
+                        fmtMoney={fmtMoney}
                         t={t}
                       />
                     );
@@ -1441,16 +1527,29 @@ function AddToBOQModal({
         const pos = String(((nextOrdinal - 1) % 999) + 1).padStart(3, '0');
         const ordinal = `${section}.${pos}`;
 
-        // Build rich metadata with cost breakdown + components
+        // Resolve the item's currency: its own ISO code wins, then the
+        // region's catalogue currency. Stamped on the position AND on each
+        // resource row so the BOQ FX rollup converts foreign amounts to the
+        // project base via fx_rates instead of treating them as base.
+        const itemCurrency =
+          (item.currency || REGION_MAP[item.region ?? '']?.currency || '').trim().toUpperCase();
+
+        // Build rich metadata with cost breakdown + components.
+        // ``metadata.currency`` is the AUTHORITATIVE key the BOQ FX rollup
+        // reads (see ``_position_currency`` in boq/service.py) — set it so a
+        // foreign-currency catalogue rate converts to the project base via
+        // fx_rates instead of being summed as base. ``cost_item_currency``
+        // is kept as the provenance mirror the apply path also stamps.
         const meta: Record<string, unknown> = {
           cost_item_id: item.id,
           cost_item_code: item.code,
           cost_item_region: item.region,
+          ...(itemCurrency ? { currency: itemCurrency, cost_item_currency: itemCurrency } : {}),
           ...item.metadata_,
         };
 
         // Include resource breakdown for BOQ Grid display
-        // BOQ Grid reads from metadata.resources: Array<{name, code, type, unit, quantity, unit_rate, total}>
+        // BOQ Grid reads from metadata.resources: Array<{name, code, type, unit, quantity, unit_rate, total, currency}>
         if (item.components && item.components.length > 0) {
           // Full component data available — use it directly
           meta.resources = item.components.map((c) => ({
@@ -1461,20 +1560,21 @@ function AddToBOQModal({
             quantity: c.quantity,
             unit_rate: c.unit_rate,
             total: c.cost,
+            currency: itemCurrency,
           }));
           meta.resource_count = item.components.length;
         } else if (item.metadata_) {
           // No components stored — synthesize from metadata cost summary
-          const synth: Array<{ name: string; code: string; type: string; unit: string; quantity: number; unit_rate: number; total: number }> = [];
+          const synth: Array<{ name: string; code: string; type: string; unit: string; quantity: number; unit_rate: number; total: number; currency: string }> = [];
           const m = item.metadata_;
           if (m.labor_cost && m.labor_cost > 0) {
-            synth.push({ name: t('costs.component_labor', { defaultValue: 'Labor' }), code: '', type: 'labor', unit: item.unit, quantity: 1, unit_rate: m.labor_cost, total: m.labor_cost });
+            synth.push({ name: t('costs.component_labor', { defaultValue: 'Labor' }), code: '', type: 'labor', unit: item.unit, quantity: 1, unit_rate: m.labor_cost, total: m.labor_cost, currency: itemCurrency });
           }
           if (m.material_cost && m.material_cost > 0) {
-            synth.push({ name: t('costs.component_material', { defaultValue: 'Material' }), code: '', type: 'material', unit: item.unit, quantity: 1, unit_rate: m.material_cost, total: m.material_cost });
+            synth.push({ name: t('costs.component_material', { defaultValue: 'Material' }), code: '', type: 'material', unit: item.unit, quantity: 1, unit_rate: m.material_cost, total: m.material_cost, currency: itemCurrency });
           }
           if (m.equipment_cost && m.equipment_cost > 0) {
-            synth.push({ name: t('costs.component_equipment', { defaultValue: 'Equipment' }), code: '', type: 'equipment', unit: item.unit, quantity: 1, unit_rate: m.equipment_cost, total: m.equipment_cost });
+            synth.push({ name: t('costs.component_equipment', { defaultValue: 'Equipment' }), code: '', type: 'equipment', unit: item.unit, quantity: 1, unit_rate: m.equipment_cost, total: m.equipment_cost, currency: itemCurrency });
           }
           if (synth.length > 0) {
             meta.resources = synth;
@@ -1491,6 +1591,10 @@ function AddToBOQModal({
           meta.cost_breakdown = byType;
         }
 
+        // The catalogue currency rides on ``metadata.currency`` (set above) —
+        // that's the key the BOQ FX rollup reads, so a foreign-currency rate
+        // converts to the project base via fx_rates instead of being summed
+        // as base. PositionCreate has no top-level currency field.
         await apiPost(`/v1/boq/boqs/${boqId}/positions/`, {
           boq_id: boqId,
           ordinal,
@@ -1525,6 +1629,25 @@ function AddToBOQModal({
 
   const fmt = (n: number) =>
     new Intl.NumberFormat(getIntlLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+  // Currency-aware money formatter for the preview — selected items can
+  // span EUR / AED / SAR / USD, so always render the ISO code.
+  const fmtMoney = (n: number, currency: string) => {
+    const code = (currency || '').trim().toUpperCase();
+    if (!code) return fmt(n);
+    try {
+      return new Intl.NumberFormat(getIntlLocale(), {
+        style: 'currency',
+        currency: code,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(n);
+    } catch {
+      return `${fmt(n)} ${code}`;
+    }
+  };
+  const itemCurrencyOf = (it: CostItem) =>
+    (it.currency || REGION_MAP[it.region ?? '']?.currency || '').trim().toUpperCase();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in" onClick={onClose}>
@@ -1650,7 +1773,7 @@ function AddToBOQModal({
                     <tr key={item.id}>
                       <td className="px-3 py-1.5 text-content-primary truncate max-w-[250px]">{item.description}</td>
                       <td className="px-3 py-1.5 text-center text-content-tertiary">{item.unit}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums font-medium text-content-primary">{fmt(item.rate)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums font-medium text-content-primary">{fmtMoney(item.rate, itemCurrencyOf(item))}</td>
                     </tr>
                   ))}
                   {items.length > 10 && (
@@ -2267,12 +2390,15 @@ function CostItemRow({
   copiedId,
   isSelected,
   isFavourite,
+  band,
+  regionCurrency,
   onSelect,
   onToggle,
   onCopy,
   onToggleFavourite,
   onDelete,
   fmt,
+  fmtMoney,
   t,
 }: {
   item: CostItem;
@@ -2281,12 +2407,18 @@ function CostItemRow({
   copiedId: string | null;
   isSelected: boolean;
   isFavourite: boolean;
+  /** Pre-resolved certainty band from the page-level batch fetch. */
+  band: CertaintyBadgeData | null;
+  /** Active region's currency — fallback when the row's own is empty. */
+  regionCurrency: string;
   onSelect: () => void;
   onToggle: () => void;
   onCopy: () => void;
   onToggleFavourite: () => void;
   onDelete?: (id: string) => void;
   fmt: (n: number) => string;
+  /** Currency-aware money formatter — renders the ISO code with the figure. */
+  fmtMoney: (n: number, currency?: string | null) => string;
   t: ReturnType<typeof import('react-i18next').useTranslation>['t'];
 }) {
   const { confirm, ...confirmProps } = useConfirm();
@@ -2333,6 +2465,12 @@ function CostItemRow({
   const breadcrumb = [localizedCategory, cls.collection, cls.department, cls.section, cls.subsection]
     .filter(Boolean)
     .join(' > ');
+
+  // Resolve this row's currency once: the row's own ISO code wins, then
+  // the active region's catalogue currency. `money()` always renders the
+  // code so EUR / AED / SAR / USD rows are never confused.
+  const rowCurrency = (item.currency || regionCurrency || '').trim().toUpperCase();
+  const money = (n: number) => fmtMoney(n, rowCurrency);
 
   return (
     <>
@@ -2394,8 +2532,8 @@ function CostItemRow({
         </td>
         <td className="px-4 py-3 text-right font-semibold text-content-primary tabular-nums">
           <div className="inline-flex items-center gap-1.5">
-            <CertaintyBadge costItemId={item.id} />
-            <span>{fmt(item.rate)}</span>
+            <CertaintyBadge costItemId={item.id} band={band} />
+            <span title={rowCurrency || undefined}>{money(item.rate)}</span>
             {hasVariants && variantStats && (
               <Badge
                 variant="blue"
@@ -2404,7 +2542,7 @@ function CostItemRow({
                 // Tooltip shows the price range so the user sees the spread
                 // without having to expand the row.
               >
-                <span title={`${fmt(variantStats.min)} – ${fmt(variantStats.max)}`}>
+                <span title={`${money(variantStats.min)} – ${money(variantStats.max)}`}>
                   {t('costs.variants_count', { count: variantCount, defaultValue: '{{count}} variants' })}
                 </span>
               </Badge>
@@ -2488,7 +2626,7 @@ function CostItemRow({
                 <CostVariantDetail
                   variants={variants}
                   stats={variantStats}
-                  fmt={fmt}
+                  fmt={money}
                   t={t}
                 />
               )}
@@ -2500,48 +2638,66 @@ function CostItemRow({
                 <div className="rounded-lg bg-surface-primary border border-border-light p-3">
                   <div className="flex items-center gap-1.5 mb-1">
                     <HardHat size={12} className="text-amber-500" />
-                    <span className="text-2xs font-medium text-content-secondary uppercase tracking-wider">Labor</span>
+                    <span className="text-2xs font-medium text-content-secondary uppercase tracking-wider">
+                      {t('costs.component_labor', { defaultValue: 'Labor' })}
+                    </span>
                   </div>
                   <div className="text-sm font-bold tabular-nums text-content-primary">
-                    {laborCost > 0 ? fmt(laborCost) : '—'}
+                    {laborCost > 0 ? money(laborCost) : '—'}
                   </div>
                   {laborHours > 0 && (
-                    <div className="text-2xs text-content-tertiary mt-0.5">{laborHours.toFixed(1)} hrs</div>
+                    <div className="text-2xs text-content-tertiary mt-0.5">
+                      {t('costs.labor_hours_short', { defaultValue: '{{hours}} hrs', hours: laborHours.toFixed(1) })}
+                    </div>
                   )}
                   {workers > 0 && (
-                    <div className="text-2xs text-content-tertiary">{workers} workers/unit</div>
+                    <div className="text-2xs text-content-tertiary">
+                      {t('costs.workers_per_unit', { defaultValue: '{{count}} workers/unit', count: workers })}
+                    </div>
                   )}
                 </div>
                 <div className="rounded-lg bg-surface-primary border border-border-light p-3">
                   <div className="flex items-center gap-1.5 mb-1">
                     <Hammer size={12} className="text-blue-500" />
-                    <span className="text-2xs font-medium text-content-secondary uppercase tracking-wider">Equipment</span>
+                    <span className="text-2xs font-medium text-content-secondary uppercase tracking-wider">
+                      {t('costs.component_equipment', { defaultValue: 'Equipment' })}
+                    </span>
                   </div>
                   <div className="text-sm font-bold tabular-nums text-content-primary">
-                    {equipmentCost > 0 ? fmt(equipmentCost) : '—'}
+                    {equipmentCost > 0 ? money(equipmentCost) : '—'}
                   </div>
                   {machines.length > 0 && (
-                    <div className="text-2xs text-content-tertiary mt-0.5">{machines.length} items</div>
+                    <div className="text-2xs text-content-tertiary mt-0.5">
+                      {t('costs.n_items', { defaultValue: '{{count}} items', count: machines.length })}
+                    </div>
                   )}
                 </div>
                 <div className="rounded-lg bg-surface-primary border border-border-light p-3">
                   <div className="flex items-center gap-1.5 mb-1">
                     <Package size={12} className="text-green-600" />
-                    <span className="text-2xs font-medium text-content-secondary uppercase tracking-wider">Materials</span>
+                    <span className="text-2xs font-medium text-content-secondary uppercase tracking-wider">
+                      {t('costs.component_material', { defaultValue: 'Materials' })}
+                    </span>
                   </div>
                   <div className="text-sm font-bold tabular-nums text-content-primary">
-                    {materialCost > 0 ? fmt(materialCost) : '—'}
+                    {materialCost > 0 ? money(materialCost) : '—'}
                   </div>
                   {materials.length > 0 && (
-                    <div className="text-2xs text-content-tertiary mt-0.5">{materials.length} items</div>
+                    <div className="text-2xs text-content-tertiary mt-0.5">
+                      {t('costs.n_items', { defaultValue: '{{count}} items', count: materials.length })}
+                    </div>
                   )}
                 </div>
                 <div className="rounded-lg bg-surface-primary border border-border-light p-3">
                   <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-2xs font-medium text-content-secondary uppercase tracking-wider">Total</span>
+                    <span className="text-2xs font-medium text-content-secondary uppercase tracking-wider">
+                      {t('costs.total', { defaultValue: 'Total' })}
+                    </span>
                   </div>
-                  <div className="text-sm font-bold tabular-nums text-content-primary">{fmt(item.rate)}</div>
-                  <div className="text-2xs text-content-tertiary mt-0.5">per {item.unit}</div>
+                  <div className="text-sm font-bold tabular-nums text-content-primary">{money(item.rate)}</div>
+                  <div className="text-2xs text-content-tertiary mt-0.5">
+                    {t('costs.per_unit', { defaultValue: 'per {{unit}}', unit: item.unit })}
+                  </div>
                 </div>
               </div>
 
@@ -2553,21 +2709,21 @@ function CostItemRow({
                       <div
                         className="h-full bg-amber-400"
                         style={{ width: `${(laborCost / item.rate) * 100}%` }}
-                        title={`Labor: ${fmt(laborCost)}`}
+                        title={`${t('costs.component_labor', { defaultValue: 'Labor' })}: ${money(laborCost)}`}
                       />
                     )}
                     {equipmentCost > 0 && (
                       <div
                         className="h-full bg-blue-400"
                         style={{ width: `${(equipmentCost / item.rate) * 100}%` }}
-                        title={`Equipment: ${fmt(equipmentCost)}`}
+                        title={`${t('costs.component_equipment', { defaultValue: 'Equipment' })}: ${money(equipmentCost)}`}
                       />
                     )}
                     {materialCost > 0 && (
                       <div
                         className="h-full bg-green-400"
                         style={{ width: `${(materialCost / item.rate) * 100}%` }}
-                        title={`Materials: ${fmt(materialCost)}`}
+                        title={`${t('costs.component_material', { defaultValue: 'Materials' })}: ${money(materialCost)}`}
                       />
                     )}
                   </div>
@@ -2575,19 +2731,19 @@ function CostItemRow({
                     {laborCost > 0 && (
                       <span className="flex items-center gap-1">
                         <span className="h-2 w-2 rounded-full bg-amber-400" />
-                        Labor {((laborCost / item.rate) * 100).toFixed(0)}%
+                        {t('costs.component_labor', { defaultValue: 'Labor' })} {((laborCost / item.rate) * 100).toFixed(0)}%
                       </span>
                     )}
                     {equipmentCost > 0 && (
                       <span className="flex items-center gap-1">
                         <span className="h-2 w-2 rounded-full bg-blue-400" />
-                        Equipment {((equipmentCost / item.rate) * 100).toFixed(0)}%
+                        {t('costs.component_equipment', { defaultValue: 'Equipment' })} {((equipmentCost / item.rate) * 100).toFixed(0)}%
                       </span>
                     )}
                     {materialCost > 0 && (
                       <span className="flex items-center gap-1">
                         <span className="h-2 w-2 rounded-full bg-green-400" />
-                        Materials {((materialCost / item.rate) * 100).toFixed(0)}%
+                        {t('costs.component_material', { defaultValue: 'Materials' })} {((materialCost / item.rate) * 100).toFixed(0)}%
                       </span>
                     )}
                   </div>
@@ -2599,12 +2755,24 @@ function CostItemRow({
                 <table className="w-full text-xs table-fixed">
                   <thead>
                     <tr className="bg-surface-tertiary">
-                      <th className="px-3 py-2 text-left font-medium text-content-secondary truncate">Resource</th>
-                      <th className="px-3 py-2 text-left font-medium text-content-secondary w-16">Type</th>
-                      <th className="px-3 py-2 text-left font-medium text-content-secondary w-16">Unit</th>
-                      <th className="px-3 py-2 text-right font-medium text-content-secondary w-20">Qty</th>
-                      <th className="px-3 py-2 text-right font-medium text-content-secondary w-24">Unit Rate</th>
-                      <th className="px-3 py-2 text-right font-medium text-content-secondary w-24">Cost</th>
+                      <th className="px-3 py-2 text-left font-medium text-content-secondary truncate">
+                        {t('costs.resource', { defaultValue: 'Resource' })}
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium text-content-secondary w-16">
+                        {t('costs.type', { defaultValue: 'Type' })}
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium text-content-secondary w-16">
+                        {t('boq.unit', { defaultValue: 'Unit' })}
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium text-content-secondary w-20">
+                        {t('costs.qty', { defaultValue: 'Qty' })}
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium text-content-secondary w-24">
+                        {t('costs.unit_rate', { defaultValue: 'Unit Rate' })}
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium text-content-secondary w-24">
+                        {t('costs.cost', { defaultValue: 'Cost' })}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border-light">
@@ -2634,10 +2802,10 @@ function CostItemRow({
                             {comp.quantity > 0 ? comp.quantity.toFixed(2) : '—'}
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums text-content-secondary">
-                            {comp.unit_rate > 0 ? fmt(comp.unit_rate) : '—'}
+                            {comp.unit_rate > 0 ? money(comp.unit_rate) : '—'}
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums font-medium text-content-primary">
-                            {comp.cost > 0 ? fmt(comp.cost) : '—'}
+                            {comp.cost > 0 ? money(comp.cost) : '—'}
                           </td>
                         </tr>
                       );
@@ -2651,15 +2819,19 @@ function CostItemRow({
               {/* All Properties */}
               <details className="mt-4">
                 <summary className="text-2xs font-medium text-content-tertiary cursor-pointer hover:text-content-secondary transition-colors select-none">
-                  All properties ({Object.keys(cls).length + Object.keys(meta).length + 5} fields)
+                  {t('costs.all_properties_n_fields', {
+                    defaultValue: 'All properties ({{count}} fields)',
+                    count: Object.keys(cls).length + Object.keys(meta).length + 5,
+                  })}
                 </summary>
                 <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5 text-2xs">
                   {/* Basic fields */}
-                  <div className="flex justify-between"><span className="text-content-quaternary">Code</span><span className="text-content-secondary font-mono">{item.code}</span></div>
-                  <div className="flex justify-between"><span className="text-content-quaternary">Unit</span><span className="text-content-secondary">{item.unit}</span></div>
-                  <div className="flex justify-between"><span className="text-content-quaternary">Rate</span><span className="text-content-secondary font-semibold">{fmt(item.rate)}</span></div>
-                  <div className="flex justify-between"><span className="text-content-quaternary">Region</span><span className="text-content-secondary">{item.region || '—'}</span></div>
-                  <div className="flex justify-between"><span className="text-content-quaternary">Source</span><span className="text-content-secondary">{item.source}</span></div>
+                  <div className="flex justify-between"><span className="text-content-quaternary">{t('costs.code', { defaultValue: 'Code' })}</span><span className="text-content-secondary font-mono">{item.code}</span></div>
+                  <div className="flex justify-between"><span className="text-content-quaternary">{t('boq.unit', { defaultValue: 'Unit' })}</span><span className="text-content-secondary">{item.unit}</span></div>
+                  <div className="flex justify-between"><span className="text-content-quaternary">{t('costs.rate', { defaultValue: 'Rate' })}</span><span className="text-content-secondary font-semibold">{money(item.rate)}</span></div>
+                  <div className="flex justify-between"><span className="text-content-quaternary">{t('costs.currency', { defaultValue: 'Currency' })}</span><span className="text-content-secondary">{rowCurrency || '—'}</span></div>
+                  <div className="flex justify-between"><span className="text-content-quaternary">{t('costs.region_label', { defaultValue: 'Region' })}</span><span className="text-content-secondary">{item.region || '—'}</span></div>
+                  <div className="flex justify-between"><span className="text-content-quaternary">{t('costs.source_label', { defaultValue: 'Source' })}</span><span className="text-content-secondary">{item.source}</span></div>
 
                   {/* Classification */}
                   {Object.entries(cls).map(([k, v]) => (
@@ -2679,7 +2851,7 @@ function CostItemRow({
                     </div>
                   ))}
 
-                  <div className="flex justify-between"><span className="text-content-quaternary">Components</span><span className="text-content-secondary">{(item.components_count ?? detail.components?.length ?? 0)} resources</span></div>
+                  <div className="flex justify-between"><span className="text-content-quaternary">{t('costs.components_label', { defaultValue: 'Components' })}</span><span className="text-content-secondary">{t('costs.n_resources', { defaultValue: '{{count}} resources', count: (item.components_count ?? detail.components?.length ?? 0) })}</span></div>
                 </div>
               </details>
             </div>

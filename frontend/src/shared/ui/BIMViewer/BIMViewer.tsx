@@ -460,6 +460,80 @@ function QuantitiesTable({ quantities }: { quantities: Record<string, number> })
   );
 }
 
+/* ── Model-wide quantity rollup (synonym-aware) ────────────────────────── */
+
+/**
+ * Sum the volume / area / length of a single element using the same
+ * synonym-aware key resolution the BOQ link flow (`suggestQuantityFromBIM`)
+ * relies on, so real DDC / Revit exports (`NetVolume`, `NetSideArea`,
+ * `volume_m3`, …) roll up just like the canonical bare keys.
+ *
+ * Resolution mirrors `suggestQuantityFromBIM`'s candidate lists, scanning
+ * `quantities` first then `properties`, and falls back to any key whose
+ * lowercased name *includes* volume/area/length or *ends with*
+ * `_m3` / `_m2` / `_m`. One value per dimension per element (first hit
+ * wins) so the same magnitude is never double-counted when a model carries
+ * both `volume` and `NetVolume`.
+ */
+type QuantityDimension = 'volume' | 'area' | 'length';
+
+function resolveElementQuantity(el: BIMElementData, dim: QuantityDimension): number {
+  const bags: Array<Record<string, unknown> | undefined> = [el.quantities, el.properties];
+
+  // Explicit candidate keys (priority order, first hit wins) — kept in sync
+  // with the field-priority tables in suggestQuantityFromBIM.
+  const explicit: Record<QuantityDimension, string[]> = {
+    volume: ['volume_m3', 'volume', 'NetVolume', 'GrossVolume', 'Volume'],
+    area: ['area_m2', 'area', 'NetArea', 'GrossArea', 'NetSideArea', 'GrossSideArea', 'Area'],
+    length: ['length_m', 'length', 'Length'],
+  };
+
+  const toNum = (raw: unknown): number | null => {
+    const n = typeof raw === 'number' ? raw : Number.parseFloat(String(raw));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  for (const bag of bags) {
+    if (!bag) continue;
+    for (const key of explicit[dim]) {
+      let raw = bag[key];
+      if (raw === undefined) {
+        const lc = key.toLowerCase();
+        for (const [k, v] of Object.entries(bag)) {
+          if (k.toLowerCase() === lc) {
+            raw = v;
+            break;
+          }
+        }
+      }
+      const n = toNum(raw);
+      if (n !== null) return n;
+    }
+  }
+
+  // Heuristic fallback: any key whose lowercased name includes the dimension
+  // word or ends with the matching SI-unit suffix. Skips area/volume keys
+  // when resolving "length" so e.g. "SideArea" isn't mistaken for length.
+  const suffix = dim === 'volume' ? '_m3' : dim === 'area' ? '_m2' : '_m';
+  for (const bag of bags) {
+    if (!bag) continue;
+    for (const [k, v] of Object.entries(bag)) {
+      const lk = k.toLowerCase();
+      const matches =
+        lk.includes(dim) ||
+        (dim === 'length' ? lk.endsWith('_m') && !lk.endsWith('_m2') && !lk.endsWith('_m3') : lk.endsWith(suffix));
+      // Guard length against area/volume false positives ("net_area" includes
+      // neither "length" nor "_m", but "perimeter_m" should still count).
+      if (dim === 'length' && (lk.includes('area') || lk.includes('volume'))) continue;
+      if (!matches) continue;
+      const n = toNum(v);
+      if (n !== null && n !== 0) return n;
+    }
+  }
+
+  return 0;
+}
+
 /* ── BIM Viewer Component ──────────────────────────────────────────────── */
 
 export function BIMViewer({
@@ -1735,6 +1809,12 @@ export function BIMViewer({
           pos: { x: number; y: number; z: number },
           target: { x: number; y: number; z: number },
         ) => void;
+        /** Subscribe to camera-orientation changes (OrbitControls 'change').
+         *  Returns an unsubscribe fn. Lets sibling pages react to camera
+         *  motion event-driven instead of polling — an idle viewer fires
+         *  nothing. Returns a no-op unsubscribe until the scene is mounted;
+         *  re-subscribe once ``sceneManager`` is non-null to capture it. */
+        onCameraChange: (cb: () => void) => () => void;
         /** W6.6 Stream B — tween the camera to ``target`` over ``durationMs``
          *  (default 600). Resolves when the tween completes and rejects with
          *  ``Error('flyTo cancelled')`` if a newer tween overtakes it. */
@@ -1785,6 +1865,7 @@ export function BIMViewer({
     w.__oeBim = {
       getViewpoint: () => sceneRef.current?.getViewpoint() ?? null,
       setViewpoint: (pos, target) => sceneRef.current?.setViewpoint(pos, target),
+      onCameraChange: (cb) => sceneRef.current?.onCameraChange(cb) ?? (() => undefined),
       flyTo: (target, durationMs) => {
         const scene = sceneRef.current;
         if (!scene) return Promise.resolve();
@@ -2478,22 +2559,21 @@ export function BIMViewer({
       byCat.set(cat, (byCat.get(cat) ?? 0) + 1);
       const st = el.storey || 'Unassigned';
       byStorey.set(st, (byStorey.get(st) ?? 0) + 1);
-      if (el.quantities) {
-        totalVolume += el.quantities['volume'] ?? el.quantities['Volume'] ?? 0;
-        totalArea += el.quantities['area'] ?? el.quantities['Area'] ?? 0;
-        totalLength += el.quantities['length'] ?? el.quantities['Length'] ?? 0;
-      }
+      // Synonym-aware rollup so real DDC / Revit exports (NetVolume,
+      // NetSideArea, volume_m3, …) sum just like the canonical bare keys.
+      totalVolume += resolveElementQuantity(el, 'volume');
+      totalArea += resolveElementQuantity(el, 'area');
+      totalLength += resolveElementQuantity(el, 'length');
     }
     const categories = [...byCat.entries()].sort((a, b) => b[1] - a[1]);
     const storeys = [...byStorey.entries()].sort((a, b) => b[1] - a[1]);
-    // Per-key aggregation (SUM / AVG / DISTINCT) — replaces the
-    // hard-coded Volume/Area/Length triplet with a deep, classifier-
+    // Per-key aggregation (SUM / AVG / DISTINCT) — a deep, classifier-
     // driven roll-up that handles thickness as average, mark numbers
     // as distinct counts, etc.  Computed for any narrowed scope —
     // selection, filter, isolation — because each of these answers
     // "what are the totals for THIS subset?". Skipped only for the
-    // unscoped "all" view, where the basic Volume/Area/Length triplet
-    // above already covers the model-wide rollup at lower cost.
+    // unscoped "all" view, where the synonym-aware Volume/Area/Length
+    // triplet above already covers the model-wide rollup at lower cost.
     const aggregations: AggResult[] =
       scope !== 'all' ? aggregateBIMQuantities(subset) : [];
     return {
@@ -3848,7 +3928,9 @@ export function BIMViewer({
                 <div className="grid grid-cols-1 gap-1.5">
                   {modelSummary.totalVolume > 0 && (
                     <div className="flex items-center justify-between rounded-md bg-surface-secondary px-2.5 py-1.5">
-                      <span className="text-xs font-medium text-content-secondary">Volume</span>
+                      <span className="text-xs font-medium text-content-secondary">
+                        {t('bim.qty_volume', { defaultValue: 'Volume' })}
+                      </span>
                       <span className="text-xs font-semibold text-content-primary tabular-nums">
                         {modelSummary.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 1 })} m&sup3;
                       </span>
@@ -3856,7 +3938,9 @@ export function BIMViewer({
                   )}
                   {modelSummary.totalArea > 0 && (
                     <div className="flex items-center justify-between rounded-md bg-surface-secondary px-2.5 py-1.5">
-                      <span className="text-xs font-medium text-content-secondary">Area</span>
+                      <span className="text-xs font-medium text-content-secondary">
+                        {t('bim.qty_area', { defaultValue: 'Area' })}
+                      </span>
                       <span className="text-xs font-semibold text-content-primary tabular-nums">
                         {modelSummary.totalArea.toLocaleString(undefined, { maximumFractionDigits: 1 })} m&sup2;
                       </span>
@@ -3864,7 +3948,9 @@ export function BIMViewer({
                   )}
                   {modelSummary.totalLength > 0 && (
                     <div className="flex items-center justify-between rounded-md bg-surface-secondary px-2.5 py-1.5">
-                      <span className="text-xs font-medium text-content-secondary">Length</span>
+                      <span className="text-xs font-medium text-content-secondary">
+                        {t('bim.qty_length', { defaultValue: 'Length' })}
+                      </span>
                       <span className="text-xs font-semibold text-content-primary tabular-nums">
                         {modelSummary.totalLength.toLocaleString(undefined, { maximumFractionDigits: 1 })} m
                       </span>

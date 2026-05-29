@@ -394,7 +394,12 @@ class SafetyService:
             incidents_by_type[inc.incident_type] += 1
             incidents_by_status[inc.status] += 1
 
-            if inc.treatment_type in recordable_treatments:
+            # OSHA 300 recordability: the first-class ``osha_recordable``
+            # flag is the documented gate. Fall back to the treatment-type
+            # heuristic only when the flag was never set, so flagged
+            # restricted-duty / first-aid recordables are still counted and
+            # the KPI matches the OSHA log the schema is built for.
+            if getattr(inc, "osha_recordable", False) or inc.treatment_type in recordable_treatments:
                 recordable_incidents += 1
             if inc.days_lost and inc.days_lost > 0:
                 lost_time_incidents += 1

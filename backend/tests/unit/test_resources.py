@@ -1244,6 +1244,76 @@ async def test_update_assignment_to_cancelled_skips_conflict_check() -> None:
     assert updated.status == "cancelled"
 
 
+@pytest.mark.asyncio
+async def test_update_assignment_rejects_illegal_status_jump() -> None:
+    """The generic PATCH must honour the same FSM as confirm/complete/cancel:
+    a terminal 'completed' assignment cannot be PATCHed back to 'proposed'."""
+    from fastapi import HTTPException
+
+    svc = _make_service()
+    r = _make_resource(svc)
+    from app.modules.resources.schemas import AssignmentUpdate
+
+    start = datetime(2026, 5, 10, 8, 0, tzinfo=UTC)
+    end = datetime(2026, 5, 10, 17, 0, tzinfo=UTC)
+    target = SimpleNamespace(
+        id=uuid.uuid4(),
+        resource_id=r.id,
+        start_at=start,
+        end_at=end,
+        allocation_percent=100,
+        status="completed",
+        project_id=PROJECT_ID,
+        task_id=None,
+        work_order_id=None,
+        cost_rate=Decimal("0"),
+        currency="EUR",
+        notes="",
+        created_by=None,
+        metadata_={},
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    svc.assignment_repo.rows[target.id] = target
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.update_assignment(target.id, AssignmentUpdate(status="proposed"))
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_update_assignment_allows_legal_status_transition() -> None:
+    """A legal transition (confirmed -> in_progress) via PATCH is accepted."""
+    svc = _make_service()
+    r = _make_resource(svc)
+    from app.modules.resources.schemas import AssignmentUpdate
+
+    start = datetime(2026, 5, 10, 8, 0, tzinfo=UTC)
+    end = datetime(2026, 5, 10, 17, 0, tzinfo=UTC)
+    target = SimpleNamespace(
+        id=uuid.uuid4(),
+        resource_id=r.id,
+        start_at=start,
+        end_at=end,
+        allocation_percent=100,
+        status="confirmed",
+        project_id=PROJECT_ID,
+        task_id=None,
+        work_order_id=None,
+        cost_rate=Decimal("0"),
+        currency="EUR",
+        notes="",
+        created_by=None,
+        metadata_={},
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    svc.assignment_repo.rows[target.id] = target
+    updated = await svc.update_assignment(
+        target.id, AssignmentUpdate(status="in_progress")
+    )
+    assert updated.status == "in_progress"
+
+
 # ── Service: skill / cert attach ─────────────────────────────────────────
 
 

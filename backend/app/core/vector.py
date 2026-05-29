@@ -646,6 +646,12 @@ _qdrant_instance: Any = None
 _qdrant_tried: bool = False
 _qdrant_last_attempt_ts: float = 0.0
 _QDRANT_RETRY_COOLDOWN_S: float = 5.0
+# Bounded connect/request timeout (seconds) for the Qdrant probe. Keep it
+# tight: ``vector_status()`` runs this on every ``/api/system/status`` poll
+# (offloaded to a worker thread by the caller), so a wedged or unreachable
+# Qdrant must fail fast rather than hang the probe thread for tens of
+# seconds. 2s is comfortably above a healthy localhost round-trip.
+_QDRANT_CONNECT_TIMEOUT_S: float = 2.0
 
 
 def reset_qdrant_client() -> None:
@@ -689,7 +695,11 @@ def _get_qdrant():
         from app.config import get_settings
 
         url = get_settings().qdrant_url or "http://localhost:6333"
-        client = QdrantClient(url=url, timeout=2, check_compatibility=False)
+        client = QdrantClient(
+            url=url,
+            timeout=_QDRANT_CONNECT_TIMEOUT_S,
+            check_compatibility=False,
+        )
         client.get_collections()
         _qdrant_instance = client
         logger.info("Connected to Qdrant at %s", url)

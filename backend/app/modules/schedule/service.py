@@ -273,6 +273,55 @@ def compute_duration(start_date: str, end_date: str, region: str | None = None) 
     return working_days
 
 
+def _effective_activity_status(
+    *,
+    stored_status: str,
+    progress_pct: float,
+    end_date: str | None,
+    today: date,
+    region: str | None = None,
+) -> str:
+    """Derive the display status of an activity, flagging overdue ones as "delayed".
+
+    The stored status only ever carries completed / in_progress / not_started
+    (set from progress in ``update_progress``). "Delayed" is a temporal overlay
+    computed at read time: an activity that is not yet complete and whose planned
+    end date is strictly before today is considered delayed. A completed activity
+    (or one already at 100 % progress) is never delayed, regardless of dates.
+
+    Args:
+        stored_status: The persisted activity status.
+        progress_pct: Current progress percentage (0.0 - 100.0).
+        end_date: ISO planned end date string (may be empty/None).
+        today: Reference date for the overdue comparison.
+        region: Optional project region (accepted for calendar consistency).
+
+    Returns:
+        The effective status, which may be "delayed" in place of an unfinished
+        stored status.
+    """
+    if stored_status == "completed" or progress_pct >= 100.0:
+        return "completed"
+
+    if not end_date:
+        return stored_status
+
+    try:
+        planned_end = date.fromisoformat(str(end_date)[:10])
+    except (ValueError, TypeError):
+        return stored_status
+
+    # ``region`` is currently informational; the overdue test is calendar-based
+    # (planned end already in the past). Regional holidays would only ever push
+    # the delay flag later, never earlier, so a strict past-date check is a safe
+    # lower bound that never over-reports.
+    _ = region
+    if planned_end < today:
+        return "delayed"
+
+    return stored_status
+
+
 class ScheduleService:
     """Business logic for Schedule, Activity, and WorkOrder operations."""
 
@@ -661,6 +710,34 @@ class ScheduleService:
         )
 
         logger.info("Activity deleted: %s from schedule %s", activity_id, schedule_id)
+
+    async def clear_activities(self, schedule_id: uuid.UUID) -> int:
+        """Delete every activity (and its work orders) of a schedule at once.
+
+        Used by the schedule "Reset" action. Replaces an N+1 per-activity
+        delete loop with a single bulk statement.
+
+        Args:
+            schedule_id: Target schedule whose activities are cleared.
+
+        Returns:
+            The number of activities removed.
+
+        Raises:
+            HTTPException 404 if the schedule does not exist.
+        """
+        await self.get_schedule(schedule_id)
+
+        deleted = await self.activity_repo.delete_for_schedule(schedule_id)
+
+        await _safe_publish(
+            "schedule.activities.cleared",
+            {"schedule_id": str(schedule_id), "count": deleted},
+            source_module="oe_schedule",
+        )
+
+        logger.info("Cleared %d activity(ies) from schedule %s", deleted, schedule_id)
+        return deleted
 
     async def link_boq_position(self, activity_id: uuid.UUID, boq_position_id: uuid.UUID) -> Activity:
         """Link a BOQ position to an activity.
@@ -1051,7 +1128,16 @@ class ScheduleService:
         Raises:
             HTTPException 404 if schedule not found.
         """
-        await self.get_schedule(schedule_id)
+        schedule = await self.get_schedule(schedule_id)
+
+        # Resolve the project region once so the delay check honours the same
+        # regional work calendar the rest of the schedule math uses.
+        from app.modules.projects.repository import ProjectRepository
+
+        proj_repo = ProjectRepository(self.session)
+        project = await proj_repo.get_by_id(schedule.project_id)
+        project_region = project.region if project else None
+        today = datetime.now(UTC).date()
 
         activities, _ = await self.activity_repo.list_for_schedule(schedule_id)
 
@@ -1073,6 +1159,18 @@ class ScheduleService:
             if not duration:
                 duration = compute_duration(str(act.start_date), str(act.end_date))
 
+            # Derive the effective status: an unfinished activity whose planned
+            # end date has already passed is "delayed". This is computed at read
+            # time (not persisted) because delay is a temporal condition that
+            # changes daily; the stored status keeps the user-set value.
+            effective_status = _effective_activity_status(
+                stored_status=act.status,
+                progress_pct=progress,
+                end_date=act.end_date,
+                today=today,
+                region=project_region,
+            )
+
             gantt_activities.append(
                 GanttActivity(
                     id=act.id,
@@ -1087,16 +1185,16 @@ class ScheduleService:
                     boq_position_ids=act.boq_position_ids or [],
                     wbs_code=act.wbs_code,
                     activity_type=act.activity_type,
-                    status=act.status,
+                    status=effective_status,
                 )
             )
 
             # Count by status
-            if act.status == "completed":
+            if effective_status == "completed":
                 completed += 1
-            elif act.status == "in_progress":
+            elif effective_status == "in_progress":
                 in_progress += 1
-            elif act.status == "delayed":
+            elif effective_status == "delayed":
                 delayed += 1
             else:
                 not_started += 1

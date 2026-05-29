@@ -1039,7 +1039,12 @@ class DevelopmentDashboard(BaseModel):
     total_plots: int = 0
     plots_by_status: dict[str, int] = Field(default_factory=dict)
     buyers_by_status: dict[str, int] = Field(default_factory=dict)
+    # ``contracted_value`` is meaningful only for a single-currency
+    # development (0 otherwise); ``contracted_value_by_currency`` carries
+    # the honest per-currency breakdown so consumers never blend
+    # different currencies into one figure.
     contracted_value: Decimal = Decimal("0")
+    contracted_value_by_currency: dict[str, str] = Field(default_factory=dict)
     open_snags: int = 0
     open_warranty_claims: int = 0
     completed_handovers: int = 0

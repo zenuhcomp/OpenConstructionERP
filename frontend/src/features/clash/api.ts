@@ -472,6 +472,28 @@ export const clashApi = {
       body,
     ),
 
+  /**
+   * Apply ONE triage change (status / severity / assignee) to many clashes
+   * in a single request. Backs the review-table bulk-actions toolbar so a
+   * large selection no longer fires one PATCH per row (and invalidates the
+   * results query once, not per row). Returns how many rows actually
+   * changed plus how many were requested.
+   */
+  bulkUpdateResults: (
+    projectId: string,
+    runId: string,
+    body: {
+      result_ids: string[];
+      status?: string;
+      severity?: ClashSeverity;
+      assigned_to?: string | null;
+    },
+  ) =>
+    apiPatch<{ updated: number; requested: number }>(
+      `/v1/clash/projects/${projectId}/runs/${runId}/results`,
+      body,
+    ),
+
   /** Diff the active run against an earlier one (same models/config).
    *  Returns new / resolved / persistent buckets + summary stats. */
   compare: (projectId: string, runId: string, baseRunId: string) =>

@@ -29,6 +29,7 @@ import importlib.util
 import logging
 import os
 from functools import lru_cache
+from importlib import resources
 from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
 
@@ -194,14 +195,37 @@ def get_pack_by_slug(slug: str) -> PartnerPackManifest | None:
 def get_active_pack() -> PartnerPackManifest | None:
     """Pick the active pack.
 
-    Activation is explicit only — a pack is active ONLY when the
-    ``OE_PARTNER_PACK`` env var names it. Merely discovering packs (including
-    the source-checkout packs under ``packs/``) never co-brands the app.
+    A pack becomes active either by being *applied* in-app (persisted via the
+    /modules Partner Packs tab) or by the ``OE_PARTNER_PACK`` env var. Merely
+    discovering packs (including the source-checkout packs under ``packs/``)
+    never co-brands the app.
 
     Precedence:
-      1. env ``OE_PARTNER_PACK=<slug>``
-      2. None
+      1. in-app applied pack (``partner_pack_state.json``)
+      2. env ``OE_PARTNER_PACK=<slug>``
+      3. None
+
+    Cached for the process lifetime; ``reset_cache()`` is called by the apply
+    service after an apply / un-apply so the change takes effect immediately.
     """
+    # 1. In-app applied pack. Imported lazily to avoid any import-order issues.
+    try:
+        from app.core.partner_pack.state import get_applied_slug
+
+        applied = get_applied_slug()
+    except Exception:  # noqa: BLE001 — state file is best-effort
+        applied = None
+    if applied:
+        m = get_pack_by_slug(applied)
+        if m:
+            logger.info("Active partner pack (in-app applied): %s", m.slug)
+            return m
+        logger.warning(
+            "Applied partner pack '%s' is no longer installed; falling back.",
+            applied,
+        )
+
+    # 2. env var.
     requested = os.environ.get("OE_PARTNER_PACK", "").strip()
     if requested:
         m = get_pack_by_slug(requested)
@@ -238,6 +262,95 @@ def get_active_pack_module_name() -> str | None:
         if ep.name == active.slug:
             # ep.value is "module:attr" — return the module part
             return ep.value.split(":", 1)[0]
+    return None
+
+
+def _entrypoint_module_for_slug(slug: str) -> str | None:
+    """Return the Python module name for a pip-installed pack by slug, or None."""
+    try:
+        eps = entry_points(group=ENTRY_POINT_GROUP)
+    except TypeError:
+        eps = entry_points().get(ENTRY_POINT_GROUP, [])  # type: ignore[assignment]
+    for ep in eps:
+        if ep.name == slug:
+            return ep.value.split(":", 1)[0]
+    return None
+
+
+def _fs_package_dir_for_slug(slug: str) -> Path | None:
+    """Locate the on-disk package dir for a source-checkout pack by slug."""
+    if not _PACKS_DIR.is_dir():
+        return None
+
+    def _pkg_dirs(pack_dir: Path) -> list[Path]:
+        src_dir = pack_dir / "src"
+        if not src_dir.is_dir():
+            return []
+        return [
+            d
+            for d in sorted(src_dir.glob("openconstructionerp_*"))
+            if d.is_dir() and not d.name.endswith(".egg-info")
+        ]
+
+    # Fast path: the pack directory name matches the slug (repo convention).
+    direct = _PACKS_DIR / slug
+    for pkg_dir in _pkg_dirs(direct):
+        if (pkg_dir / "manifest.py").is_file():
+            return pkg_dir
+
+    # Fallback: scan every pack and match the loaded manifest slug.
+    for pack_dir in sorted(_PACKS_DIR.iterdir()):
+        if not pack_dir.is_dir() or pack_dir == direct:
+            continue
+        for pkg_dir in _pkg_dirs(pack_dir):
+            manifest_path = pkg_dir / "manifest.py"
+            if not manifest_path.is_file():
+                continue
+            m = _load_manifest_from_file(manifest_path)
+            if m and m.slug == slug:
+                return pkg_dir
+    return None
+
+
+def read_pack_file(slug: str, relpath: str) -> bytes | None:
+    """Read a file shipped inside a pack package, addressed by slug.
+
+    Works for pip-installed (entry-point) packs via ``importlib.resources`` and
+    for source-checkout packs under ``packs/<slug>/src/``. Path-traversal safe.
+    Returns ``None`` when the pack or the file cannot be found. This is the
+    by-slug counterpart to ``router._read_pack_resource`` (which only reads the
+    active pack); the /modules grid uses it to show each pack's own logo.
+    """
+    rel = relpath.lstrip("/\\")
+    if not rel or ".." in Path(rel.replace("\\", "/")).parts:
+        return None
+
+    # 1) pip-installed pack — read via importlib.resources.
+    mod_name = _entrypoint_module_for_slug(slug)
+    if mod_name:
+        try:
+            target = resources.files(mod_name).joinpath(rel)
+            if target.is_file():
+                return target.read_bytes()
+        except (
+            ModuleNotFoundError,
+            FileNotFoundError,
+            AttributeError,
+            NotADirectoryError,
+        ):
+            pass
+
+    # 2) source-checkout pack — read from the packs/ directory, sandboxed.
+    pkg_dir = _fs_package_dir_for_slug(slug)
+    if pkg_dir:
+        base = pkg_dir.resolve()
+        target = (base / rel).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError:
+            return None
+        if target.is_file():
+            return target.read_bytes()
     return None
 
 

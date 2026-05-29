@@ -623,7 +623,6 @@ class RFIService:
         from sqlalchemy import select
 
         now = datetime.now(UTC)
-        today_str = now.strftime("%Y-%m-%d")
 
         # Fetch RFIs for the project, capped at ``_RFI_STATS_SCAN_CAP``
         # so a runaway project history can't lock up the dashboard.
@@ -652,10 +651,18 @@ class RFIService:
             if rfi.status in ("draft", "open"):
                 open_count += 1
 
-            # Overdue = open/draft + past due date
+            # Overdue = open/draft + past due date. Use the same
+            # ``now > midnight(due)`` rule the row/detail view applies
+            # (router._compute_rfi_fields) so the stat tile and the list never
+            # disagree for an RFI due *today* — a naive ``due_str < today_str``
+            # string compare treated "due today" as not-overdue while the list
+            # treated it as overdue.
             if rfi.status in ("draft", "open") and rfi.response_due_date:
                 try:
-                    if rfi.response_due_date < today_str:
+                    due = datetime.fromisoformat(str(rfi.response_due_date))
+                    if due.tzinfo is None:
+                        due = due.replace(tzinfo=UTC)
+                    if now > due:
                         overdue_count += 1
                 except (TypeError, ValueError):
                     pass

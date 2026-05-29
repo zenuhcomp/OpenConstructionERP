@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.approval_routes.models import Instance, Route, Step, StepState
@@ -27,6 +27,7 @@ class ApprovalRouteRepository:
         project_id: uuid.UUID | None,
         target_kind: str | None = None,
         include_tenant_wide: bool = True,
+        include_inactive: bool = True,
     ) -> list[Route]:
         """List routes visible to the caller.
 
@@ -35,6 +36,11 @@ class ApprovalRouteRepository:
         ``project_id IS NULL`` templates as well — so a module surface
         can show shared templates plus per-project ones in a single
         dropdown without two round trips.
+
+        ``include_inactive`` defaults to ``True`` (the admin surface shows
+        archived routes). Pass ``False`` to restrict the result to
+        ``is_active = True`` rows — what a consumer picker wants so users
+        can't start a workflow on an archived template.
         """
         stmt = select(Route)
         if project_id is None:
@@ -47,6 +53,8 @@ class ApprovalRouteRepository:
             stmt = stmt.where(Route.project_id == project_id)
         if target_kind is not None:
             stmt = stmt.where(Route.target_kind == target_kind)
+        if not include_inactive:
+            stmt = stmt.where(Route.is_active.is_(True))
         stmt = stmt.order_by(Route.created_at.desc())
         return list((await self.session.execute(stmt)).scalars().all())
 
@@ -99,6 +107,13 @@ class ApprovalRouteRepository:
             self.session.add(s)
         await self.session.flush()
         return steps
+
+    async def delete_steps_for_route(self, route_id: uuid.UUID) -> None:
+        """Remove every step of a route — used when replacing the step list."""
+        await self.session.execute(
+            delete(Step).where(Step.route_id == route_id),
+        )
+        await self.session.flush()
 
     async def delete_route(self, route: Route) -> None:
         await self.session.delete(route)

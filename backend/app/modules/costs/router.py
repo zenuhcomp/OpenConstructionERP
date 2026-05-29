@@ -27,6 +27,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -93,6 +94,24 @@ _ALLOWED_COST_IMPORT_SIGNATURES: frozenset[str] = frozenset({"zip", "ole"})
 
 router = APIRouter(tags=["costs"])
 logger = logging.getLogger(__name__)
+
+
+class CertaintyBatchRequest(BaseModel):
+    """Request body for ``POST /v1/costs/certainty/batch``.
+
+    Carries the cost-item ids visible on one list page so the certainty
+    badges can be resolved in a single round-trip instead of one HTTP
+    request per row (an N+1 the list view fired on every page). Bounded
+    to 200 ids — comfortably above the 10-row default page size while
+    still capping the ``IN()`` fan-out.
+    """
+
+    ids: list[uuid.UUID] = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Cost-item ids to grade (deduplicated server-side; unknown ids dropped).",
+    )
 
 
 # ── Region → currency map ─────────────────────────────────────────────────
@@ -4270,6 +4289,105 @@ async def list_regional_indices(
     svc = RegionalIndexService(session)
     rows = await svc.list_for_region(region)
     return [RegionalIndexResponse.model_validate(row) for row in rows]
+
+
+@router.post("/certainty/batch/", response_model=list[CertaintyBadge])
+async def get_cost_item_certainty_batch(
+    body: CertaintyBatchRequest,
+    session: SessionDep,
+    user: OptionalUserPayload,
+) -> list[CertaintyBadge]:
+    """‌⁠‍Return certainty badges for many cost items in a single round-trip.
+
+    The list view renders one badge per visible row; fetching them
+    individually fires N HTTP requests per page (one per row), which is
+    a per-keystroke N+1 against the usage ledger. This endpoint folds
+    the whole visible page into two grouped queries — ``count(*)`` and
+    ``max(used_at)`` keyed by ``cost_item_id`` — then classifies each
+    band in Python, so the page costs one request regardless of row
+    count.
+
+    Unknown ids are silently dropped (the badge is decorative — a
+    missing row simply renders nothing on the client). Duplicate ids in
+    the request collapse to one result. Public, mirroring the
+    single-item endpoint.
+    """
+    _ = user
+
+    # De-duplicate while preserving the caller's order so the response is
+    # deterministic; cap at the request schema's max_length (validated on
+    # ``ids``) so a hostile payload can't fan out into an unbounded IN().
+    seen: set[uuid.UUID] = set()
+    ordered_ids: list[uuid.UUID] = []
+    for raw in body.ids:
+        if raw not in seen:
+            seen.add(raw)
+            ordered_ids.append(raw)
+    if not ordered_ids:
+        return []
+
+    from datetime import UTC, datetime
+
+    from sqlalchemy import func
+
+    from app.modules.costs.intelligence import (
+        NEVER_USED_AGE_DAYS,
+        classify_certainty,
+    )
+    from app.modules.costs.models import CostItemUsage
+
+    # Only items that actually exist get a badge — resolve their ``source``
+    # in one pass so the band carries the correct provenance label.
+    item_rows = await session.execute(
+        select(CostItem.id, CostItem.source).where(CostItem.id.in_(ordered_ids))
+    )
+    source_by_id: dict[uuid.UUID, str] = {row[0]: (row[1] or "manual") for row in item_rows.all()}
+
+    # Two grouped aggregates over the usage ledger — frequency + last use —
+    # instead of one query per id. The composite index on
+    # ``(cost_item_id, used_at)`` covers both.
+    usage_rows = await session.execute(
+        select(
+            CostItemUsage.cost_item_id,
+            func.count(CostItemUsage.id).label("freq"),
+            func.max(CostItemUsage.used_at).label("last_used"),
+        )
+        .where(CostItemUsage.cost_item_id.in_(ordered_ids))
+        .group_by(CostItemUsage.cost_item_id)
+    )
+    usage_by_id: dict[uuid.UUID, tuple[int, datetime | None]] = {
+        row[0]: (int(row[1] or 0), row[2]) for row in usage_rows.all()
+    }
+
+    now = datetime.now(UTC)
+    out: list[CertaintyBadge] = []
+    for item_id in ordered_ids:
+        if item_id not in source_by_id:
+            continue
+        frequency, last_used = usage_by_id.get(item_id, (0, None))
+        if last_used is None:
+            age_days = NEVER_USED_AGE_DAYS
+            last_used_iso: datetime | None = None
+        else:
+            # SQLite returns naive datetimes; normalise to UTC-aware so the
+            # diff matches the single-item endpoint's behaviour.
+            if last_used.tzinfo is None:
+                last_used = last_used.replace(tzinfo=UTC)
+            age_days = max(0, int((now - last_used).total_seconds() // 86400))
+            last_used_iso = last_used
+        out.append(
+            CertaintyBadge.model_validate(
+                {
+                    "cost_item_id": item_id,
+                    "frequency": frequency,
+                    "age_days": age_days,
+                    "source": source_by_id[item_id],
+                    "confidence_badge": classify_certainty(frequency, age_days),
+                    "last_used_at": last_used_iso,
+                }
+            )
+        )
+    return out
 
 
 @router.get("/{item_id}/certainty/", response_model=CertaintyBadge)

@@ -73,10 +73,18 @@ async def _safe_publish(name: str, data: dict, source_module: str = "") -> None:
 from app.modules.tendering.models import TenderBid, TenderPackage
 from app.modules.tendering.repository import TenderingRepository
 from app.modules.tendering.schemas import (
+    AddendumAckEntry,
+    AddendumCreate,
+    AddendumResponse,
     BidComparisonResponse,
     BidComparisonRow,
     BidCreate,
+    BidLevelingSummary,
     BidUpdate,
+    LevelBidsResponse,
+    LevelingMatrixCell,
+    LevelingMatrixResponse,
+    LevelingMatrixRow,
     PackageCreate,
     PackageUpdate,
 )
@@ -627,6 +635,382 @@ class TenderingService:
             "positions_updated": updated,
             "boq_id": str(package.boq_id),
         }
+
+    # ── Addenda (mid-tender clarifications) ────────────────────────────────
+    # Addenda live in the package ``metadata_`` JSON store under ``addenda``
+    # (an append-only list of revision dicts). No dedicated table is needed:
+    # an addendum is a small, package-scoped revision log and ``metadata_`` is
+    # already the data model's extensible per-package store. Each entry shape:
+    #   {id, revision_no, title, body, published_at, published_by_user_id,
+    #    acknowledged_by: [{bidder_id, acknowledged_at, user_id}],
+    #    created_at, updated_at}
+
+    @staticmethod
+    def _addendum_to_response(package_id: uuid.UUID, raw: dict) -> AddendumResponse:
+        acks = [
+            AddendumAckEntry(
+                bidder_id=str(a.get("bidder_id", "")),
+                acknowledged_at=str(a.get("acknowledged_at", "")),
+                user_id=a.get("user_id"),
+            )
+            for a in (raw.get("acknowledged_by") or [])
+            if isinstance(a, dict)
+        ]
+        return AddendumResponse(
+            id=str(raw.get("id", "")),
+            package_id=package_id,
+            revision_no=int(raw.get("revision_no", 0)),
+            title=str(raw.get("title", "")),
+            body=raw.get("body"),
+            published_at=raw.get("published_at"),
+            published_by_user_id=raw.get("published_by_user_id"),
+            acknowledged_by=acks,
+            created_at=str(raw.get("created_at", "")),
+            updated_at=str(raw.get("updated_at", "")),
+        )
+
+    @staticmethod
+    def _read_addenda(package: TenderPackage) -> list[dict]:
+        raw = (package.metadata_ or {}).get("addenda")
+        return [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
+
+    async def list_addenda(self, package_id: uuid.UUID) -> list[AddendumResponse]:
+        """List a package's addenda, oldest revision first."""
+        package = await self.get_package(package_id)
+        addenda = sorted(self._read_addenda(package), key=lambda a: int(a.get("revision_no", 0)))
+        return [self._addendum_to_response(package_id, a) for a in addenda]
+
+    async def create_addendum(self, package_id: uuid.UUID, data: AddendumCreate) -> AddendumResponse:
+        """Append a new draft addendum to a package."""
+        package = await self.get_package(package_id)
+        addenda = self._read_addenda(package)
+        next_rev = max((int(a.get("revision_no", 0)) for a in addenda), default=0) + 1
+        now = datetime.now(UTC).isoformat()
+        entry = {
+            "id": str(uuid.uuid4()),
+            "revision_no": next_rev,
+            "title": data.title,
+            "body": data.body,
+            "published_at": None,
+            "published_by_user_id": None,
+            "acknowledged_by": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        meta = dict(package.metadata_ or {})
+        meta["addenda"] = [*addenda, entry]
+        await self.repo.update_package_fields(package_id, metadata_=meta)
+
+        await _safe_publish(
+            "tendering.addendum.created",
+            {"package_id": str(package_id), "addendum_id": entry["id"], "revision_no": next_rev},
+            source_module="oe_tendering",
+        )
+        logger.info("Addendum created: package=%s rev=%s", package_id, next_rev)
+        return self._addendum_to_response(package_id, entry)
+
+    async def find_addendum_package(
+        self,
+        addendum_id: str,
+        accessible_project_ids: list[uuid.UUID] | None = None,
+    ) -> tuple[TenderPackage, dict, int]:
+        """Locate the package and stored entry for ``addendum_id``.
+
+        Returns ``(package, entry, index)``. Raises 404 if no package holds an
+        addendum with that id (the IDOR/access check still runs at the router,
+        which scopes by the returned package's project).
+
+        ``accessible_project_ids`` scopes the lookup to the caller's own
+        projects so a regular user never triggers a cross-tenant table scan
+        over every package in the database. ``None`` means "no filter" and is
+        reserved for admins (who are cross-tenant by design); an empty list
+        means the caller owns no projects and therefore can hold no addendum,
+        so we short-circuit to 404 without any scan. The package relationship
+        ``bids`` is *not* eager-loaded here — addendum lookup only reads the
+        package ``metadata_`` JSON, so we avoid the heavy bids fan-out the old
+        ``list_packages(limit=10_000)`` path incurred.
+        """
+        from sqlalchemy import select
+
+        if accessible_project_ids is not None and len(accessible_project_ids) == 0:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Addendum not found")
+
+        stmt = select(TenderPackage)
+        if accessible_project_ids is not None:
+            stmt = stmt.where(TenderPackage.project_id.in_(accessible_project_ids))
+        result = await self.session.execute(stmt)
+        for package in result.scalars().all():
+            addenda = self._read_addenda(package)
+            for idx, a in enumerate(addenda):
+                if str(a.get("id")) == str(addendum_id):
+                    return package, a, idx
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Addendum not found")
+
+    async def publish_addendum(
+        self, package: TenderPackage, addendum_id: str, user_id: str | None
+    ) -> AddendumResponse:
+        """Mark an addendum as published (stamps timestamp + publisher)."""
+        addenda = self._read_addenda(package)
+        target_idx = next(
+            (i for i, a in enumerate(addenda) if str(a.get("id")) == str(addendum_id)),
+            None,
+        )
+        if target_idx is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Addendum not found")
+        entry = dict(addenda[target_idx])
+        if entry.get("published_at"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Addendum is already published",
+            )
+        now = datetime.now(UTC).isoformat()
+        entry["published_at"] = now
+        entry["published_by_user_id"] = str(user_id) if user_id else None
+        entry["updated_at"] = now
+        addenda[target_idx] = entry
+        meta = dict(package.metadata_ or {})
+        meta["addenda"] = addenda
+        await self.repo.update_package_fields(package.id, metadata_=meta)
+
+        await _safe_publish(
+            "tendering.addendum.published",
+            {"package_id": str(package.id), "addendum_id": addendum_id},
+            source_module="oe_tendering",
+        )
+        logger.info("Addendum published: package=%s addendum=%s", package.id, addendum_id)
+        return self._addendum_to_response(package.id, entry)
+
+    async def acknowledge_addendum(
+        self, package: TenderPackage, addendum_id: str, bidder_id: str, user_id: str | None
+    ) -> AddendumResponse:
+        """Record a bidder acknowledgement of a published addendum."""
+        addenda = self._read_addenda(package)
+        target_idx = next(
+            (i for i, a in enumerate(addenda) if str(a.get("id")) == str(addendum_id)),
+            None,
+        )
+        if target_idx is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Addendum not found")
+        entry = dict(addenda[target_idx])
+        if not entry.get("published_at"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot acknowledge a draft addendum; publish it first",
+            )
+        acks = [a for a in (entry.get("acknowledged_by") or []) if isinstance(a, dict)]
+        if not any(str(a.get("bidder_id")) == str(bidder_id) for a in acks):
+            acks.append(
+                {
+                    "bidder_id": str(bidder_id),
+                    "acknowledged_at": datetime.now(UTC).isoformat(),
+                    "user_id": str(user_id) if user_id else None,
+                }
+            )
+        entry["acknowledged_by"] = acks
+        entry["updated_at"] = datetime.now(UTC).isoformat()
+        addenda[target_idx] = entry
+        meta = dict(package.metadata_ or {})
+        meta["addenda"] = addenda
+        await self.repo.update_package_fields(package.id, metadata_=meta)
+        logger.info(
+            "Addendum acknowledged: package=%s addendum=%s bidder=%s",
+            package.id,
+            addendum_id,
+            bidder_id,
+        )
+        return self._addendum_to_response(package.id, entry)
+
+    # ── Bid leveling ───────────────────────────────────────────────────────
+    # Normalize every bid onto the package's reference BOQ lines. Pure
+    # computation over existing data (BOQ positions + bid line_items); no
+    # persistence. Omitted lines are imputed at the bidder's own mean unit
+    # rate so a short quote cannot win on a misleadingly low total.
+
+    async def _build_leveling(
+        self, package_id: uuid.UUID
+    ) -> tuple[TenderPackage, list[LevelingMatrixRow], list[BidLevelingSummary], str, int]:
+        package = await self.get_package(package_id)
+        all_bids = await self.repo.list_bids_for_package(package_id)
+
+        # Cross-currency guard. Leveling normalises every bid onto the SAME
+        # reference BOQ quantities and emits raw_total / leveled_total numbers
+        # with no per-cell currency tag — so blending bids quoted in different
+        # currencies would silently sum euros with dollars. Scope leveling to
+        # the package currency (mirrors compare_bids' ``_same_currency`` and
+        # bid_management.leveling_matrix). Bids quoted in another currency are
+        # excluded and their count is surfaced so the user can re-quote / FX
+        # convert before trusting the leveled totals.
+        package_currency = (package.currency or "").strip().upper()
+
+        def _same_currency(bid: TenderBid) -> bool:
+            bc = (bid.currency or "").strip().upper()
+            # No package currency, or a bid that did not declare one, cannot
+            # be proven mismatched — keep it (degrades safely, never blends a
+            # *provably* foreign-currency bid).
+            return not package_currency or not bc or bc == package_currency
+
+        bids = [b for b in all_bids if _same_currency(b)]
+        excluded_off_currency = len(all_bids) - len(bids)
+
+        from app.modules.boq.service import BOQService
+
+        boq_service = BOQService(self.session)
+        try:
+            boq_data = await boq_service.get_boq_with_positions(package.boq_id)
+            ref_positions = boq_data.positions
+        except HTTPException:
+            ref_positions = []
+
+        # Reference line index → (position_id, code, description, unit, qty, rate, total)
+        ref_rows: list[dict] = []
+        for pos in ref_positions:
+            qty = _to_decimal(pos.quantity)
+            rate = _to_decimal(pos.unit_rate)
+            total = _to_decimal(pos.total) if pos.total else qty * rate
+            ref_rows.append(
+                {
+                    "position_id": str(pos.id),
+                    "line_code": pos.ordinal or "",
+                    "description": pos.description or "",
+                    "unit": pos.unit or "",
+                    "quantity": qty,
+                    "rate": rate,
+                    "total": total,
+                }
+            )
+
+        # Index each bid's line items by position_id (last write wins per pid).
+        bid_index: dict[str, dict[str, dict]] = {}
+        for bid in bids:
+            idx: dict[str, dict] = {}
+            for item in bid.line_items or []:
+                if not isinstance(item, dict):
+                    continue
+                key = item.get("position_id")
+                if key:
+                    idx[str(key)] = item
+            bid_index[str(bid.id)] = idx
+
+        # Per-bid mean unit rate across the lines the bidder actually quoted —
+        # used to impute omitted lines so the leveled total covers full scope.
+        bid_mean_rate: dict[str, Decimal] = {}
+        for bid in bids:
+            quoted = [_to_decimal(it.get("unit_rate", 0)) for it in bid_index[str(bid.id)].values()]
+            quoted = [r for r in quoted if r > 0]
+            bid_mean_rate[str(bid.id)] = (
+                (sum(quoted, Decimal("0")) / Decimal(len(quoted))) if quoted else Decimal("0")
+            )
+
+        summaries: dict[str, dict] = {
+            str(bid.id): {
+                "bid_id": str(bid.id),
+                "company_name": bid.company_name,
+                "raw_amount": _to_decimal(bid.total_amount),
+                "leveled_amount": Decimal("0"),
+                "matched_lines": 0,
+                "scaled_lines": 0,
+                "imputed_lines": 0,
+                "currency": bid.currency or "",
+            }
+            for bid in bids
+        }
+
+        rows: list[LevelingMatrixRow] = []
+        for ref in ref_rows:
+            pid = ref["position_id"]
+            ref_qty: Decimal = ref["quantity"]
+            cells: list[LevelingMatrixCell] = []
+            for bid in bids:
+                bid_id = str(bid.id)
+                matching = bid_index[bid_id].get(pid)
+                if matching is not None:
+                    unit_rate = _to_decimal(matching.get("unit_rate", 0))
+                    raw_total = _to_decimal(matching.get("total", 0))
+                    # When the bidder quoted a rate but not a total (or a total
+                    # that disagrees with rate×ref_qty), level to ref_qty so all
+                    # bids are compared at the SAME quantity.
+                    leveled_total = unit_rate * ref_qty if ref_qty > 0 else raw_total
+                    if leveled_total != raw_total and raw_total > 0:
+                        cell_status = "scaled"
+                        summaries[bid_id]["scaled_lines"] += 1
+                    else:
+                        cell_status = "matched"
+                        summaries[bid_id]["matched_lines"] += 1
+                else:
+                    # Imputed at the bidder's mean rate × reference quantity.
+                    unit_rate = bid_mean_rate[bid_id]
+                    leveled_total = unit_rate * ref_qty if ref_qty > 0 else Decimal("0")
+                    raw_total = Decimal("0")
+                    cell_status = "imputed"
+                    summaries[bid_id]["imputed_lines"] += 1
+                summaries[bid_id]["leveled_amount"] += leveled_total
+                cells.append(
+                    LevelingMatrixCell(
+                        bid_id=bid_id,
+                        company_name=bid.company_name,
+                        raw_total=_round2(raw_total),
+                        leveled_total=_round2(leveled_total),
+                        status=cell_status,
+                        unit_rate=_round2(unit_rate),
+                    )
+                )
+            rows.append(
+                LevelingMatrixRow(
+                    position_id=pid,
+                    line_code=ref["line_code"],
+                    description=ref["description"],
+                    unit=ref["unit"],
+                    reference_quantity=float(ref_qty),
+                    reference_rate=_round2(ref["rate"]),
+                    reference_total=_round2(ref["total"]),
+                    cells=cells,
+                )
+            )
+
+        summary_list = [
+            BidLevelingSummary(
+                bid_id=s["bid_id"],
+                company_name=s["company_name"],
+                raw_amount=_round2(s["raw_amount"]),
+                leveled_amount=_round2(s["leveled_amount"]),
+                matched_lines=s["matched_lines"],
+                scaled_lines=s["scaled_lines"],
+                imputed_lines=s["imputed_lines"],
+                currency=s["currency"],
+            )
+            for s in summaries.values()
+        ]
+        return package, rows, summary_list, package_currency, excluded_off_currency
+
+    async def get_leveling_matrix(self, package_id: uuid.UUID) -> LevelingMatrixResponse:
+        """Return the full bid-leveling matrix for a package."""
+        package, rows, summaries, currency, excluded = await self._build_leveling(package_id)
+        return LevelingMatrixResponse(
+            package_id=package_id,
+            package_name=package.name,
+            currency=currency,
+            excluded_off_currency=excluded,
+            bid_summaries=summaries,
+            rows=rows,
+        )
+
+    async def level_bids(self, package_id: uuid.UUID) -> LevelBidsResponse:
+        """Run bid leveling and return the per-bid rollup."""
+        package, rows, summaries, currency, excluded = await self._build_leveling(package_id)
+        await _safe_publish(
+            "tendering.bids.leveled",
+            {"package_id": str(package_id), "bid_count": len(summaries)},
+            source_module="oe_tendering",
+        )
+        return LevelBidsResponse(
+            package_id=package_id,
+            package_name=package.name,
+            currency=currency,
+            excluded_off_currency=excluded,
+            bid_count=len(summaries),
+            reference_line_count=len(rows),
+            bid_summaries=summaries,
+        )
 
     # ── Project Intelligence (RFC 25) ──────────────────────────────────────
 

@@ -5,6 +5,75 @@ All notable changes to OpenConstructionERP are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.9.0] - 2026-05-30
+
+**Quality wave, full localization, and partner-pack country projects.**
+
+A large multi-agent quality pass swept roughly 26 modules and fixed every
+confirmed high and medium severity finding from the deep-review audits. The
+money handling is now consistent everywhere: amounts in a foreign currency are
+converted inside a project through that project's `fx_rates`, totals across
+projects are grouped by currency rather than blended into a single number, and
+the ISO currency code is always shown next to a value. Touched areas include
+finance, BOQ compare, costs, assemblies, catalog, coordination, dashboard,
+schedule, tendering, reporting, RFI, submittals, risk, QMS, safety, geo, and
+property development.
+
+Localization is now complete. The earlier backlog of missing strings across the
+26 locales is closed, and every new key introduced by this release - the quality
+wave plus the dashboard greeting, the country onboarding, the tendering levelling
+and addendum work, and the QMS sign-off - is translated into all of them. Every
+one of the 27 locale files is up to date (de, fr, es, pt, ru, zh, ar, hi, tr, it,
+nl, pl, cs, ja, ko, sv, no, da, fi, bg, hr, id, ro, th, vi, mn, plus the English
+master).
+
+Partner packs now ship a flagship country project each. Twelve realistic,
+fully worked-out demo projects (Sydney, Auckland, Montréal, Frankfurt, São
+Paulo, Delhi, Riyadh, London, Denver, a German formwork structure, a modular
+housing scheme, and a solar plus storage EPC) are authored as standalone demo
+templates, each in its own currency, classification standard, and locale, with
+88 to 136 priced positions. They appear automatically in the project
+marketplace, and when a partner pack is active its country project installs on
+first boot. The merge between the pack templates and the core registry is now
+order independent, with a regression test guarding it.
+
+### Added
+- `GET /api/v1/projects/{id}/activity` returns a project-scoped, cross-module
+  recent-activity feed (RFIs, tasks, change orders, documents, punch items,
+  field reports), which restores the project overview activity widget.
+- Twelve partner-pack flagship demo projects under `app/core/demo_packs/`, with
+  auto-derived marketplace catalog rows and `OE_PARTNER_PACK` driven auto-install.
+- Backend groundwork for in-app partner-pack apply (state, apply, discovery, router).
+- One-click country setup in onboarding. A "Set up by country" step installs a
+  localized workspace - interface language, a matching cost database (CWICR
+  region preload), the right classification standard, and a sample project - in a
+  single click for 21 countries, or piece by piece from a customize panel. The
+  manual region picker and the AI connection move into an Advanced section.
+- Time-aware dashboard greeting that addresses the signed-in user by name (Good
+  morning / Good afternoon / Good evening / Welcome back), localized in all 27
+  languages.
+- Bundled showcase 3D geometry. The demo BIM models now ship their GLB geometry
+  and seed it on first boot, so the 3D viewer works out of the box on a fresh
+  install (issue #168).
+
+### Changed
+- The dashboard "Weather & Site" panel is off by default. It stays available as
+  an opt-in widget through dashboard customization.
+- Access tokens no longer embed the full permission set. The server re-derives
+  permissions from the user's role on every request, which shrinks the token and
+  removes the intermittent HTTP 431 (request header too large) error that could
+  blank the UI or make projects appear to be missing.
+
+### Fixed
+- Recent-activity widget 404 on the project overview (issue #167).
+- BIM 3D viewer showing "No 3D geometry" for the demo models on a fresh install
+  (issue #168). Geometry is bundled and seeded at startup, the geometry endpoint
+  now reports a precise status (still converting, conversion failed, no converter,
+  or genuinely missing), and the viewer no longer files an automatic bug report
+  for the expected "not ready yet" states.
+- All confirmed high and medium deep-review findings across the modules above.
+- Mixed-currency totals that previously summed across currencies without conversion.
+
 ## [5.6.0] - 2026-05-28
 
 **Partner-pack system — pip-installable white-label preset bundles.**

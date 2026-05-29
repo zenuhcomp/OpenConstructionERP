@@ -5,12 +5,19 @@
 // that any feature (markups, submittals, …) mounts to show + drive the
 // approval workflow for a single target.
 //
+// These fixtures mirror the REAL backend response models
+// (backend/app/modules/approval_routes/schemas.py): a flat
+// InstanceResponse carrying step_states (one StepState row per approver
+// per step) + a 1-based current_step_ordinal, plus a RouteResponse with
+// the template steps the UI joins against. The decide payload uses the
+// backend's exact Literal: decision ∈ {'approved','rejected'}.
+//
 // Coverage:
 //   1. Loading skeleton, then the route ladder renders with status pills.
 //   2. The currently-active step shows Approve / Reject buttons only for
 //      the assigned approver (the current user).
 //   3. Clicking Approve hits POST /v1/approval-routes/instances/{id}/decide
-//      with the right payload.
+//      with the right payload (decision:'approved').
 //   4. No instance + no configured route → empty "no workflow" state.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
@@ -23,7 +30,7 @@ import {
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import type { ApprovalInstance } from '../types';
+import type { ApprovalInstance, ApprovalRoute } from '../types';
 
 /* ── Toast mock ─────────────────────────────────────────────────────── */
 
@@ -89,54 +96,54 @@ const TARGET_KIND = 'markup';
 const TARGET_ID = 'markup-1';
 const ME_ID = 'user-current';
 
+// Flat InstanceResponse — no fabricated current_step_index / route_name /
+// per-step assignees. The ladder is reconstructed from the route's steps.
 const runningInstance: ApprovalInstance = {
   id: 'inst-1',
   route_id: 'route-1',
-  route_name: 'Std markup review',
-  project_id: 'proj-1',
   target_kind: TARGET_KIND,
   target_id: TARGET_ID,
-  status: 'in_progress',
-  current_step_index: 0,
+  current_step_ordinal: 1,
+  status: 'pending',
+  started_at: '2026-05-26T09:00:00Z',
+  completed_at: null,
+  started_by: 'user-author',
+  created_at: '2026-05-26T09:00:00Z',
+  updated_at: '2026-05-26T09:00:00Z',
+  // No decision recorded yet — step 1 is open for the current user.
+  step_states: [],
+};
+
+// RouteResponse the card fetches via getRoute to render the ladder.
+const route: ApprovalRoute = {
+  id: 'route-1',
+  project_id: 'proj-1',
+  target_kind: TARGET_KIND,
+  name: 'Std markup review',
+  is_active: true,
+  created_by: 'user-author',
+  created_at: '2026-05-20T09:00:00Z',
+  updated_at: '2026-05-20T09:00:00Z',
   steps: [
     {
       id: 'step-1',
-      instance_id: 'inst-1',
-      sort_order: 0,
+      route_id: 'route-1',
+      ordinal: 1,
       approver_role: null,
       approver_user_id: ME_ID,
       mode: 'all',
       sla_hours: 24,
-      status: 'active',
-      assignees: [
-        {
-          user_id: ME_ID,
-          user_name: 'Current Tester',
-          user_email: 'me@example.com',
-          decided_at: null,
-          decision: null,
-          comment: null,
-        },
-      ],
-      closed_at: null,
     },
     {
       id: 'step-2',
-      instance_id: 'inst-1',
-      sort_order: 1,
+      route_id: 'route-1',
+      ordinal: 2,
       approver_role: 'manager',
       approver_user_id: null,
       mode: 'any',
       sla_hours: null,
-      status: 'pending',
-      assignees: [],
-      closed_at: null,
     },
   ],
-  started_by_id: 'user-author',
-  started_at: '2026-05-26T09:00:00Z',
-  closed_at: null,
-  cancelled_reason: null,
 };
 
 function makeClient(): QueryClient {
@@ -145,13 +152,19 @@ function makeClient(): QueryClient {
   });
 }
 
-function setupApiGet(opts: { instances?: ApprovalInstance[]; routes?: unknown[] } = {}) {
+function setupApiGet(
+  opts: { instances?: ApprovalInstance[]; route?: ApprovalRoute | null; routes?: unknown[] } = {},
+) {
   apiMocks.apiGet.mockImplementation(async (path: string) => {
     if (path.startsWith('/v1/users/me')) {
       return { id: ME_ID, user_id: ME_ID, email: 'me@example.com', role: 'engineer' };
     }
     if (path.includes('/instances')) {
       return opts.instances ?? [];
+    }
+    // Single-route fetch (getRoute) — path has a trailing /{id}.
+    if (/\/routes\/[^/]+$/.test(path)) {
+      return opts.route ?? route;
     }
     if (path.includes('/routes')) {
       return opts.routes ?? [];
@@ -187,7 +200,7 @@ afterEach(() => {
 
 describe('<ApprovalInstanceCard />', () => {
   it('renders the running instance ladder with approve/reject for active assignee', { timeout: 15000 }, async () => {
-    setupApiGet({ instances: [runningInstance] });
+    setupApiGet({ instances: [runningInstance], route });
     const ApprovalInstanceCard = await importCard();
     const qc = makeClient();
 
@@ -197,21 +210,20 @@ describe('<ApprovalInstanceCard />', () => {
       </QueryClientProvider>,
     );
 
-    // Step-1 approve button renders once the instance lands. We use
+    // Step-1 approve button renders once the instance + route land. We use
     // ``findByTestId`` (bumped timeout because the first test pays the
-    // one-time module-transform cost — production ``vitest`` runs hit
-    // this in ~2s, but the CI box can be slower).
+    // one-time module-transform cost).
     await screen.findByTestId('approval-approve-step-1', {}, { timeout: 4000 });
 
     // Approve + Reject only on the active step (step-1, the current user
-    // is the assigned approver). Step-2 must NOT show action buttons.
+    // is the named approver). Step-2 must NOT show action buttons.
     expect(screen.getByTestId('approval-reject-step-1')).toBeTruthy();
     expect(screen.queryByTestId('approval-approve-step-2')).toBeNull();
     expect(screen.queryByTestId('approval-reject-step-2')).toBeNull();
   });
 
   it('posts the decide payload when the approver clicks Approve', async () => {
-    setupApiGet({ instances: [runningInstance] });
+    setupApiGet({ instances: [runningInstance], route });
     apiMocks.apiPost.mockImplementation(async () => ({
       ...runningInstance,
       status: 'approved',
@@ -228,8 +240,7 @@ describe('<ApprovalInstanceCard />', () => {
     const approveBtn = await screen.findByTestId('approval-approve-step-1');
 
     // Optional comment goes along with the call. ``getAllByTestId`` +
-    // [0] is defensive against any cross-test DOM bleed that earlier
-    // testing-library cleanup glitches might leave behind.
+    // [0] is defensive against any cross-test DOM bleed.
     const comments = screen.getAllByTestId('approval-comment-step-1');
     const comment = comments[0] as HTMLTextAreaElement;
     fireEvent.change(comment, { target: { value: 'LGTM' } });
@@ -243,7 +254,7 @@ describe('<ApprovalInstanceCard />', () => {
     expect(path).toBe('/v1/approval-routes/instances/inst-1/decide');
     expect(body).toEqual({
       step_id: 'step-1',
-      decision: 'approve',
+      decision: 'approved',
       comment: 'LGTM',
     });
   });

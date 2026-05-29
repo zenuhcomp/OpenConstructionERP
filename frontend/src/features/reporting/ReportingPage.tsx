@@ -21,8 +21,15 @@ import {
 } from 'lucide-react';
 import { Breadcrumb, Button, Card, CardContent, EmptyState, Skeleton } from '@/shared/ui';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { apiGet, apiPost, API_BASE, getAuthToken, ApiError } from '@/shared/lib/api';
 import { projectsApi, type Project } from '@/features/projects/api';
+
+// Roles allowed to trigger the portfolio-wide KPI recompute. The backend
+// gates /kpi/recalculate-all/ behind reporting.distribute (MANAGER), so
+// editors/viewers would only ever get a 403 — hiding the trigger keeps it
+// from being a dead control (W2 audit, /reporting).
+const RECALC_ROLES = new Set(['manager', 'admin', 'superuser', 'owner']);
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -178,13 +185,37 @@ function KPICard({
 /* ── Project status badge ──────────────────────────────────────────────────── */
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation();
+  // Colors carry dark-mode variants so the badge is legible in both
+  // themes (the rest of the page is dark-aware). Labels route through
+  // t() so non-English locales don't see raw English enum tokens; the
+  // unknown-status fallback humanises snake_case rather than printing it
+  // verbatim.
   const map: Record<string, { color: string; label: string }> = {
-    active: { color: 'bg-emerald-100 text-emerald-700', label: 'Active' },
-    on_hold: { color: 'bg-amber-100 text-amber-700', label: 'On Hold' },
-    completed: { color: 'bg-blue-100 text-blue-700', label: 'Completed' },
-    archived: { color: 'bg-gray-100 text-gray-500', label: 'Archived' },
+    active: {
+      color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+      label: t('reporting.status_active', { defaultValue: 'Active' }),
+    },
+    on_hold: {
+      color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+      label: t('reporting.status_on_hold', { defaultValue: 'On Hold' }),
+    },
+    completed: {
+      color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+      label: t('reporting.status_completed', { defaultValue: 'Completed' }),
+    },
+    archived: {
+      color: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+      label: t('reporting.status_archived', { defaultValue: 'Archived' }),
+    },
   };
-  const s = map[status] ?? { color: 'bg-gray-100 text-gray-500', label: status };
+  const fallbackLabel = status
+    ? status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    : t('reporting.status_unknown', { defaultValue: 'Unknown' });
+  const s = map[status] ?? {
+    color: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+    label: fallbackLabel,
+  };
   return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${s.color}`}>{s.label}</span>;
 }
 
@@ -204,6 +235,8 @@ const TABS: { key: DashboardTab; labelKey: string; defaultLabel: string; icon: R
 export function ReportingPage() {
   const { t } = useTranslation();
   const { activeProjectId, activeProjectName } = useProjectContextStore();
+  const userRole = useAuthStore((s) => s.userRole);
+  const canRecalculate = RECALC_ROLES.has((userRole ?? '').toLowerCase());
 
   const [tab, setTab] = useState<DashboardTab>('executive');
   const [loading, setLoading] = useState(true);
@@ -325,11 +358,19 @@ export function ReportingPage() {
 
   // Active / total counts
   const activeProjects = projects.filter((p) => p.status === 'active');
-  const totalPortfolioValue = projects.reduce((sum, p) => {
+  // Portfolio value MUST NOT blend currencies: a EUR project and a USD
+  // project cannot be added as if 1 EUR = 1 USD. We group each project's
+  // budget by its own ISO currency and let the UI render per-currency
+  // subtotals (each carrying its code), per the platform money rule.
+  const portfolioValueByCurrency = projects.reduce<Record<string, number>>((acc, p) => {
     const meta = p.metadata as Record<string, unknown> | undefined;
     const budget = meta?.budget_estimate ?? (p as unknown as Record<string, unknown>).budget_estimate;
-    return sum + (budget ? Number(budget) || 0 : 0);
-  }, 0);
+    const amount = budget ? Number(budget) || 0 : 0;
+    if (amount <= 0) return acc;
+    const code = (p.currency || '').trim().toUpperCase() || 'N/A';
+    acc[code] = (acc[code] ?? 0) + amount;
+    return acc;
+  }, {});
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
   const selectedKpi = selectedProjectId ? kpiMap[selectedProjectId] : undefined;
@@ -361,14 +402,16 @@ export function ReportingPage() {
             })}
           </p>
         </div>
-        <button
-          onClick={handleRecalculate}
-          disabled={recalculating}
-          className="inline-flex items-center gap-2 rounded-lg bg-oe-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-oe-blue-hover disabled:opacity-50"
-        >
-          {recalculating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-          {t('reporting.recalculate', { defaultValue: 'Recalculate KPIs' })}
-        </button>
+        {canRecalculate && (
+          <button
+            onClick={handleRecalculate}
+            disabled={recalculating}
+            className="inline-flex items-center gap-2 rounded-lg bg-oe-blue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-oe-blue-hover disabled:opacity-50"
+          >
+            {recalculating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            {t('reporting.recalculate', { defaultValue: 'Recalculate KPIs' })}
+          </button>
+        )}
       </div>
 
       {recalcError && (
@@ -469,7 +512,7 @@ export function ReportingPage() {
         <ExecutiveDashboard
           projects={projects}
           activeProjects={activeProjects}
-          totalValue={totalPortfolioValue}
+          valueByCurrency={portfolioValueByCurrency}
           kpiMap={kpiMap}
         />
       )}
@@ -514,15 +557,27 @@ export function ReportingPage() {
 function ExecutiveDashboard({
   projects,
   activeProjects,
-  totalValue,
+  valueByCurrency,
   kpiMap,
 }: {
   projects: Project[];
   activeProjects: Project[];
-  totalValue: number;
+  valueByCurrency: Record<string, number>;
   kpiMap: Record<string, KPISnapshot>;
 }) {
   const { t } = useTranslation();
+
+  // Sort currencies by descending subtotal so the largest leads. Each
+  // entry keeps its own ISO code — we never collapse them into one
+  // figure because there is no FX context here to convert with.
+  const currencyEntries = Object.entries(valueByCurrency).sort((a, b) => b[1] - a[1]);
+  const [topEntry] = currencyEntries;
+  const portfolioValueLabel =
+    currencyEntries.length === 0 || topEntry === undefined
+      ? 'N/A'
+      : currencyEntries.length === 1
+        ? `${fmtNum(topEntry[1])} ${topEntry[0]}`
+        : currencyEntries.map(([code, amount]) => `${fmtNum(amount)} ${code}`).join(' · ');
 
   return (
     <div className="space-y-6">
@@ -542,7 +597,7 @@ function ExecutiveDashboard({
         />
         <KPICard
           label={t('reporting.portfolio_value', { defaultValue: 'Portfolio Value' })}
-          value={totalValue > 0 ? fmtNum(totalValue) : 'N/A'}
+          value={portfolioValueLabel}
           color="gray"
           icon={BarChart3}
         />
@@ -977,6 +1032,12 @@ function FinanceDashboardView({
     return <PromptCard message={t('reporting.select_project_prompt_finance', { defaultValue: 'Select a project to view Finance dashboard' })} />;
   }
 
+  // The procurement stats endpoint does not expose its own currency, so
+  // committed money is shown against the project's finance currency
+  // (purchase orders inherit the project currency). Money must always
+  // carry its ISO code — a bare number is ambiguous.
+  const procurementCurrency = financeDash?.currency || project.currency || '';
+
   return (
     <div className="space-y-6">
       {/* Finance KPIs */}
@@ -1064,7 +1125,7 @@ function FinanceDashboardView({
               <StatBlock label={t('reporting.total_pos', { defaultValue: 'Total POs' })} value={procurementStats.total_pos} />
               <StatBlock
                 label={t('reporting.committed', { defaultValue: 'Committed' })}
-                value={fmtNum(procurementStats.total_committed, 2)}
+                value={`${fmtNum(procurementStats.total_committed, 2)}${procurementCurrency ? ` ${procurementCurrency}` : ''}`}
               />
               <StatBlock
                 label={t('reporting.pending_delivery', { defaultValue: 'Pending Delivery' })}
@@ -1086,6 +1147,19 @@ function FinanceDashboardView({
 
 /* ── Shared sub-components ─────────────────────────────────────────────────── */
 
+type StatColor = 'emerald' | 'amber' | 'red' | 'blue';
+
+// Static lookup — Tailwind only ships classes it finds as literal
+// strings in source. Interpolating `text-${color}-600` would let the
+// production purge drop every colored stat (they appear nowhere literal),
+// so the red/amber/green signalling silently disappeared in builds.
+const STAT_COLOR_CLASSES: Record<StatColor, string> = {
+  emerald: 'text-emerald-600 dark:text-emerald-400',
+  amber: 'text-amber-600 dark:text-amber-400',
+  red: 'text-red-600 dark:text-red-400',
+  blue: 'text-blue-600 dark:text-blue-400',
+};
+
 function StatBlock({
   label,
   value,
@@ -1093,9 +1167,9 @@ function StatBlock({
 }: {
   label: string;
   value: string | number;
-  color?: string;
+  color?: StatColor;
 }) {
-  const textColor = color ? `text-${color}-600 dark:text-${color}-400` : 'text-content-primary';
+  const textColor = color ? STAT_COLOR_CLASSES[color] : 'text-content-primary';
   return (
     <div>
       <p className="text-xs font-medium text-content-secondary">{label}</p>

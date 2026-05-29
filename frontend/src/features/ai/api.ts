@@ -142,6 +142,8 @@ export interface CostMatch {
   description: string;
   unit: string;
   rate: number;
+  /** ISO currency of the matched cost-DB rate. May be empty for legacy rows. */
+  currency?: string;
   region: string;
   score: number;
 }

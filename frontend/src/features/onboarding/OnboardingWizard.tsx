@@ -25,6 +25,10 @@ import {
   Boxes,
   Settings2,
   Home,
+  Globe,
+  Languages,
+  Layers,
+  ChevronDown,
   type LucideIcon,
 } from 'lucide-react';
 import { Logo, Button, CountryFlag, Badge } from '@/shared/ui';
@@ -42,6 +46,12 @@ import {
   CORE_MODULE_KEYS,
   TOTAL_MODULE_COUNT,
 } from './modules';
+import {
+  COUNTRY_PACKS,
+  DEFAULT_COUNTRY_PACK,
+  getCountryPack,
+  type CountryPack,
+} from './countryPacks';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -1023,6 +1033,340 @@ function StepModuleConfig({
   );
 }
 
+// ── Country Pack picker (Step 5 lead experience) ────────────────────────────
+
+/** Per-component install status used by the Country Pack card. */
+type PackComponentState = 'idle' | 'running' | 'done' | 'error' | 'skipped';
+
+/** Small status glyph for a Country Pack component (locale / DB / demo). */
+function PackStatusGlyph({ state }: { state: PackComponentState }) {
+  if (state === 'running') {
+    return <Loader2 size={15} className="animate-spin text-oe-blue shrink-0" aria-hidden />;
+  }
+  if (state === 'done') {
+    return <CheckCircle2 size={15} className="text-semantic-success shrink-0" aria-hidden />;
+  }
+  if (state === 'skipped') {
+    return <span className="text-2xs text-content-quaternary shrink-0">—</span>;
+  }
+  if (state === 'error') {
+    return <span className="text-2xs font-semibold text-semantic-error shrink-0">!</span>;
+  }
+  return (
+    <span className="h-2 w-2 rounded-full bg-border-light dark:bg-white/15 shrink-0" aria-hidden />
+  );
+}
+
+/** A single à-la-carte component row inside the customize panel. */
+function PackComponentRow({
+  icon,
+  label,
+  detail,
+  state,
+  actionLabel,
+  doneLabel,
+  skippedLabel,
+  onAction,
+  disabled,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail: string;
+  state: PackComponentState;
+  actionLabel: string;
+  doneLabel: string;
+  skippedLabel: string;
+  onAction: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-surface-secondary/60 px-3 py-2.5">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-elevated text-content-secondary">
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-content-primary">{label}</div>
+          <div className="truncate text-2xs text-content-tertiary">{detail}</div>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {state === 'done' ? (
+          <span className="flex items-center gap-1 text-2xs font-medium text-semantic-success">
+            <CheckCircle2 size={13} />
+            {doneLabel}
+          </span>
+        ) : state === 'skipped' ? (
+          <span className="text-2xs text-content-quaternary">{skippedLabel}</span>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onAction}
+            disabled={disabled || state === 'running'}
+            icon={state === 'running' ? <Loader2 size={12} className="animate-spin" /> : undefined}
+          >
+            {actionLabel}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CountryPackCard({
+  packs,
+  selectedPack,
+  onSelectPack,
+  onInstallPack,
+  onPackLocale,
+  onPackDb,
+  onPackDemo,
+  installing,
+  localeState,
+  dbState,
+  demoState,
+  customizeOpen,
+  onToggleCustomize,
+  recordedClassification,
+}: {
+  packs: CountryPack[];
+  selectedPack: CountryPack;
+  onSelectPack: (pack: CountryPack) => void;
+  onInstallPack: (pack: CountryPack) => void;
+  onPackLocale: (pack: CountryPack) => void;
+  onPackDb: (pack: CountryPack) => void;
+  onPackDemo: (pack: CountryPack) => void;
+  installing: boolean;
+  localeState: PackComponentState;
+  dbState: PackComponentState;
+  demoState: PackComponentState;
+  customizeOpen: boolean;
+  onToggleCustomize: () => void;
+  recordedClassification: string | null;
+}) {
+  const { t } = useTranslation();
+  const [packQuery, setPackQuery] = useState('');
+
+  const filteredPacks = (() => {
+    const q = packQuery.trim().toLowerCase();
+    if (!q) return packs;
+    return packs.filter(
+      (p) =>
+        t(p.labelKey, { defaultValue: p.labelDefault }).toLowerCase().includes(q) ||
+        p.labelDefault.toLowerCase().includes(q) ||
+        p.region.toLowerCase().includes(q) ||
+        p.classification.toLowerCase().includes(q) ||
+        p.id.toLowerCase().includes(q),
+    );
+  })();
+
+  const packLabel = t(selectedPack.labelKey, { defaultValue: selectedPack.labelDefault });
+  const allDone =
+    localeState === 'done' &&
+    (dbState === 'done') &&
+    (demoState === 'done' || demoState === 'skipped');
+
+  return (
+    <div className="rounded-2xl bg-surface-elevated shadow-sm shadow-black/[0.04] p-6">
+      <div className="mb-4 flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-oe-blue-subtle text-oe-blue-text">
+          <Globe size={20} />
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-base font-bold text-content-primary">
+            {t('onboarding.country_pack_title', { defaultValue: 'Set up by country' })}
+          </h3>
+          <p className="text-xs text-content-tertiary">
+            {t('onboarding.country_pack_subtitle', {
+              defaultValue: 'Install a ready localized workspace in one click',
+            })}
+          </p>
+        </div>
+      </div>
+
+      {/* Country filter */}
+      <div className="mb-2">
+        <input
+          type="search"
+          value={packQuery}
+          onChange={(e) => setPackQuery(e.target.value)}
+          placeholder={t('onboarding.country_pack_filter_placeholder', {
+            defaultValue: 'Find your country…',
+          })}
+          disabled={installing}
+          className="w-full rounded-lg bg-surface-secondary/70 px-3 py-1.5 text-xs text-content-primary placeholder:text-content-quaternary border border-transparent focus:border-oe-blue/40 focus:outline-none focus:bg-surface-secondary disabled:opacity-50"
+        />
+      </div>
+
+      {/* Country grid */}
+      <div className="mb-4 grid max-h-56 grid-cols-2 gap-2 overflow-y-auto pr-1 -mr-1 sm:grid-cols-3">
+        {filteredPacks.length === 0 && (
+          <div className="col-span-full py-6 text-center text-xs text-content-tertiary">
+            {t('onboarding.country_pack_no_results', {
+              defaultValue: 'No countries match "{{q}}"',
+              q: packQuery,
+            })}
+          </div>
+        )}
+        {filteredPacks.map((pack) => {
+          const isSelected = selectedPack.id === pack.id;
+          return (
+            <button
+              key={pack.id}
+              type="button"
+              onClick={() => !installing && onSelectPack(pack)}
+              disabled={installing}
+              aria-pressed={isSelected}
+              className={clsx(
+                'flex items-center gap-2 rounded-xl px-3 py-2 text-left transition-all duration-200',
+                isSelected
+                  ? 'bg-oe-blue-subtle/50 ring-2 ring-oe-blue/40 shadow-sm'
+                  : 'bg-surface-secondary/70 hover:bg-surface-secondary hover:shadow-sm',
+                installing && 'opacity-60 cursor-not-allowed',
+              )}
+            >
+              <CountryFlag code={pack.flagId} size={18} className="shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-medium text-content-primary">
+                  {t(pack.labelKey, { defaultValue: pack.labelDefault })}
+                </div>
+                <div className="text-2xs text-content-quaternary">{pack.classification}</div>
+              </div>
+              {isSelected && <Check size={14} className="shrink-0 text-oe-blue" />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* What the selected pack includes — at-a-glance chips with live status */}
+      <div className="mb-4 rounded-xl bg-surface-secondary/50 p-3">
+        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-content-secondary">
+          <CountryFlag code={selectedPack.flagId} size={16} className="shrink-0" />
+          {t('onboarding.country_pack_includes', {
+            defaultValue: '{{country}} pack includes',
+            country: packLabel,
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-2xs text-content-tertiary">
+          <span className="inline-flex items-center gap-1.5">
+            <PackStatusGlyph state={localeState} />
+            <Languages size={12} className="text-content-quaternary" />
+            {t('onboarding.country_pack_locale', { defaultValue: 'Language' })}: {selectedPack.locale.toUpperCase()}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <PackStatusGlyph state={dbState} />
+            <Database size={12} className="text-content-quaternary" />
+            {t('onboarding.country_pack_db', { defaultValue: 'Cost database' })}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <PackStatusGlyph state={demoState} />
+            <FolderOpen size={12} className="text-content-quaternary" />
+            {selectedPack.demoId
+              ? t('onboarding.country_pack_demo', { defaultValue: 'Demo project' })
+              : t('onboarding.country_pack_no_demo', { defaultValue: 'No demo' })}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Layers size={12} className="text-content-quaternary" />
+            {selectedPack.classification}
+          </span>
+        </div>
+      </div>
+
+      {/* Primary one-click install */}
+      <Button
+        variant="primary"
+        onClick={() => onInstallPack(selectedPack)}
+        loading={installing}
+        disabled={installing || allDone}
+        icon={allDone ? <CheckCircle2 size={16} /> : <Rocket size={16} />}
+        className="w-full"
+      >
+        {allDone
+          ? t('onboarding.country_pack_installed', {
+              defaultValue: '{{country}} pack installed',
+              country: packLabel,
+            })
+          : installing
+            ? t('onboarding.country_pack_installing', {
+                defaultValue: 'Installing {{country}} pack…',
+                country: packLabel,
+              })
+            : t('onboarding.country_pack_install', {
+                defaultValue: 'Install {{country}} pack',
+                country: packLabel,
+              })}
+      </Button>
+
+      {recordedClassification && (
+        <p className="mt-2 text-center text-2xs text-content-tertiary">
+          {t('onboarding.country_pack_classification_set', {
+            defaultValue: 'Classification set to {{standard}}',
+            standard: recordedClassification,
+          })}
+        </p>
+      )}
+
+      {/* Customize / install separately */}
+      <button
+        type="button"
+        onClick={onToggleCustomize}
+        aria-expanded={customizeOpen}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 text-xs font-medium text-oe-blue hover:underline"
+      >
+        {customizeOpen
+          ? t('onboarding.country_pack_hide_customize', { defaultValue: 'Hide options' })
+          : t('onboarding.country_pack_customize', { defaultValue: 'Customize / install separately' })}
+        <ChevronDown
+          size={13}
+          className={clsx('transition-transform duration-200', customizeOpen && 'rotate-180')}
+        />
+      </button>
+
+      {customizeOpen && (
+        <div className="mt-3 space-y-2">
+          <PackComponentRow
+            icon={<Languages size={15} />}
+            label={t('onboarding.country_pack_locale', { defaultValue: 'Language' })}
+            detail={selectedPack.locale.toUpperCase()}
+            state={localeState}
+            actionLabel={t('onboarding.country_pack_apply', { defaultValue: 'Apply' })}
+            doneLabel={t('onboarding.country_pack_applied', { defaultValue: 'Applied' })}
+            skippedLabel="—"
+            onAction={() => onPackLocale(selectedPack)}
+            disabled={installing}
+          />
+          <PackComponentRow
+            icon={<Database size={15} />}
+            label={t('onboarding.country_pack_db', { defaultValue: 'Cost database' })}
+            detail={selectedPack.region}
+            state={dbState}
+            actionLabel={t('onboarding.load_database', { defaultValue: 'Load Database' })}
+            doneLabel={t('onboarding.demo_installed', { defaultValue: 'Installed' })}
+            skippedLabel="—"
+            onAction={() => onPackDb(selectedPack)}
+            disabled={installing}
+          />
+          <PackComponentRow
+            icon={<FolderOpen size={15} />}
+            label={t('onboarding.country_pack_demo', { defaultValue: 'Demo project' })}
+            detail={
+              selectedPack.demoId ??
+              t('onboarding.country_pack_no_demo', { defaultValue: 'No demo' })
+            }
+            state={demoState}
+            actionLabel={t('onboarding.install_demo', { defaultValue: 'Install Demo Project' })}
+            doneLabel={t('onboarding.demo_installed', { defaultValue: 'Installed' })}
+            skippedLabel={t('onboarding.country_pack_no_demo', { defaultValue: 'No demo' })}
+            onAction={() => onPackDemo(selectedPack)}
+            disabled={installing || !selectedPack.demoId}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Step 5: Data Setup (combined) ───────────────────────────────────────────
 
 function StepDataSetup({
@@ -1058,6 +1402,29 @@ function StepDataSetup({
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
 
+  // ── Country Pack state ──
+  // Default-select the pack whose region matches the language-suggested
+  // region (e.g. picking French in step 1 pre-selects the France pack); fall
+  // back to the first showcase pack (US) if nothing matches.
+  const [selectedPackId, setSelectedPackId] = useState<string>(() => {
+    const base = selectedLang.split('-')[0] ?? 'en';
+    const byLocale = COUNTRY_PACKS.find((p) => p.locale === base);
+    const byRegion = COUNTRY_PACKS.find((p) => p.region === suggestedRegion);
+    return (byLocale ?? byRegion ?? DEFAULT_COUNTRY_PACK).id;
+  });
+  // Per-component status for the active pack.
+  const [packLocaleState, setPackLocaleState] = useState<PackComponentState>('idle');
+  const [packDbState, setPackDbState] = useState<PackComponentState>('idle');
+  const [packDemoState, setPackDemoState] = useState<PackComponentState>('idle');
+  const [packInstalling, setPackInstalling] = useState(false);
+  // À la carte: expandable "Customize / install separately" panel.
+  const [packCustomizeOpen, setPackCustomizeOpen] = useState(false);
+  // Record the classification standard chosen via the pack (stored locally so
+  // it can be read by the workspace; mirrors how loaded databases are tracked).
+  const [recordedClassification, setRecordedClassification] = useState<string | null>(null);
+
+  const selectedPack = getCountryPack(selectedPackId) ?? DEFAULT_COUNTRY_PACK;
+
   // ── DB loading progress simulation ──
   useEffect(() => {
     if (!loadingDb) {
@@ -1087,72 +1454,78 @@ function StepDataSetup({
   const addQueueTask = useUploadQueueStore((s) => s.addTask);
   const updateQueueTask = useUploadQueueStore((s) => s.updateTask);
 
-  const handleLoadDb = useCallback(async () => {
-    if (loadingDb || loadedDb) return;
-    setLoadingDb(true);
+  // Generalized cost-DB loader. Loads an explicit ``region`` (defaults to the
+  // currently selected one) and returns ``true`` on success so callers that
+  // chain components (the Country Pack "install all" flow) can react. Shared
+  // by the region grid (manual path) and the Country Pack picker.
+  const loadCostDb = useCallback(
+    async (region: string): Promise<boolean> => {
+      if (loadingDb || (loadedDb && loadedDb.id === region)) return !!loadedDb;
+      setLoadingDb(true);
 
-    const dbName = CWICR_DATABASES.find((d) => d.id === selectedRegion)?.name ?? selectedRegion;
-    const taskId = `db-${selectedRegion}-${Date.now()}`;
+      const dbName = CWICR_DATABASES.find((d) => d.id === region)?.name ?? region;
+      const taskId = `db-${region}-${Date.now()}`;
 
-    // Add to global queue so FloatingQueuePanel shows progress
-    addQueueTask({
-      id: taskId,
-      type: 'import',
-      filename: `${dbName} Cost Database`,
-      status: 'processing',
-      progress: 10,
-      message: t('onboarding.db_loading_status', { defaultValue: 'Loading cost database...' }),
-    });
-
-    try {
-      const token = useAuthStore.getState().accessToken;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
-
-      updateQueueTask(taskId, { progress: 30, message: t('onboarding.db_downloading', { defaultValue: 'Downloading from server...' }) });
-
-      const res = await fetch(`/api/v1/costs/load-cwicr/${selectedRegion}`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        signal: controller.signal,
+      // Add to global queue so FloatingQueuePanel shows progress
+      addQueueTask({
+        id: taskId,
+        type: 'import',
+        filename: `${dbName} Cost Database`,
+        status: 'processing',
+        progress: 10,
+        message: t('onboarding.db_loading_status', { defaultValue: 'Loading cost database...' }),
       });
-      clearTimeout(timeoutId);
 
-      if (res.ok) {
-        updateQueueTask(taskId, { progress: 80, message: t('onboarding.db_importing', { defaultValue: 'Importing items...' }) });
+      try {
+        const token = useAuthStore.getState().accessToken;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
-        const data = await res.json();
-        const imported = data.imported ?? 0;
-        setDbProgress(100);
-        setLoadedDb({ id: selectedRegion, count: imported });
+        updateQueueTask(taskId, { progress: 30, message: t('onboarding.db_downloading', { defaultValue: 'Downloading from server...' }) });
 
-        // Update queue task to completed
-        updateQueueTask(taskId, {
-          status: 'completed',
-          progress: 100,
-          message: `${imported.toLocaleString()} items imported`,
+        const res = await fetch(`/api/v1/costs/load-cwicr/${region}`, {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
 
-        try {
-          const existing = JSON.parse(
-            localStorage.getItem('oe_loaded_databases') || '[]',
-          ) as string[];
-          if (!existing.includes(selectedRegion)) {
-            localStorage.setItem(
-              'oe_loaded_databases',
-              JSON.stringify([...existing, selectedRegion]),
-            );
+        if (res.ok) {
+          updateQueueTask(taskId, { progress: 80, message: t('onboarding.db_importing', { defaultValue: 'Importing items...' }) });
+
+          const data = await res.json();
+          const imported = data.imported ?? 0;
+          setDbProgress(100);
+          setLoadedDb({ id: region, count: imported });
+
+          // Update queue task to completed
+          updateQueueTask(taskId, {
+            status: 'completed',
+            progress: 100,
+            message: `${imported.toLocaleString()} items imported`,
+          });
+
+          try {
+            const existing = JSON.parse(
+              localStorage.getItem('oe_loaded_databases') || '[]',
+            ) as string[];
+            if (!existing.includes(region)) {
+              localStorage.setItem(
+                'oe_loaded_databases',
+                JSON.stringify([...existing, region]),
+              );
+            }
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignore
-        }
 
-        addToast({
-          type: 'success',
-          title: `${dbName} loaded`,
-          message: `${imported.toLocaleString()} cost items imported`,
-        });
-      } else {
+          addToast({
+            type: 'success',
+            title: `${dbName} loaded`,
+            message: `${imported.toLocaleString()} cost items imported`,
+          });
+          return true;
+        }
         const err = await res.json().catch(() => ({ detail: 'Failed to load database' }));
         updateQueueTask(taskId, { status: 'error', progress: 0, error: err.detail || 'Failed' });
         addToast({
@@ -1160,38 +1533,161 @@ function StepDataSetup({
           title: 'Failed to load database',
           message: err.detail || 'Unknown error',
         });
+        return false;
+      } catch {
+        updateQueueTask(taskId, { status: 'error', progress: 0, error: 'Connection error' });
+        addToast({
+          type: 'error',
+          title: t('common.connection_error', { defaultValue: 'Connection error' }),
+        });
+        return false;
+      } finally {
+        setLoadingDb(false);
       }
-    } catch {
-      updateQueueTask(taskId, { status: 'error', progress: 0, error: 'Connection error' });
-      addToast({
-        type: 'error',
-        title: t('common.connection_error', { defaultValue: 'Connection error' }),
-      });
-    } finally {
-      setLoadingDb(false);
-    }
-  }, [loadingDb, loadedDb, selectedRegion, addToast, t]);
+    },
+    [loadingDb, loadedDb, addToast, t, addQueueTask, updateQueueTask],
+  );
 
-  const handleInstallDemo = useCallback(async () => {
-    setInstallingDemo(true);
+  // Region-grid (manual path) load button: load whatever region is selected.
+  const handleLoadDb = useCallback(() => {
+    void loadCostDb(selectedRegion);
+  }, [loadCostDb, selectedRegion]);
+
+  // Generalized demo installer. Installs an explicit ``demoId`` and returns
+  // ``true`` on success. Built-in demo ids only — POST /api/demo/install/{id}.
+  const installDemoProject = useCallback(
+    async (demoId: string): Promise<boolean> => {
+      setInstallingDemo(true);
+      try {
+        await apiPost(`/demo/install/${demoId}`, undefined, { longRunning: true });
+        setDemoInstalled(true);
+        addToast({
+          type: 'success',
+          title: t('onboarding.demo_installed', { defaultValue: 'Demo project installed' }),
+        });
+        return true;
+      } catch {
+        addToast({
+          type: 'error',
+          title: t('onboarding.demo_install_error', {
+            defaultValue: 'Failed to install demo project',
+          }),
+        });
+        return false;
+      } finally {
+        setInstallingDemo(false);
+      }
+    },
+    [addToast, t],
+  );
+
+  // Manual path: install the language-suggested demo.
+  const handleInstallDemo = useCallback(() => {
+    void installDemoProject(suggestedDemoId);
+  }, [installDemoProject, suggestedDemoId]);
+
+  // ── Country Pack component runners ──────────────────────────────────────
+
+  /** Set the UI locale and persist it as an explicit user choice. */
+  const applyLocale = useCallback((locale: string) => {
+    i18n.changeLanguage(locale);
     try {
-      await apiPost(`/demo/install/${suggestedDemoId}`);
-      setDemoInstalled(true);
-      addToast({
-        type: 'success',
-        title: t('onboarding.demo_installed', { defaultValue: 'Demo project installed' }),
-      });
+      localStorage.setItem('oe_lang_explicit', '1');
     } catch {
-      addToast({
-        type: 'error',
-        title: t('onboarding.demo_install_error', {
-          defaultValue: 'Failed to install demo project',
-        }),
-      });
-    } finally {
-      setInstallingDemo(false);
+      // storage unavailable — locale still applied for this session
     }
-  }, [suggestedDemoId, addToast, t]);
+  }, []);
+
+  /** Record the workspace cost-classification standard locally. */
+  const recordClassification = useCallback((classification: string) => {
+    setRecordedClassification(classification);
+    try {
+      localStorage.setItem('oe_classification', classification);
+    } catch {
+      // ignore — non-critical preference
+    }
+  }, []);
+
+  // À la carte: set just the pack's locale.
+  const handlePackLocale = useCallback(
+    (pack: CountryPack) => {
+      setPackLocaleState('running');
+      applyLocale(pack.locale);
+      recordClassification(pack.classification);
+      setPackLocaleState('done');
+    },
+    [applyLocale, recordClassification],
+  );
+
+  // À la carte: load just the pack's cost database.
+  const handlePackDb = useCallback(
+    async (pack: CountryPack) => {
+      setSelectedRegion(pack.region);
+      setPackDbState('running');
+      const ok = await loadCostDb(pack.region);
+      setPackDbState(ok ? 'done' : 'error');
+    },
+    [loadCostDb],
+  );
+
+  // À la carte: install just the pack's demo project (if it has one).
+  const handlePackDemo = useCallback(
+    async (pack: CountryPack) => {
+      if (!pack.demoId) {
+        setPackDemoState('skipped');
+        return;
+      }
+      setPackDemoState('running');
+      const ok = await installDemoProject(pack.demoId);
+      setPackDemoState(ok ? 'done' : 'error');
+    },
+    [installDemoProject],
+  );
+
+  // One-click: install the whole pack — locale + cost DB + demo together,
+  // with live per-component progress. Endpoints called:
+  //   - POST /api/v1/costs/load-cwicr/{region}
+  //   - POST /api/demo/install/{demoId}   (built-in demos only)
+  // Locale + classification are applied client-side.
+  const handleInstallPack = useCallback(
+    async (pack: CountryPack) => {
+      if (packInstalling) return;
+      setPackInstalling(true);
+
+      // 1) Locale + classification — instant, client-side.
+      setPackLocaleState('running');
+      applyLocale(pack.locale);
+      recordClassification(pack.classification);
+      setPackLocaleState('done');
+
+      // 2) Cost database.
+      setPackDbState('running');
+      const dbOk = await loadCostDb(pack.region);
+      setPackDbState(dbOk ? 'done' : 'error');
+
+      // 3) Demo project (omitted when the pack has none).
+      if (pack.demoId) {
+        setPackDemoState('running');
+        const demoOk = await installDemoProject(pack.demoId);
+        setPackDemoState(demoOk ? 'done' : 'error');
+      } else {
+        setPackDemoState('skipped');
+      }
+
+      setPackInstalling(false);
+    },
+    [packInstalling, applyLocale, recordClassification, loadCostDb, installDemoProject],
+  );
+
+  // When the user switches the active pack, reset its per-component status and
+  // align the manual region grid with the pack's region for consistency.
+  const handleSelectPack = useCallback((pack: CountryPack) => {
+    setSelectedPackId(pack.id);
+    setSelectedRegion(pack.region);
+    setPackLocaleState('idle');
+    setPackDbState('idle');
+    setPackDemoState(pack.demoId ? 'idle' : 'skipped');
+  }, []);
 
   const testMutation = useMutation({
     mutationFn: () => aiApi.testConnection(selectedProvider),
@@ -1242,10 +1738,19 @@ function StepDataSetup({
   });
 
   const handleContinue = useCallback(async () => {
-    // Start background DB loading if region selected but not loaded yet
-    if (backgroundLoad && selectedRegion && !loadedDb && !loadingDb) {
-      // Fire and forget — don't await, just start in background
+    // If the user neither installed the Country Pack nor loaded a DB manually,
+    // fall back to background-loading the active pack's region so a fresh
+    // workspace still gets a sensible cost database. The pack flow already
+    // owns its own progress, so only kick this off when nothing is in flight.
+    const dbUntouched =
+      packDbState === 'idle' && packLocaleState === 'idle' && !loadedDb && !loadingDb;
+    if (backgroundLoad && dbUntouched && selectedRegion) {
+      // Fire and forget — don't await, just start in background.
       handleLoadDb();
+      // Apply the active pack's locale + classification too, so a one-tap
+      // "Continue" still localizes the workspace.
+      applyLocale(selectedPack.locale);
+      recordClassification(selectedPack.classification);
       addToast({
         type: 'info',
         title: t('onboarding.db_loading_bg', { defaultValue: 'Loading database in background...' }),
@@ -1253,10 +1758,13 @@ function StepDataSetup({
           defaultValue: 'You can continue working. We\'ll notify you when it\'s ready.',
         }),
       });
-    }
-    // Install demo if toggled on and not yet installed
-    if (installDemo && !demoInstalled && !installingDemo) {
-      handleInstallDemo(); // also fire and forget in background
+      // Install the pack's demo in the background as well (built-in demos only).
+      if (selectedPack.demoId) {
+        void installDemoProject(selectedPack.demoId);
+      }
+    } else if (installDemo && !demoInstalled && !installingDemo && packDemoState === 'idle') {
+      // Manual path: install the toggled demo if the pack flow didn't.
+      handleInstallDemo();
     }
     // Save AI key if provided
     if (apiKey.trim()) {
@@ -1269,6 +1777,13 @@ function StepDataSetup({
     loadedDb,
     loadingDb,
     handleLoadDb,
+    packDbState,
+    packLocaleState,
+    packDemoState,
+    selectedPack,
+    applyLocale,
+    recordClassification,
+    installDemoProject,
     installDemo,
     demoInstalled,
     installingDemo,
@@ -1311,6 +1826,40 @@ function StepDataSetup({
       </p>
 
       <div className="mt-6 w-full max-w-2xl space-y-4">
+        {/* ── Country Pack: the lead, one-click experience ──────────────── */}
+        <CountryPackCard
+          packs={COUNTRY_PACKS}
+          selectedPack={selectedPack}
+          onSelectPack={handleSelectPack}
+          onInstallPack={handleInstallPack}
+          onPackLocale={handlePackLocale}
+          onPackDb={handlePackDb}
+          onPackDemo={handlePackDemo}
+          installing={packInstalling}
+          localeState={packLocaleState}
+          dbState={packDbState}
+          demoState={packDemoState}
+          customizeOpen={packCustomizeOpen}
+          onToggleCustomize={() => setPackCustomizeOpen((v) => !v)}
+          recordedClassification={recordedClassification}
+        />
+
+        {/* ── Advanced / manual setup ──────────────────────────────────── */}
+        <details className="group rounded-2xl bg-surface-elevated/60 shadow-sm shadow-black/[0.04]">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-medium text-content-secondary hover:text-content-primary transition-colors">
+            <span className="flex items-center gap-2">
+              <Settings2 size={16} className="text-content-tertiary" />
+              {t('onboarding.advanced_manual_setup', {
+                defaultValue: 'Advanced — pick a region manually or connect AI',
+              })}
+            </span>
+            <ChevronDown
+              size={16}
+              className="text-content-tertiary transition-transform duration-200 group-open:rotate-180"
+            />
+          </summary>
+
+          <div className="space-y-4 p-4 pt-0">
         {/* Card 1: Cost Database — full width */}
         <div className="rounded-2xl bg-surface-elevated shadow-sm shadow-black/[0.04] p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -1558,6 +2107,8 @@ function StepDataSetup({
             </div>
           )}
         </div>
+          </div>
+        </details>
       </div>
 
       <p className="mt-4 text-xs text-content-tertiary text-center max-w-md">
@@ -1576,7 +2127,7 @@ function StepDataSetup({
         <Button
           variant="primary"
           onClick={handleContinue}
-          loading={saveMutation.isPending || installingDemo}
+          loading={saveMutation.isPending || installingDemo || packInstalling}
           icon={<ArrowRight size={16} />}
           iconPosition="right"
         >

@@ -854,10 +854,17 @@ export class ElementManager {
             status?: number;
             diagnostic?: unknown;
             requestId?: string | null;
+            expected?: boolean;
           };
           err.status = resp.status;
           err.diagnostic = detail;
           err.requestId = requestId;
+          // A 404 here means the model simply has no 3D mesh artifact
+          // (lightweight install / showcase / metadata-only model). That is
+          // an expected empty state the viewer already handles gracefully —
+          // it is NOT a bug. Flag it so the global error logger drops it and
+          // the auto bug-reporter never files a false report (#168).
+          err.expected = resp.status === 404;
           throw err;
         }
         const total = Number(resp.headers.get('content-length')) || 0;

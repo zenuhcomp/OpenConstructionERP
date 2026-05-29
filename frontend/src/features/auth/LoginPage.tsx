@@ -8,6 +8,7 @@ import {
   BarChart3, Upload, FileCheck,
   Box, Ruler, Layers,
   PenTool, FolderOpen, ClipboardList,
+  Sun, Moon, Monitor,
 } from 'lucide-react';
 import { Button, Input, Logo, LogoWithText, CountryFlag } from '@/shared/ui';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -16,6 +17,48 @@ import { BrandingEditorModal } from '@/app/layout/CustomBranding';
 import { extractErrorMessageFromBody } from '@/shared/lib/api';
 import { AuthBackground } from './AuthBackground';
 import { SUPPORTED_LANGUAGES } from '@/app/i18n';
+import { useThemeStore } from '@/stores/useThemeStore';
+
+/* Segmented theme switch (Light / Dark / System) for the login page. */
+function ThemeSwitch() {
+  const { t } = useTranslation();
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
+  const opts = [
+    { mode: 'light' as const, icon: Sun, label: t('theme.light', { defaultValue: 'Light' }) },
+    { mode: 'dark' as const, icon: Moon, label: t('theme.dark', { defaultValue: 'Dark' }) },
+    { mode: 'system' as const, icon: Monitor, label: t('theme.system', { defaultValue: 'System' }) },
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label={t('theme.label', { defaultValue: 'Theme' })}
+      className="flex items-center gap-0.5 rounded-xl border border-border-light bg-surface-elevated/85 backdrop-blur-sm p-0.5 shadow-sm"
+    >
+      {opts.map(({ mode, icon: Icon, label }) => {
+        const active = theme === mode;
+        return (
+          <button
+            key={mode}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            title={label}
+            aria-label={label}
+            onClick={() => setTheme(mode)}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+              active
+                ? 'bg-oe-blue text-white shadow-sm'
+                : 'text-content-tertiary hover:text-content-secondary hover:bg-surface-secondary'
+            }`}
+          >
+            <Icon size={15} strokeWidth={2} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function LoginPage() {
   const { t, i18n } = useTranslation();
@@ -262,8 +305,10 @@ export function LoginPage() {
         <div className="absolute top-[-12%] left-[-6%] w-[520px] h-[520px] rounded-full bg-sky-300/12 dark:bg-oe-blue/35 blur-[110px] animate-blob-slow-1 mix-blend-screen" />
       </div>
 
-      {/* Language - top right (enlarged for /login so it's discoverable). */}
-      <div className="absolute top-4 right-4 z-30" ref={langRef}>
+      {/* Theme + Language - top right (enlarged for /login so discoverable). */}
+      <div className="absolute top-4 right-4 z-30 flex items-center gap-2">
+        <ThemeSwitch />
+        <div className="relative" ref={langRef}>
         <button
           onClick={() => setLangOpen(!langOpen)}
           className="flex items-center gap-2 rounded-xl border border-border-light bg-surface-elevated/85 backdrop-blur-sm px-4 py-2 text-sm font-medium text-content-secondary hover:bg-surface-elevated hover:border-oe-blue/30 transition-colors shadow-sm"
@@ -296,6 +341,7 @@ export function LoginPage() {
             })}
           </div>
         )}
+        </div>
       </div>
 
       {/* ── Right column on lg+: marketing & benefits.

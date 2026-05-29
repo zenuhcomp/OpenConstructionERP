@@ -285,6 +285,14 @@ class DwgOfflineReadinessResponse(BaseModel):
     converter_available: bool
     version: str | None = None
     message: str
+    # True only when the request reached the backend over the loopback
+    # interface AND the server is not a hosted/production deployment — i.e.
+    # the browser and the server genuinely run on the same machine, so the
+    # "your files never leave your computer" claim is literally true. On a
+    # hosted demo this is False and the UI must show the honest "processed
+    # on your OpenConstructionERP server" copy instead. Defaults to False so
+    # the strong claim is never shown unless explicitly earned.
+    local_only: bool = False
 
 
 # Forward reference resolution

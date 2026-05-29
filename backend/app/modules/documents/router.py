@@ -333,35 +333,40 @@ async def file_types_by_project(
     page to render "has RVT / IFC / DWG / PDF" chips on each card in a
     single round-trip (instead of N requests, one per card).
 
-    Returns extensions lower-cased, without the leading dot. Any project
-    the caller cannot read is silently omitted.
+    Uses the same owner-OR-member project set as the project list and
+    dashboard endpoints (admins see every project) so team-member projects
+    keep their file-type chips. Returns extensions lower-cased, without the
+    leading dot. Any project the caller cannot read is silently omitted.
     """
     from sqlalchemy import select as _select
 
     from app.modules.documents.models import Document
     from app.modules.projects.models import Project
+    from app.modules.teams.access import member_project_ids_subquery
+    from app.modules.users.repository import UserRepository
 
-    # Projects the caller owns. The Projects page already filters by
-    # ``owner_id`` client-side, so mirroring the same rule here keeps
-    # the response set identical.
     if user_id is None:
         return {}
-    own_ids = (
-        (
-            await session.execute(
-                _select(Project.id).where(Project.owner_id == uuid.UUID(str(user_id))),
-            )
+    user_uuid = uuid.UUID(str(user_id))
+
+    # Owner-OR-member set, mirroring ``list_projects`` / ``dashboard_cards``.
+    # Admins bypass the ownership check and see every project's chips.
+    user = await UserRepository(session).get_by_id(user_uuid)
+    is_admin = user is not None and getattr(user, "role", "") == "admin"
+    if is_admin:
+        proj_stmt = _select(Project.id)
+    else:
+        proj_stmt = _select(Project.id).where(
+            (Project.owner_id == user_uuid) | (Project.id.in_(member_project_ids_subquery(user_uuid)))
         )
-        .scalars()
-        .all()
-    )
-    if not own_ids:
+    visible_ids = (await session.execute(proj_stmt)).scalars().all()
+    if not visible_ids:
         return {}
 
     rows = (
         await session.execute(
             _select(Document.project_id, Document.file_path, Document.name).where(
-                Document.project_id.in_(own_ids),
+                Document.project_id.in_(visible_ids),
             ),
         )
     ).all()

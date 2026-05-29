@@ -34,7 +34,11 @@ from app.dependencies import (
     SessionDep,
     verify_project_access,
 )
-from app.modules.approval_routes.models import TARGET_KINDS
+from app.modules.approval_routes.models import (
+    INSTANCE_STATUSES,
+    STEP_MODES,
+    TARGET_KINDS,
+)
 from app.modules.approval_routes.schemas import (
     CancelInstance,
     DecisionSubmit,
@@ -84,6 +88,27 @@ async def _instance_to_response(
     return payload
 
 
+# ── Metadata ─────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/meta",
+    dependencies=[Depends(RequirePermission("approval_routes.read"))],
+)
+async def get_meta() -> dict[str, list[str]]:
+    """Expose the validated whitelists so the UI never drifts from the DB.
+
+    The frontend builds its target-kind / mode / status pickers from this
+    payload instead of hard-coding a parallel list that can fall out of
+    sync with :data:`TARGET_KINDS`.
+    """
+    return {
+        "target_kinds": list(TARGET_KINDS),
+        "step_modes": list(STEP_MODES),
+        "instance_statuses": list(INSTANCE_STATUSES),
+    }
+
+
 # ── Routes (templates) ───────────────────────────────────────────────
 
 
@@ -97,6 +122,7 @@ async def list_routes(
     user_id: CurrentUserId,
     project_id: uuid.UUID | None = Query(default=None),
     target_kind: str | None = Query(default=None),
+    include_inactive: bool = Query(default=True),
     service: ApprovalRouteService = Depends(_get_service),
 ) -> list[RouteResponse]:
     """List approval-route templates.
@@ -106,6 +132,10 @@ async def list_routes(
     listing then includes tenant-wide templates (``project_id IS NULL``)
     plus that project's routes — matching the picker UX in consumer
     modules.
+
+    ``include_inactive`` defaults to ``True`` (admin surface). A consumer
+    picker passes ``include_inactive=false`` so users can only start a
+    workflow on an active template.
     """
     if target_kind is not None and target_kind not in TARGET_KINDS:
         raise HTTPException(
@@ -115,7 +145,11 @@ async def list_routes(
     if project_id is not None:
         await verify_project_access(project_id, user_id, session)
 
-    rows = await service.list_routes(project_id=project_id, target_kind=target_kind)
+    rows = await service.list_routes(
+        project_id=project_id,
+        target_kind=target_kind,
+        include_inactive=include_inactive,
+    )
     # Batched: one IN(...) Step fetch instead of N per-route round trips.
     steps_by_route = await service.list_steps_for_routes([r.id for r in rows])
     responses: list[RouteResponse] = []
@@ -219,12 +253,34 @@ async def list_instances(
     target_kind: str | None = Query(default=None),
     target_id: uuid.UUID | None = Query(default=None),
     route_id: uuid.UUID | None = Query(default=None),
+    project_id: uuid.UUID | None = Query(default=None),
     instance_status: str | None = Query(default=None, alias="status"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     service: ApprovalRouteService = Depends(_get_service),
 ) -> list[InstanceResponse]:
-    """List approval instances. Filter by target / route / status."""
+    """List approval instances. Filter by target / route / project / status.
+
+    ``project_id`` scopes the listing to instances whose route belongs to
+    that project (tenant-wide routes are excluded when a project filter is
+    supplied, matching the per-project drill-down UX).
+    """
+    # When a project filter is supplied, pre-resolve that project's route
+    # ids so the instance scan is actually scoped server-side instead of
+    # returning every instance and discarding most of it.
+    project_route_ids: set[uuid.UUID] | None = None
+    if project_id is not None:
+        await verify_project_access(project_id, user_id, session)
+        project_routes = await service.list_routes(
+            project_id=project_id,
+            include_inactive=True,
+        )
+        # Only the project's own routes (not tenant-wide) belong to the
+        # project drill-down.
+        project_route_ids = {r.id for r in project_routes if r.project_id == project_id}
+        if not project_route_ids:
+            return []
+
     rows = await service.list_instances(
         target_kind=target_kind,
         target_id=target_id,
@@ -239,6 +295,8 @@ async def list_instances(
     project_cache: dict[uuid.UUID, uuid.UUID | None] = {}
     out: list[InstanceResponse] = []
     for inst in rows:
+        if project_route_ids is not None and inst.route_id not in project_route_ids:
+            continue
         if inst.route_id not in project_cache:
             try:
                 route = await service.get_route(inst.route_id)

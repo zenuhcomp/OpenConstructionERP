@@ -558,19 +558,54 @@ async def list_payments(
     session: SessionDep,
     user_id: CurrentUserId = None,  # type: ignore[assignment]
     invoice_id: uuid.UUID | None = Query(default=None),
+    project_id: uuid.UUID | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
     _perm: None = Depends(RequirePermission("finance.read")),
     service: FinanceService = Depends(_get_service),
 ) -> PaymentListResponse:
-    """List payments with optional invoice filter."""
+    """List payments scoped to a single invoice or project.
+
+    Either ``invoice_id`` or ``project_id`` MUST be supplied — an unscoped
+    call would return payments across every tenant. Access to the referenced
+    invoice/project is verified before any rows are read.
+    """
     if invoice_id is not None:
         await _require_invoice_access(session, invoice_id, user_id)
-    items, total = await service.list_payments(invoice_id=invoice_id, limit=limit, offset=offset)
-    return PaymentListResponse(
-        items=[PaymentResponse.model_validate(p) for p in items],
-        total=total,
+    elif project_id is not None:
+        await _require_project_access(session, project_id, user_id)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either invoice_id or project_id is required to list payments.",
+        )
+    items, total = await service.list_payments(
+        invoice_id=invoice_id,
+        project_id=project_id,
+        limit=limit,
+        offset=offset,
     )
+
+    # Enrich each payment with its parent invoice number (one round trip)
+    # so the UI can show a readable reference rather than a raw UUID.
+    invoice_ids = {p.invoice_id for p in items}
+    numbers: dict[uuid.UUID, str] = {}
+    if invoice_ids:
+        rows = (
+            await session.execute(
+                select(Invoice.id, Invoice.invoice_number).where(Invoice.id.in_(invoice_ids))
+            )
+        ).all()
+        numbers = {row[0]: row[1] for row in rows}
+
+    responses: list[PaymentResponse] = []
+    for p in items:
+        resp = PaymentResponse.model_validate(p)
+        resp.invoice_number = numbers.get(p.invoice_id)
+        resp.status = "refunded" if p.is_refund else "completed"
+        responses.append(resp)
+
+    return PaymentListResponse(items=responses, total=total)
 
 
 @router.post(

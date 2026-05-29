@@ -469,6 +469,20 @@ function OfflineReadyBadge({
 
   const ready = readiness?.ready ?? false;
   const converterMissing = readiness && !readiness.converter_available;
+  // Only claim "runs on your machine" when the server is genuinely a
+  // same-machine, non-hosted deployment. On the hosted demo we tell the
+  // honest truth: processing happens on the user's OpenConstructionERP
+  // server and is never forwarded to a third party.
+  const localOnly = readiness?.local_only ?? false;
+  const readyTooltip = localOnly
+    ? t('dwg_takeoff.offline_ready_tooltip_local', {
+        defaultValue:
+          'This tool works fully offline — conversions run on your machine.',
+      })
+    : t('dwg_takeoff.offline_ready_tooltip_server', {
+        defaultValue:
+          'Conversions run on your OpenConstructionERP server and are never sent to third parties.',
+      });
 
   return (
     <div className="relative" data-testid={testId}>
@@ -483,10 +497,7 @@ function OfflineReadyBadge({
         )}
         title={
           ready
-            ? t('dwg_takeoff.offline_ready_tooltip', {
-                defaultValue:
-                  'This tool works fully offline — conversions run on your machine.',
-              })
+            ? readyTooltip
             : t('dwg_takeoff.offline_install_tooltip', {
                 defaultValue:
                   'Install the local DWG converter to enable offline .dwg conversion. DXF files already work.',
@@ -538,11 +549,7 @@ function OfflineReadyBadge({
             </button>
           </div>
           <p className="text-content-secondary leading-relaxed">
-            {readiness?.message ??
-              t('dwg_takeoff.offline_ready_tooltip', {
-                defaultValue:
-                  'This tool works fully offline — conversions run on your machine.',
-              })}
+            {readiness?.message ?? readyTooltip}
           </p>
           {converterMissing && (
             <>
@@ -772,6 +779,17 @@ export function DwgTakeoffPage() {
   const [visibleLayers, setVisibleLayers] = useState<Set<string>>(new Set());
   const [visibleNames, setVisibleNames] = useState<Set<string>>(new Set());
   /**
+   * Full layer roster for the drawing, accumulated across server-filtered
+   * entity fetches. The entities query only ships the layers the user has
+   * toggled on (perf — a medium DWG carries 50k+ entities), which means the
+   * `layers` list derived from those entities would otherwise lose every
+   * hidden layer's row and the user could never re-enable it. We remember
+   * the union of layer names + metadata ever seen so the LayerPanel keeps
+   * the complete, toggle-able roster regardless of what the last fetch
+   * filtered out. Reset whenever the selected drawing changes.
+   */
+  const [allLayers, setAllLayers] = useState<DxfLayer[]>([]);
+  /**
    * Multi-entity selection (RFC 11). A single-click produces a one-item set;
    * Shift+click toggles membership; Escape clears. `primarySelectedEntityId`
    * below is the first element of the set and drives the single-entity UI
@@ -862,9 +880,27 @@ export function DwgTakeoffPage() {
   }, [drawings, selectedDrawingId]);
   const effectiveScale = drawingScale * unitFactor;
 
+  /**
+   * Layers to request from the backend. While `visibleLayers` is empty the
+   * full roster is not yet known (it is reset on every drawing switch), so
+   * we fetch ALL layers unfiltered to discover them. Once the user has a
+   * concrete visible set the backend filters the entity payload before
+   * serialising — only the toggled-on layers come over the wire. Sorted so
+   * the array is a stable React Query cache key (toggling A then B yields
+   * the same key as B then A).
+   */
+  const requestedLayers = useMemo(
+    () => Array.from(visibleLayers).sort(),
+    [visibleLayers],
+  );
+
   const { data: entities = [], isLoading: loadingEntities } = useQuery({
-    queryKey: ['dwg-entities', selectedDrawingId],
-    queryFn: () => fetchEntities(selectedDrawingId!),
+    queryKey: ['dwg-entities', selectedDrawingId, requestedLayers],
+    queryFn: () =>
+      fetchEntities(
+        selectedDrawingId!,
+        requestedLayers.length > 0 ? requestedLayers : undefined,
+      ),
     enabled: !!selectedDrawingId,
   });
 
@@ -1162,12 +1198,44 @@ export function DwgTakeoffPage() {
     return annotatedEntities.filter((e) => e.layout === selectedLayout);
   }, [annotatedEntities, selectedLayout, layouts]);
 
-  // Computed layers (from filtered entities + annotations so virtual
-  // USER_MARKUP layer gets a LayerPanel row once users start drawing).
-  const layers = useMemo(
+  // Layers present in THIS (possibly server-filtered) fetch + the virtual
+  // USER_MARKUP layer so it gets a LayerPanel row once users start drawing.
+  const fetchedLayers = useMemo(
     () => extractLayers(filteredEntities, annotations),
     [filteredEntities, annotations],
   );
+
+  // Merge the layers from the latest fetch into the persistent full roster.
+  // Because the entity fetch is filtered by `visibleLayers`, hidden layers
+  // are absent from `fetchedLayers` — the union preserves their rows so the
+  // user can re-enable them. Entity counts/colours are refreshed from the
+  // most recent fetch that included the layer.
+  useEffect(() => {
+    if (fetchedLayers.length === 0) return;
+    setAllLayers((prev) => {
+      const byName = new Map(prev.map((l) => [l.name, l]));
+      for (const l of fetchedLayers) byName.set(l.name, l);
+      const merged = Array.from(byName.values()).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+      // Skip the state write when nothing changed to avoid a render loop.
+      if (
+        merged.length === prev.length &&
+        merged.every(
+          (l, i) =>
+            prev[i]?.name === l.name && prev[i]?.entity_count === l.entity_count,
+        )
+      ) {
+        return prev;
+      }
+      return merged;
+    });
+  }, [fetchedLayers]);
+
+  // Full, toggle-able layer roster shown in the LayerPanel and used by the
+  // summary/canvas. Falls back to the current fetch before the roster has
+  // been seeded on first paint.
+  const layers = allLayers.length > 0 ? allLayers : fetchedLayers;
 
   /**
    * Annotations filtered by the virtual layer toggle. If the annotation
@@ -1185,12 +1253,18 @@ export function DwgTakeoffPage() {
     });
   }, [annotations, visibleLayers, layers]);
 
-  // Initialize visible layers when entities/layout change
+  // Seed visible layers from the full roster the FIRST time it is known for
+  // the current drawing. A per-drawing latch (not a `visibleLayers.size === 0`
+  // check) so that a deliberate "Hide All" — which also empties the set — is
+  // never silently undone by this effect on the next render.
+  const seededLayersForDrawingRef = useRef<string | null>(null);
   useEffect(() => {
-    if (layers.length > 0) {
-      setVisibleLayers(new Set(layers.map((l) => l.name)));
-    }
-  }, [layers]);
+    if (!selectedDrawingId) return;
+    if (seededLayersForDrawingRef.current === selectedDrawingId) return;
+    if (layers.length === 0) return;
+    seededLayersForDrawingRef.current = selectedDrawingId;
+    setVisibleLayers(new Set(layers.map((l) => l.name)));
+  }, [layers, selectedDrawingId]);
 
   // Initialize visible entity names when entities/layout change
   useEffect(() => {
@@ -1664,6 +1738,8 @@ export function DwgTakeoffPage() {
     setSelectedDrawingId(id);
     setVisibleLayers(new Set());
     setVisibleNames(new Set());
+    setAllLayers([]);
+    seededLayersForDrawingRef.current = null;
     setSelectedEntityIds(new Set());
     setHiddenEntityIds(new Set());
     setSelectedAnnotationId(null);
@@ -2093,21 +2169,59 @@ export function DwgTakeoffPage() {
           linked_annotation_id: annotationId ?? undefined,
         },
       };
+
+      // Unit-safety: linking a measured entity to an EXISTING position must
+      // not silently change its unit of measure. An area measurement (m\u00b2)
+      // pushed onto a position priced per metre or per piece would corrupt
+      // the estimate. We only adopt the measurement's unit when the
+      // existing position has none or the two already agree; otherwise we
+      // keep the position's unit and push the quantity only, and tell the
+      // user about the kept unit so the mismatch is never invisible.
+      const existingUnit = (position.unit ?? '').trim();
+      const measuredUnit = measurement ? measurement.unit.trim() : '';
+      const unitsMatch =
+        !existingUnit || existingUnit.toLowerCase() === measuredUnit.toLowerCase();
+      let unitKept = false;
       if (measurement) {
         patch['quantity'] = measurement.value;
-        patch['unit'] = measurement.unit;
+        if (unitsMatch) {
+          patch['unit'] = measurement.unit;
+        } else {
+          // Keep position.unit; only the quantity is updated.
+          unitKept = true;
+        }
       }
       await boqApi.updatePosition(position.id, patch);
 
       queryClient.invalidateQueries({ queryKey: ['dwg-annotations', selectedDrawingId] });
       queryClient.invalidateQueries({ queryKey: ['boq', position.boq_id] });
 
+      let message: string;
+      if (!measurement) {
+        message = position.ordinal;
+      } else if (unitKept) {
+        // Surface the old\u2192new unit difference so the user knows we kept
+        // their unit and pushed only the quantity. Plain-template head
+        // (value \u2192 ordinal) plus a translated "kept unit" explanation with
+        // two interpolated units.
+        const note = t('dwg_takeoff.linked_unit_kept_note', {
+          defaultValue: 'kept unit {{kept}} (measured {{measured}})',
+          kept: existingUnit,
+          measured: measuredUnit,
+        });
+        message = `${measurement.value} \u2192 ${position.ordinal} \u00b7 ${note}`;
+      } else {
+        message = `${measurement.value} ${measurement.unit} \u2192 ${position.ordinal}`;
+      }
+
       addToast({
-        type: 'success',
-        title: t('dwg_takeoff.linked_to_boq', { defaultValue: 'Linked to BOQ' }),
-        message: measurement
-          ? `${measurement.value} ${measurement.unit} \u2192 ${position.ordinal}`
-          : position.ordinal,
+        type: unitKept ? 'warning' : 'success',
+        title: unitKept
+          ? t('dwg_takeoff.linked_unit_mismatch', {
+              defaultValue: 'Linked \u00b7 unit kept',
+            })
+          : t('dwg_takeoff.linked_to_boq', { defaultValue: 'Linked to BOQ' }),
+        message,
       });
       setLinkingEntityId(null);
       setEntityPopup(null);
@@ -2490,7 +2604,9 @@ export function DwgTakeoffPage() {
                           <span className="text-xs font-mono px-2.5 py-1 rounded-md bg-orange-500/10 text-orange-400 border border-orange-500/20 font-semibold">.dxf</span>
                         </div>
                         <p className="text-[11px] text-gray-600 leading-relaxed mt-1 text-center">
-                          AutoCAD 2000–2025 &middot; DXF R12–R2025
+                          {t('dwg_takeoff.format_support', {
+                            defaultValue: 'AutoCAD 2000–2025 · DXF R12–R2025',
+                          })}
                         </p>
                       </button>
                     </div>
@@ -2513,7 +2629,9 @@ export function DwgTakeoffPage() {
                         {t('dwg_takeoff.hero_subtitle', { defaultValue: 'Open DWG/DXF drawings, measure areas and lengths, annotate directly on the drawing, and link measurements to your BOQ positions.' })}
                       </p>
                       <p className="text-xs text-gray-600 mt-3 leading-relaxed">
-                        AutoCAD DWG 2000–2025 &middot; DXF R12–R2025
+                        {t('dwg_takeoff.format_support_dwg', {
+                          defaultValue: 'AutoCAD DWG 2000–2025 · DXF R12–R2025',
+                        })}
                       </p>
                     </div>
                     <div className="grid grid-cols-2 gap-3 mt-2">
@@ -2531,12 +2649,18 @@ export function DwgTakeoffPage() {
                       ))}
                     </div>
 
-                    {/* Local processing badge — sits under the feature cards */}
+                    {/* Local processing badge — sits under the feature cards.
+                        The strong "files never leave your computer" claim is
+                        shown ONLY when the backend reports local_only (browser
+                        + server on the same machine). On the hosted demo we
+                        show honest "processed on your own server" copy. */}
                     <div className="mt-3 flex items-center justify-start">
                       <div className="inline-flex flex-wrap items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20">
                         <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
                         <span className="text-xs text-emerald-300/90 font-medium">
-                          {t('common.local_processing', { defaultValue: '100% Local Processing · Your files never leave your computer' })}
+                          {offlineReadiness?.local_only
+                            ? t('common.local_processing', { defaultValue: '100% Local Processing · Your files never leave your computer' })
+                            : t('dwg_takeoff.processed_on_your_server', { defaultValue: 'Processed on your OpenConstructionERP server · never sent to third parties' })}
                         </span>
                         <span className="text-[10px] text-emerald-500/30">|</span>
                         <a
@@ -2674,7 +2798,7 @@ export function DwgTakeoffPage() {
                     disabled={!canUndoFn(undoState)}
                     data-testid="dwg-undo"
                     title={t('dwg_takeoff.undo', { defaultValue: 'Undo (Ctrl+Z)' })}
-                    aria-label="Undo"
+                    aria-label={t('dwg_takeoff.undo_aria', { defaultValue: 'Undo' })}
                     className={clsx(
                       'flex h-7 w-7 items-center justify-center rounded-md transition-colors',
                       canUndoFn(undoState)
@@ -2692,7 +2816,7 @@ export function DwgTakeoffPage() {
                     title={t('dwg_takeoff.redo', {
                       defaultValue: 'Redo (Ctrl+Y / Ctrl+Shift+Z)',
                     })}
-                    aria-label="Redo"
+                    aria-label={t('dwg_takeoff.redo_aria', { defaultValue: 'Redo' })}
                     className={clsx(
                       'flex h-7 w-7 items-center justify-center rounded-md transition-colors',
                       canRedoFn(undoState)
@@ -2713,7 +2837,9 @@ export function DwgTakeoffPage() {
                       title={t('dwg_takeoff.snap_menu', {
                         defaultValue: 'Snap modes',
                       })}
-                      aria-label="Snap modes"
+                      aria-label={t('dwg_takeoff.snap_menu', {
+                        defaultValue: 'Snap modes',
+                      })}
                       className={clsx(
                         'flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors',
                         snapModes.endpoint || snapModes.midpoint || snapModes.intersection

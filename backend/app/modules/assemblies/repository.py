@@ -52,6 +52,7 @@ class AssemblyRepository:
         tag: str | None = None,
         project_id: uuid.UUID | None = None,
         is_template: bool | None = None,
+        owner_id: uuid.UUID | None = None,
     ) -> tuple[list[Assembly], int]:
         """List assemblies with pagination and optional filters.
 
@@ -64,11 +65,19 @@ class AssemblyRepository:
             tag: Filter by tag (stored in metadata.tags JSON array).
             project_id: Filter by project_id (null = global templates).
             is_template: Filter by template flag.
+            owner_id: When provided, restrict to the caller's own
+                assemblies (per-tenant isolation). Pass ``None`` for an
+                admin / unscoped listing. Legacy/global templates with no
+                owner are excluded for scoped callers — they are readable
+                only by admins, matching ``_verify_assembly_owner``.
 
         Returns:
             Tuple of (assemblies, total_count).
         """
         base = select(Assembly).where(Assembly.is_active.is_(True))
+
+        if owner_id is not None:
+            base = base.where(Assembly.owner_id == owner_id)
 
         if q:
             pattern = f"%{q}%"

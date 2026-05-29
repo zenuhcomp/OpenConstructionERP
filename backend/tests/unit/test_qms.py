@@ -60,6 +60,13 @@ from app.modules.qms.schemas import (
     PunchItemUpdate,
 )
 from app.modules.qms.service import QMSService
+from app.modules.projects.models import Project
+from app.modules.users.models import User
+from app.modules.variations.models import (
+    Notice,
+    VariationOrder,
+    VariationRequest,
+)
 
 PROJECT_ID = uuid.uuid4()
 
@@ -76,6 +83,16 @@ _QMS_TABLES = [
     QMSAuditFinding.__table__,
     QMSAuditLog.__table__,
     QMSCalibration.__table__,
+    # Escalation links an NCR to an existing VariationOrder, so the order
+    # table (plus the request/notice tables it FK-references, and the
+    # user/project tables those reference) must exist for the escalate
+    # happy-path test. The process-wide SQLite engine listener turns
+    # ``PRAGMA foreign_keys=ON``, so a real Project row is required.
+    User.__table__,
+    Project.__table__,
+    Notice.__table__,
+    VariationRequest.__table__,
+    VariationOrder.__table__,
 ]
 
 
@@ -302,6 +319,54 @@ async def test_inspection_failed_emits_failed_event(svc: QMSService) -> None:
 
 
 @pytest.mark.asyncio
+async def test_add_signature_defaults_to_caller_when_omitted(svc: QMSService) -> None:
+    """Omitting ``signer_user_id`` signs as the authenticated caller.
+
+    This is the "sign as me" flow the UI relies on so a normal user never
+    has to hand-type a UUID.
+    """
+    insp = await svc.schedule_inspection(
+        InspectionCreate(project_id=PROJECT_ID),
+    )
+    caller = uuid.uuid4()
+    sig = await svc.add_signature(
+        insp.id,
+        InspectionSignatureCreate(signer_role="inspector"),
+        default_signer_user_id=caller,
+    )
+    assert sig.signer_user_id == caller
+
+
+@pytest.mark.asyncio
+async def test_add_signature_explicit_id_overrides_default(svc: QMSService) -> None:
+    """An explicit ``signer_user_id`` records a sign-off for another member."""
+    insp = await svc.schedule_inspection(
+        InspectionCreate(project_id=PROJECT_ID),
+    )
+    caller = uuid.uuid4()
+    on_behalf_of = uuid.uuid4()
+    sig = await svc.add_signature(
+        insp.id,
+        InspectionSignatureCreate(signer_user_id=on_behalf_of, signer_role="GC"),
+        default_signer_user_id=caller,
+    )
+    assert sig.signer_user_id == on_behalf_of
+
+
+@pytest.mark.asyncio
+async def test_add_signature_requires_a_signer(svc: QMSService) -> None:
+    """With neither an explicit id nor a caller default, signing is rejected."""
+    insp = await svc.schedule_inspection(
+        InspectionCreate(project_id=PROJECT_ID),
+    )
+    with pytest.raises(ValueError, match="signer_user_id"):
+        await svc.add_signature(
+            insp.id,
+            InspectionSignatureCreate(signer_role="inspector"),
+        )
+
+
+@pytest.mark.asyncio
 async def test_complete_already_completed_inspection(svc: QMSService) -> None:
     insp = await svc.schedule_inspection(
         InspectionCreate(project_id=PROJECT_ID),
@@ -439,7 +504,21 @@ async def test_close_ncr_with_no_actions_blocked(svc: QMSService) -> None:
 
 @pytest.mark.asyncio
 async def test_escalate_ncr_publishes_event(svc: QMSService) -> None:
-    """NCR escalation publishes ``qms.ncr.escalated_to_variation`` event."""
+    """NCR escalation publishes ``qms.ncr.escalated_to_variation`` event.
+
+    Mirrors the product flow: the caller supplies an existing
+    :class:`VariationOrder` in the same project; the QMS module does not
+    fabricate one. The escalation links the NCR to that variation.
+    """
+    # A real owner + project so the VariationOrder FK is satisfied
+    # (the process-wide SQLite listener enables foreign_keys=ON).
+    owner = User(email=f"u{uuid.uuid4().hex[:6]}@test.com", hashed_password="x")
+    svc.session.add(owner)
+    await svc.session.flush()
+    project = Project(id=PROJECT_ID, name="Escalation Test", owner_id=owner.id)
+    svc.session.add(project)
+    await svc.session.flush()
+
     ncr = await svc.raise_ncr(
         NCRCreate(
             project_id=PROJECT_ID,
@@ -451,11 +530,19 @@ async def test_escalate_ncr_publishes_event(svc: QMSService) -> None:
         ),
     )
 
+    # An existing variation order in the same project to escalate into.
+    variation = VariationOrder(project_id=PROJECT_ID, code="VO-0001")
+    svc.session.add(variation)
+    await svc.session.flush()
+
     spy = MagicMock()
     with patch("app.modules.qms.service.event_bus.publish_detached", spy):
-        ncr_after = await svc.escalate_ncr_to_variation(ncr.id)
+        ncr_after = await svc.escalate_ncr_to_variation(
+            ncr.id,
+            variation_id=variation.id,
+        )
 
-    assert ncr_after.linked_variation_id is not None
+    assert ncr_after.linked_variation_id == variation.id
     assert spy.call_count == 1
     event_name = spy.call_args.args[0]
     payload = spy.call_args.args[1]

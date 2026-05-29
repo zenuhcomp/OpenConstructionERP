@@ -110,12 +110,14 @@ class ApprovalRouteService:
         *,
         project_id: uuid.UUID | None,
         target_kind: str | None = None,
+        include_inactive: bool = True,
     ) -> list[Route]:
         if target_kind is not None:
             _validate_target_kind(target_kind)
         return await self.repo.list_routes(
             project_id=project_id,
             target_kind=target_kind,
+            include_inactive=include_inactive,
         )
 
     async def list_steps(self, route_id: uuid.UUID) -> list[Step]:
@@ -199,6 +201,38 @@ class ApprovalRouteService:
         if payload.is_active is not None and payload.is_active != route.is_active:
             changed["is_active"] = (route.is_active, payload.is_active)
             route.is_active = payload.is_active
+
+        # Replace the step list when supplied. Deleting steps cascades to
+        # any StepState rows, so we refuse to touch the steps of a route
+        # that already has instances — the decision history would be lost.
+        if payload.steps is not None:
+            for step in payload.steps:
+                _validate_step_mode(step.mode)
+            existing = await self.repo.list_instances(route_id=route_id, limit=1)
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Route has instances; its steps can no longer be edited. "
+                        "Create a new route instead."
+                    ),
+                )
+            old_steps = await self.repo.list_steps(route_id)
+            await self.repo.delete_steps_for_route(route_id)
+            new_steps = [
+                Step(
+                    route_id=route.id,
+                    ordinal=s.ordinal,
+                    approver_role=s.approver_role,
+                    approver_user_id=s.approver_user_id,
+                    mode=s.mode,
+                    sla_hours=s.sla_hours,
+                )
+                for s in payload.steps
+            ]
+            await self.repo.add_steps_bulk(new_steps)
+            changed["step_count"] = (len(old_steps), len(new_steps))
+
         if not changed:
             return route
         await self.session.flush()

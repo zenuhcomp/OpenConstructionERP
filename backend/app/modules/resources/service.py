@@ -78,6 +78,23 @@ class SkillMismatchError(ValueError):
         self.missing = missing
 
 
+# ── Assignment status FSM ──────────────────────────────────────────────────
+
+# Allowed status transitions for an Assignment. A self-transition (target ==
+# current) is always permitted and treated as a no-op. The dedicated
+# confirm/complete/cancel endpoints enforce subsets of this table; the generic
+# PATCH (update_assignment) must honour the SAME rules so the Edit Assignment
+# modal cannot push a row through an illegal jump (e.g. completed -> proposed or
+# cancelled -> confirmed), which would corrupt utilization/availability math.
+ASSIGNMENT_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    "proposed": frozenset({"confirmed", "cancelled"}),
+    "confirmed": frozenset({"in_progress", "completed", "cancelled"}),
+    "in_progress": frozenset({"completed", "cancelled"}),
+    "completed": frozenset(),
+    "cancelled": frozenset(),
+}
+
+
 # ── Pure helpers ───────────────────────────────────────────────────────────
 
 
@@ -287,8 +304,9 @@ def compute_resource_utilization(
 ) -> dict[str, float]:
     """Pure: compute utilization stats for a resource over a period.
 
-    Counts overlap of each active assignment with the period, weighted by
-    allocation_percent. Returns dict with utilization_percent, hours_assigned,
+    Counts overlap of each committed assignment with the period, weighted by
+    allocation_percent. Tentative ('proposed') and 'cancelled' assignments are
+    excluded. Returns dict with utilization_percent, hours_assigned,
     hours_available.
     """
     if period_end <= period_start:
@@ -303,7 +321,11 @@ def compute_resource_utilization(
     for a in assignments:
         if a.resource_id != resource_id:
             continue
-        if a.status in ("cancelled",):
+        # Only committed work counts toward utilization. 'cancelled' never
+        # consumed the resource, and 'proposed' is a tentative booking still
+        # awaiting confirm/decline — counting either as assigned hours
+        # inflates the figure and can push utilization past 100%.
+        if a.status in ("cancelled", "proposed"):
             continue
         ov_start = max(period_start, a.start_at)
         ov_end = min(period_end, a.end_at)
@@ -645,6 +667,23 @@ class ResourcesService:
             fields["metadata_"] = fields.pop("metadata")
         if not fields:
             return assignment
+        # Guard the status FSM: the dedicated confirm/complete/cancel endpoints
+        # enforce strict transitions, but the generic PATCH used by the Edit
+        # Assignment modal must not become a back door for illegal jumps
+        # (e.g. completed -> proposed, cancelled -> confirmed). A self-transition
+        # is a no-op and always allowed.
+        if "status" in fields:
+            target_status = fields["status"]
+            if target_status != assignment.status:
+                allowed = ASSIGNMENT_STATUS_TRANSITIONS.get(assignment.status, frozenset())
+                if target_status not in allowed:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"Cannot change assignment status from "
+                            f"'{assignment.status}' to '{target_status}'"
+                        ),
+                    )
         # If start_at/end_at change, run conflict check
         new_start = fields.get("start_at", assignment.start_at)
         new_end = fields.get("end_at", assignment.end_at)

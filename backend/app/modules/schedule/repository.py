@@ -130,6 +130,20 @@ class ActivityRepository:
         stmt = delete(Activity).where(Activity.id == activity_id)
         await self.session.execute(stmt)
 
+    async def delete_for_schedule(self, schedule_id: uuid.UUID) -> int:
+        """Delete all activities of a schedule in a single statement.
+
+        Returns the number of activities removed. Dependent work orders are
+        removed via the ON DELETE CASCADE FK on WorkOrder.activity_id.
+        """
+        count_stmt = select(func.count()).select_from(
+            select(Activity).where(Activity.schedule_id == schedule_id).subquery()
+        )
+        total = (await self.session.execute(count_stmt)).scalar_one()
+        stmt = delete(Activity).where(Activity.schedule_id == schedule_id)
+        await self.session.execute(stmt)
+        return int(total)
+
     async def get_max_sort_order(self, schedule_id: uuid.UUID) -> int:
         """Get the highest sort_order for activities in a schedule."""
         stmt = select(func.coalesce(func.max(Activity.sort_order), -1)).where(Activity.schedule_id == schedule_id)

@@ -43,6 +43,8 @@ from app.modules.clash.schemas import (
     ClashBCFExportRequest,
     ClashBCFExportResponse,
     ClashBCFImportResponse,
+    ClashBulkResultUpdate,
+    ClashBulkUpdateResponse,
     ClashCategoriesResponse,
     ClashCategoryItem,
     ClashClusterRead,
@@ -82,27 +84,17 @@ def _get_service(session: SessionDep) -> ClashService:
 
 
 async def _require_project_access(session: AsyncSession, project_id: uuid.UUID, user_id: str) -> None:
-    """‌⁠‍Verify the caller owns (or is admin on) ``project_id`` (IDOR guard)."""
-    from app.modules.projects.repository import ProjectRepository
-    from app.modules.users.repository import UserRepository
+    """‌⁠‍Verify the caller may access ``project_id`` (IDOR guard).
 
-    project = await ProjectRepository(session).get_by_id(project_id)
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project {project_id} not found",
-        )
-    try:
-        user = await UserRepository(session).get_by_id(uuid.UUID(str(user_id)))
-        if user is not None and getattr(user, "role", "") == "admin":
-            return
-    except Exception:  # noqa: BLE001 — best-effort admin check
-        logger.exception("Admin-role lookup failed during clash access check")
-    if str(getattr(project, "owner_id", "")) != str(user_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: you do not own this project",
-        )
+    Delegates to the shared :func:`app.dependencies.verify_project_access`
+    so the clash module agrees with ``clash_cost_impact`` and the rest of
+    the app: owner, admin, **and project team members** (added via
+    ``add_project_member``) are all granted, and a real-but-forbidden
+    project returns 404 (not 403) to avoid leaking UUID existence.
+    """
+    from app.dependencies import verify_project_access
+
+    await verify_project_access(project_id, user_id, session)
 
 
 @router.get(
@@ -350,6 +342,38 @@ async def update_result(
         actor=str(user_id),
     )
     return ClashResultResponse.model_validate(result)
+
+
+@router.patch(
+    "/projects/{project_id}/runs/{run_id}/results",
+    response_model=ClashBulkUpdateResponse,
+    dependencies=[Depends(RequirePermission("clash.update"))],
+)
+async def bulk_update_results(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    data: ClashBulkResultUpdate,
+    user_id: CurrentUserId,
+    session: SessionDep,
+    service: ClashService = Depends(_get_service),
+) -> ClashBulkUpdateResponse:
+    """Apply one triage change (status / severity / assignee) to many clashes.
+
+    Backs the review table's bulk-actions toolbar so a large selection
+    updates in a single request instead of one PATCH per row. The run
+    summary is recomputed once for the whole batch.
+    """
+    await _require_project_access(session, project_id, user_id)
+    updated = await service.bulk_update_results(
+        project_id,
+        run_id,
+        data.result_ids,
+        new_status=data.status,
+        assigned_to=data.assigned_to,
+        severity=data.severity,
+        actor=str(user_id),
+    )
+    return ClashBulkUpdateResponse(updated=updated, requested=len(data.result_ids))
 
 
 @router.get(

@@ -28,9 +28,11 @@ import { useToastStore } from '@/stores/useToastStore';
 import {
   approvalRoutesKeys,
   deleteRoute,
+  getMeta,
   listRoutes,
 } from './api';
 import { ApprovalInstancesList } from './ApprovalInstancesList';
+import { kindLabel } from './labels';
 import { RouteEditor } from './RouteEditor';
 import type { ApprovalRoute } from './types';
 
@@ -47,6 +49,8 @@ export function ApprovalRoutesPage() {
   const [editingRoute, setEditingRoute] = useState<ApprovalRoute | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApprovalRoute | null>(null);
 
+  // Admin surface — show archived routes too (includeInactive defaults
+  // to true on the backend; we keep it explicit for clarity).
   const routesQuery = useQuery({
     queryKey: approvalRoutesKeys.routes(null, kindFilter || null),
     queryFn: () =>
@@ -56,6 +60,14 @@ export function ApprovalRoutesPage() {
       }),
     staleTime: 30_000,
   });
+
+  // Target kinds from the backend whitelist so the filter never drifts.
+  const { data: meta } = useQuery({
+    queryKey: approvalRoutesKeys.meta(),
+    queryFn: () => getMeta(),
+    staleTime: 10 * 60_000,
+  });
+  const targetKinds = meta?.target_kinds ?? [];
 
   const delMut = useMutation({
     mutationFn: (id: string) => deleteRoute(id),
@@ -171,24 +183,18 @@ export function ApprovalRoutesPage() {
               value={kindFilter}
               onChange={(e) => setKindFilter(e.target.value)}
               className="h-8 rounded-md border border-border bg-surface-primary px-2 text-xs focus:outline-none focus:ring-2 focus:ring-oe-blue/30 focus:border-oe-blue cursor-pointer"
+              aria-label={t('approvalRoutes.filter_kind', {
+                defaultValue: 'Filter by kind',
+              })}
             >
               <option value="">
                 {t('approvalRoutes.all_kinds', {
                   defaultValue: 'All target kinds',
                 })}
               </option>
-              {[
-                'markup',
-                'submittal',
-                'rfi',
-                'file',
-                'variation',
-                'change_order',
-                'document',
-                'inspection',
-              ].map((k) => (
+              {targetKinds.map((k) => (
                 <option key={k} value={k}>
-                  {k}
+                  {kindLabel(t, k)}
                 </option>
               ))}
             </select>
@@ -223,7 +229,7 @@ export function ApprovalRoutesPage() {
             groupedRoutes.map(([kind, rows]) => (
               <div key={kind}>
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-content-tertiary mb-1.5">
-                  {kind}
+                  {kindLabel(t, kind)}
                 </h2>
                 <Card padding="none" className="overflow-hidden">
                   <table className="w-full text-sm">
@@ -256,11 +262,6 @@ export function ApprovalRoutesPage() {
                                 <span className="text-sm font-medium text-content-primary">
                                   {r.name}
                                 </span>
-                                {r.description && (
-                                  <span className="text-xs text-content-tertiary truncate max-w-md">
-                                    {r.description}
-                                  </span>
-                                )}
                               </div>
                             </td>
                             <td className="px-3 py-2.5 text-xs text-content-secondary tabular-nums">

@@ -192,11 +192,16 @@ class InspectionRead(BaseModel):
 
 
 class InspectionSignatureCreate(BaseModel):
-    """Sign-off entry against an inspection."""
+    """Sign-off entry against an inspection.
+
+    ``signer_user_id`` is optional: when omitted the API fills it from the
+    authenticated caller (the normal "sign as me" flow). It may be set
+    explicitly to record a sign-off on behalf of another project member.
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    signer_user_id: UUID
+    signer_user_id: UUID | None = None
     signer_role: str = Field(
         ...,
         pattern=r"^(GC|designer|client|subcontractor|inspector|other)$",
@@ -222,6 +227,20 @@ class InspectionSignatureRead(BaseModel):
     comments: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class InspectionSignaturesEnvelope(BaseModel):
+    """Signatures collected on an inspection plus how many are required.
+
+    ``required`` is inherited from the linked ITP item's
+    ``signatories_required`` (default 1) so the UI can render a
+    ``collected/required`` indicator and gate the Complete action.
+    """
+
+    inspection_id: UUID
+    required: int
+    collected: int
+    signatures: list[InspectionSignatureRead] = Field(default_factory=list)
 
 
 # ── NCR ───────────────────────────────────────────────────────────────────

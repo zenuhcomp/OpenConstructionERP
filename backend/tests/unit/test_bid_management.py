@@ -27,6 +27,7 @@ import pytest
 
 from app.modules.bid_management.schemas import (
     BidAwardCreate,
+    BidComparisonCreate,
     BidPackageCreate,
 )
 from app.modules.bid_management.service import (
@@ -465,6 +466,41 @@ def test_recommend_bidder_empty() -> None:
     assert recommend_bidder(SimpleNamespace(), [], bidders) is None
 
 
+# ── BidComparisonCreate weight validation ─────────────────────────────────
+
+
+def test_comparison_create_default_weights_sum_to_100() -> None:
+    cmp_ = BidComparisonCreate(package_id=uuid.uuid4())
+    assert cmp_.commercial_weight_pct + cmp_.technical_weight_pct == 100
+
+
+def test_comparison_create_accepts_valid_split() -> None:
+    cmp_ = BidComparisonCreate(
+        package_id=uuid.uuid4(),
+        commercial_weight_pct=70,
+        technical_weight_pct=30,
+    )
+    assert cmp_.commercial_weight_pct == 70
+    assert cmp_.technical_weight_pct == 30
+
+
+def test_comparison_create_rejects_weights_not_summing_to_100() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        BidComparisonCreate(
+            package_id=uuid.uuid4(),
+            commercial_weight_pct=100,
+            technical_weight_pct=100,
+        )
+    with pytest.raises(pydantic.ValidationError):
+        BidComparisonCreate(
+            package_id=uuid.uuid4(),
+            commercial_weight_pct=60,
+            technical_weight_pct=30,
+        )
+
+
 # ── compute_bid_summary ───────────────────────────────────────────────────
 
 
@@ -675,6 +711,18 @@ async def test_award_package_emits_and_auto_rejects_others() -> None:
         for b in (winner, loser1, loser2, disq):
             await svc.bidder_repo.create(b)
 
+        # The winner must have a VALID submission to be awardable — a bidder
+        # who never submitted a valid bid cannot win the package.
+        winner_sub = SimpleNamespace(
+            id=uuid.uuid4(),
+            bidder_id=winner.id,
+            is_valid=True,
+            total_amount=Decimal("9000"),
+            currency="EUR",
+            _package_id=pkg.id,
+        )
+        await svc.submission_repo.create(winner_sub)
+
         award_data = BidAwardCreate(
             package_id=pkg.id,
             awarded_bidder_id=winner.id,
@@ -760,6 +808,44 @@ async def test_award_rejects_disqualified_bidder() -> None:
         award_data = BidAwardCreate(
             package_id=pkg.id,
             awarded_bidder_id=b.id,
+            awarded_amount=Decimal("100"),
+        )
+        with pytest.raises(HTTPException) as exc:
+            await svc.award_package(pkg.id, award_data, user_id="u1")
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_award_rejects_bidder_without_valid_submission() -> None:
+    """A bidder with no valid submission must not be awardable.
+
+    Late / currency-mismatched / incomplete bids are flagged is_valid=False
+    by open_bids and are excluded from the leveling matrix — awarding one
+    would contradict the comparison the manager just reviewed.
+    """
+    svc = _make_service()
+    from fastapi import HTTPException
+
+    from app.modules.bid_management.models import Bidder
+
+    with patch("app.modules.bid_management.service.event_bus.publish_detached"):
+        pkg = await svc.create_package(_pkg_data(code="BP-NV"), user_id="u1")
+        pkg.status = "closed"
+        bidder = Bidder(package_id=pkg.id, company_name="Late Co", status="active")
+        await svc.bidder_repo.create(bidder)
+        # An INVALID submission (e.g. late) — must not unlock the award.
+        invalid_sub = SimpleNamespace(
+            id=uuid.uuid4(),
+            bidder_id=bidder.id,
+            is_valid=False,
+            total_amount=Decimal("100"),
+            currency="EUR",
+            _package_id=pkg.id,
+        )
+        await svc.submission_repo.create(invalid_sub)
+        award_data = BidAwardCreate(
+            package_id=pkg.id,
+            awarded_bidder_id=bidder.id,
             awarded_amount=Decimal("100"),
         )
         with pytest.raises(HTTPException) as exc:

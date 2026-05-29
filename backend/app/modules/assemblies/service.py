@@ -406,8 +406,16 @@ class AssemblyService:
         is_template: bool | None = None,
         offset: int = 0,
         limit: int = 50,
+        owner_id: uuid.UUID | None = None,
     ) -> tuple[list[Assembly], int]:
-        """Search assemblies with filters and pagination."""
+        """Search assemblies with filters and pagination.
+
+        ``owner_id`` scopes the result to a single tenant; pass ``None``
+        for an admin / unscoped listing. The list and stats endpoints
+        thread the caller's id through so a VIEWER cannot enumerate other
+        tenants' assemblies (the per-item endpoints already 404 on a
+        non-owner — this closes the matching leak in the collection).
+        """
         return await self.assembly_repo.list_all(
             q=q,
             category=category,
@@ -417,6 +425,7 @@ class AssemblyService:
             is_template=is_template,
             offset=offset,
             limit=limit,
+            owner_id=owner_id,
         )
 
     async def update_assembly(
@@ -1160,39 +1169,43 @@ class AssemblyService:
 
     # ── Stats ─────────────────────────────────────────────────────────────
 
-    async def get_stats(self) -> dict[str, object]:
+    async def get_stats(self, *, owner_id: uuid.UUID | None = None) -> dict[str, object]:
         """Return aggregated assembly statistics.
 
         Returns total count, category breakdown, and most-used assemblies
         (determined by the number of BOQ positions referencing each assembly).
-        """
-        from sqlalchemy import func as sqlfunc
 
-        # All active assemblies with components loaded
-        assemblies, total = await self.assembly_repo.list_all(offset=0, limit=10000)
+        ``owner_id`` scopes the totals/breakdown to a single tenant so the
+        stats banner does not leak the platform-wide count to a VIEWER;
+        pass ``None`` for an admin / unscoped roll-up.
+        """
+        # All active assemblies for this tenant
+        assemblies, total = await self.assembly_repo.list_all(offset=0, limit=10000, owner_id=owner_id)
 
         by_category: dict[str, int] = {}
         for asm in assemblies:
             cat = asm.category or "uncategorized"
             by_category[cat] = by_category.get(cat, 0) + 1
 
-        # Try to get usage counts from BOQ positions that reference assemblies
+        # Most-used: count BOQ positions that reference each assembly via
+        # their metadata (positions carry no ``assembly_id`` column — the
+        # reference lives in ``metadata_['assembly_id']``), restricted to
+        # the tenant's own assemblies so the banner never exposes another
+        # owner's recipe names.
         most_used: list[dict[str, object]] = []
         try:
-            from sqlalchemy import select as sa_select
-
-            from app.modules.boq.models import Position as BOQPosition
-
-            stmt = (
-                sa_select(Assembly.name, sqlfunc.count(BOQPosition.id).label("cnt"))
-                .join(BOQPosition, BOQPosition.assembly_id == Assembly.id)
-                .where(Assembly.is_active.is_(True))
-                .group_by(Assembly.id, Assembly.name)
-                .order_by(sqlfunc.count(BOQPosition.id).desc())
-                .limit(5)
-            )
-            rows = (await self.session.execute(stmt)).all()
-            most_used = [{"name": row[0], "usage_count": row[1]} for row in rows]
+            scoped_ids = {str(asm.id): asm.name for asm in assemblies}
+            if scoped_ids:
+                usage = await self.get_usage_counts(
+                    [asm.id for asm in assemblies],
+                    owner_id=owner_id,
+                )
+                ranked = sorted(usage.items(), key=lambda kv: kv[1], reverse=True)
+                most_used = [
+                    {"name": scoped_ids.get(aid, ""), "usage_count": cnt}
+                    for aid, cnt in ranked[:5]
+                    if cnt > 0
+                ]
         except Exception:
             # BOQ module may not exist or table not yet created
             logger.debug("Could not compute assembly usage stats from BOQ positions")
@@ -1465,14 +1478,25 @@ class AssemblyService:
     async def get_usage_counts(
         self,
         assembly_ids: list[uuid.UUID],
+        *,
+        owner_id: uuid.UUID | None = None,
     ) -> dict[str, int]:
         """Get BOQ position usage counts for a list of assemblies.
 
-        Checks BOQ position metadata for assembly_id references and also
-        checks positions with source='assembly'.
+        Positions carry no ``assembly_id`` column — the reference lives in
+        ``Position.metadata_['assembly_id']`` (set by ``apply_to_boq``).
+        We therefore can't ``GROUP BY`` on a column, but we DON'T need to
+        load every assembly-sourced position into Python either: a
+        ``LIKE`` over the serialised JSON metadata pre-filters in SQL to
+        only the rows that mention one of the requested assembly ids, and
+        we select just the ``metadata`` column instead of whole ORM rows.
 
         Args:
             assembly_ids: List of assembly UUIDs to check.
+            owner_id: When provided, only count positions in BOQs that
+                belong to the caller's own projects, so the usage figure
+                never reflects (and the scan never reads) another tenant's
+                BOQ positions.
 
         Returns:
             Dict mapping assembly_id (str) to usage count.
@@ -1483,18 +1507,39 @@ class AssemblyService:
         usage: dict[str, int] = {str(aid): 0 for aid in assembly_ids}
 
         try:
+            from sqlalchemy import String, or_
             from sqlalchemy import select as sa_select
 
-            from app.modules.boq.models import Position as BOQPosition
+            from app.modules.boq.models import BOQ, Position as BOQPosition
 
-            # Search positions with source='assembly' and metadata containing assembly_id
-            stmt = sa_select(BOQPosition).where(BOQPosition.source == "assembly")
+            # Pre-filter in SQL: only assembly-sourced positions whose
+            # serialised metadata mentions at least one of the requested
+            # assembly ids. ``metadata_`` is a JSON column; casting to
+            # text + LIKE is portable across SQLite and PostgreSQL and
+            # avoids pulling the full table into Python.
+            meta_text = BOQPosition.metadata_.cast(String)
+            id_clauses = [meta_text.ilike(f'%"assembly_id": "{aid}"%') for aid in assembly_ids]
+
+            stmt = sa_select(BOQPosition.metadata_).where(
+                BOQPosition.source == "assembly",
+                or_(*id_clauses),
+            )
+
+            # Tenant scope: restrict to the caller's own projects via the
+            # BOQ → project owner link so the count (and the scan) never
+            # crosses tenants.
+            if owner_id is not None:
+                from app.modules.projects.models import Project
+
+                stmt = (
+                    stmt.join(BOQ, BOQ.id == BOQPosition.boq_id)
+                    .join(Project, Project.id == BOQ.project_id)
+                    .where(Project.owner_id == owner_id)
+                )
+
             result = await self.session.execute(stmt)
-            positions = result.scalars().all()
-
-            for pos in positions:
-                meta = getattr(pos, "metadata_", None) or {}
-                ref_id = meta.get("assembly_id", "")
+            for (meta,) in result.all():
+                ref_id = (meta or {}).get("assembly_id", "")
                 if ref_id in usage:
                     usage[ref_id] += 1
         except Exception:

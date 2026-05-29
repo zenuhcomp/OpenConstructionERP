@@ -785,9 +785,88 @@ def register_warranty_bridge_subscribers() -> None:
     logger.info("property_dev snag→warranty bridge subscriber registered")
 
 
+# ── Buyer-portal contact-agent fan-out ─────────────────────────────────
+
+
+async def _on_portal_message_received(event: Event) -> dict[str, Any] | None:
+    """Route a buyer-portal message to the assigned agent's inbox.
+
+    Triggered by ``crm.lead.message_received`` published from the buyer
+    portal's ``contact-agent`` endpoint. The :class:`CrmActivity` row is
+    already persisted (and owner-scoped) by the router; this subscriber's
+    job is the second half of the flow the buyer was promised — an in-app
+    notification so the agent actually sees the message land.
+
+    Payload contract::
+
+        {
+            "activity_id": "<uuid>",
+            "buyer_id": "<uuid>",
+            "agent_user_id": "<uuid?>",   # resolved by the router
+            "buyer_name": "Jane Buyer",
+            "source": "portal",
+            "callback_phone": "+44...?",
+        }
+
+    Skips cleanly when ``source != portal`` (the event name is generic
+    and other CRM flows may reuse it) or when no agent could be resolved
+    (orphan buyer — nothing to notify; the activity still exists for a
+    manual triage sweep). Best-effort: errors are logged at DEBUG and
+    never raised back into the bus.
+    """
+    data = event.data or {}
+    if (data.get("source") or "") != "portal":
+        return None
+    agent_user_id = _coerce_uuid(data.get("agent_user_id"))
+    if agent_user_id is None:
+        logger.debug(
+            "property_dev._on_portal_message_received: no agent to notify (activity=%s)",
+            data.get("activity_id"),
+        )
+        return None
+    activity_id = data.get("activity_id")
+    buyer_name = (data.get("buyer_name") or "").strip() or "A buyer"
+    try:
+        from app.modules.notifications.service import NotificationService
+
+        async with async_session_factory() as session:
+            svc = NotificationService(session)
+            await svc.create(
+                user_id=agent_user_id,
+                notification_type="message",
+                title_key="notifications.portal.message_received.title",
+                body_key="notifications.portal.message_received.body",
+                body_context={"buyer_name": buyer_name},
+                entity_type="crm_activity",
+                entity_id=str(activity_id) if activity_id else None,
+                action_url="/crm",
+            )
+            await session.commit()
+            return {"status": "ok", "agent_user_id": str(agent_user_id)}
+    except Exception:
+        logger.debug(
+            "property_dev._on_portal_message_received: handler failed",
+            exc_info=True,
+        )
+        return None
+
+
+_PORTAL_MESSAGE_FLAG = "_property_dev_portal_message_subscribed"
+
+
+def register_portal_message_subscribers() -> None:
+    """Wire the buyer-portal contact-agent fan-out subscriber. Idempotent."""
+    if getattr(event_bus, _PORTAL_MESSAGE_FLAG, False):
+        return
+    event_bus.subscribe("crm.lead.message_received", _on_portal_message_received)
+    setattr(event_bus, _PORTAL_MESSAGE_FLAG, True)
+    logger.info("property_dev buyer-portal contact-agent subscriber registered")
+
+
 __all__ = [
     "register_property_dev_event_subscribers",
     "register_subscribers",
     "register_task_139_subscribers",
     "register_warranty_bridge_subscribers",
+    "register_portal_message_subscribers",
 ]

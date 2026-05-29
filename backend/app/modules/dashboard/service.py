@@ -144,6 +144,8 @@ async def compute_boq_summary(
             "total_boqs": 0,
             "active_boqs": 0,
             "total_value_eur": "0.00",
+            "by_currency": [],
+            "multi_currency": False,
             "position_count": 0,
             "positions_missing_quantity": 0,
             "positions_zero_price": 0,
@@ -249,6 +251,11 @@ async def compute_boq_summary(
     overall_positions = 0
     overall_missing = 0
     overall_zero_price = 0
+    # Group BOQ value by the owning project's currency. There is no
+    # cross-project rate table, so summing EUR + GBP + USD into one scalar
+    # is financially meaningless — keep per-currency subtotals and flag
+    # ``multi_currency`` (mirrors projects/router.py budget rollup).
+    totals_by_currency_map: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
 
     for p in projects:
         bucket = per_project.get(
@@ -260,22 +267,30 @@ async def compute_boq_summary(
                 "zero_price": 0,
             },
         )
+        currency = getattr(p, "currency", "EUR") or "EUR"
         by_project.append(
             {
                 "project_id": str(p.id),
                 "project_name": p.name,
                 "boq_count": boq_count_by_project.get(p.id, 0),
                 "total_value": _money(bucket["total"]),
-                "currency": getattr(p, "currency", "EUR") or "EUR",
+                "currency": currency,
                 "position_count": bucket["positions"],
                 "positions_missing_quantity": bucket["missing_qty"],
                 "positions_zero_price": bucket["zero_price"],
             },
         )
+        totals_by_currency_map[currency] += bucket["total"]
         overall_total += bucket["total"]
         overall_positions += bucket["positions"]
         overall_missing += bucket["missing_qty"]
         overall_zero_price += bucket["zero_price"]
+
+    by_currency = [
+        {"currency": cur, "total_value": _money(total)}
+        for cur, total in sorted(totals_by_currency_map.items())
+    ]
+    multi_currency = len(totals_by_currency_map) > 1
 
     if latest_boq is not None:
         try:
@@ -290,7 +305,12 @@ async def compute_boq_summary(
     return {
         "total_boqs": sum(boq_count_by_project.values()),
         "active_boqs": active_count,
+        # Legacy flat scalar kept for backward compatibility. When
+        # ``multi_currency`` is true it mixes currencies and must NOT be
+        # rendered as a single headline figure — use ``by_currency``.
         "total_value_eur": _money(overall_total),
+        "by_currency": by_currency,
+        "multi_currency": multi_currency,
         "position_count": overall_positions,
         "positions_missing_quantity": overall_missing,
         "positions_zero_price": overall_zero_price,

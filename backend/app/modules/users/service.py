@@ -36,7 +36,6 @@ async def _safe_publish(name: str, data: dict, source_module: str = "") -> None:
         _logger_ev.debug("Event publish skipped: %s", name)
 
 
-from app.core.permissions import permission_registry
 from app.modules.users.models import APIKey, User
 from app.modules.users.repository import APIKeyRepository, UserRepository
 from app.modules.users.schemas import (
@@ -79,15 +78,23 @@ def create_access_token(
     settings: Settings,
     extra_claims: dict | None = None,
 ) -> str:
-    """Create a JWT access token for a user."""
-    permissions = permission_registry.get_role_permissions(user.role)
+    """Create a JWT access token for a user.
+
+    The token deliberately carries only identity claims (``sub``, ``email``,
+    ``role``) - NOT the resolved permission list. Permissions are re-hydrated
+    from the DB role on every request in ``get_current_user_payload`` (and the
+    frontend reads them from ``GET /users/me``), so embedding them here was
+    pure dead weight: for an admin it added ~12 KB, pushing the ``Authorization``
+    header past the 16 KB limit of Node/Vite dev proxies and yielding HTTP 431
+    ("Request Header Fields Too Large") on every authenticated call. See the
+    re-hydration note in ``app/dependencies.py``.
+    """
     now = datetime.now(UTC)
     payload = {
         "iss": "openconstructionerp",  # RFC 7519 issuer claim
         "sub": str(user.id),
         "email": user.email,
         "role": user.role,
-        "permissions": permissions,
         "iat": now,
         "exp": now + timedelta(minutes=settings.jwt_expire_minutes),
         "type": "access",

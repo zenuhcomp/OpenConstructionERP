@@ -45,6 +45,7 @@ from app.modules.schedule.schemas import (
     BaselineCreate,
     BaselineResponse,
     BaselineUpdate,
+    ClearActivitiesResponse,
     CPMCalculateRequest,
     CriticalPathResponse,
     GanttData,
@@ -63,11 +64,18 @@ from app.modules.schedule.schemas import (
     ScheduleResponse,
     ScheduleStatsResponse,
     ScheduleUpdate,
+    WorkCalendarResponse,
     WorkOrderCreate,
     WorkOrderResponse,
     WorkOrderUpdate,
 )
-from app.modules.schedule.service import ScheduleService, _str_to_float, compute_duration
+from app.modules.schedule.service import (
+    ScheduleService,
+    _effective_activity_status,
+    _str_to_float,
+    compute_duration,
+    get_work_calendar,
+)
 
 router = APIRouter(tags=["schedule"])
 
@@ -354,6 +362,30 @@ async def list_activities(
     await _verify_schedule_owner(service, session, schedule_id, _user_id, payload)
     activities, _ = await service.list_activities_for_schedule(schedule_id, offset=offset, limit=limit)
     return [_activity_to_response(a) for a in activities]
+
+
+@router.delete(
+    "/schedules/{schedule_id}/activities/",
+    response_model=ClearActivitiesResponse,
+    summary="Clear all activities (reset schedule)",
+    dependencies=[Depends(RequirePermission("schedule.delete"))],
+)
+async def clear_activities(
+    schedule_id: uuid.UUID,
+    _user_id: CurrentUserId,
+    payload: CurrentUserPayload,
+    session: SessionDep,
+    service: ScheduleService = Depends(_get_service),
+) -> ClearActivitiesResponse:
+    """Delete every activity (and its work orders) of a schedule in one call.
+
+    Backs the schedule "Reset" action so the client no longer fires an N+1
+    serial DELETE per activity. Verifies the caller owns the parent project
+    (admins bypass).
+    """
+    await _verify_schedule_owner(service, session, schedule_id, _user_id, payload)
+    deleted = await service.clear_activities(schedule_id)
+    return ClearActivitiesResponse(schedule_id=schedule_id, deleted=deleted)
 
 
 @router.get(
@@ -1950,8 +1982,11 @@ async def schedule_stats(
     Computes total activities, critical count, delayed, on_track, progress_pct, etc.
     """
     await verify_project_access(project_id, _user_id, session)
+    from datetime import UTC, datetime
+
     from sqlalchemy import select
 
+    from app.modules.projects.repository import ProjectRepository
     from app.modules.schedule.models import Activity, Schedule
 
     # Get all schedules for the project
@@ -1970,6 +2005,12 @@ async def schedule_stats(
     total = len(activities)
     if total == 0:
         return ScheduleStatsResponse()
+
+    # Resolve the project region + today so "delayed" is derived the same way
+    # as the Gantt summary (overdue + unfinished), keeping the rollup honest.
+    project = await ProjectRepository(session).get_by_id(project_id)
+    project_region = project.region if project else None
+    today = datetime.now(UTC).date()
 
     critical_count = 0
     delayed = 0
@@ -1993,14 +2034,22 @@ async def schedule_stats(
         if getattr(act, "is_critical", False):
             critical_count += 1
 
-        if act.status == "delayed":
+        effective_status = _effective_activity_status(
+            stored_status=act.status,
+            progress_pct=progress,
+            end_date=act.end_date,
+            today=today,
+            region=project_region,
+        )
+
+        if effective_status == "delayed":
             delayed += 1
-        elif act.status == "completed":
+        elif effective_status == "completed":
             completed += 1
-        elif act.status == "not_started":
+        elif effective_status == "not_started":
             not_started += 1
             on_track += 1
-        elif act.status == "in_progress":
+        elif effective_status == "in_progress":
             in_progress += 1
             on_track += 1
 
@@ -2018,6 +2067,39 @@ async def schedule_stats(
         in_progress=in_progress,
         progress_pct=progress_pct,
         total_duration_days=total_duration,
+    )
+
+
+@router.get(
+    "/work-calendar/",
+    response_model=WorkCalendarResponse,
+    dependencies=[Depends(RequirePermission("schedule.read"))],
+)
+async def schedule_work_calendar(
+    project_id: uuid.UUID = Query(..., description="Project to resolve the work calendar for"),
+    session: SessionDep = None,  # type: ignore[assignment]
+    _user_id: CurrentUserId = None,  # type: ignore[assignment]
+) -> WorkCalendarResponse:
+    """Return the resolved regional work calendar for a project.
+
+    The schedule duration/CPM math resolves the calendar via prefix + full-label
+    region maps. Exposing the resolved values here lets the UI render the true
+    hours-per-day / days-per-week badge instead of re-deriving it from a smaller
+    client-side map that diverges for region values like "Middle East",
+    "United States", "DE_BERLIN" or "NORDIC".
+    """
+    await verify_project_access(project_id, _user_id, session)
+
+    from app.modules.projects.repository import ProjectRepository
+
+    project = await ProjectRepository(session).get_by_id(project_id)
+    region = project.region if project else None
+    cal = get_work_calendar(region)
+    return WorkCalendarResponse(
+        region=region,
+        hours_per_day=cal["hours_per_day"],
+        work_days_per_week=len(cal["work_days"]),
+        label=cal["label"],
     )
 
 

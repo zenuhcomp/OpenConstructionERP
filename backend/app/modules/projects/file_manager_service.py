@@ -370,11 +370,18 @@ async def _collect_bim_models(
     out: list[FileRow] = []
     for r in rows:
         path = r.canonical_file_path or ""
-        # The canonical source file is frequently absent (snapshot-seeded
-        # models, S3-only deployments) yet the model still renders because
-        # its converted geometry (GLB/DAE) lives in BIM storage. Report the
-        # size of that real on-disk artifact rather than a misleading 0.
+        # The canonical source upload (IFC/RVT) is the like-for-like size to
+        # compare against documents/photos/DWG source files in the storage
+        # breakdown bar. Prefer it when present.
         size = _file_size(path)
+        # ``True`` means ``size_bytes`` reflects the converted geometry
+        # artifact (GLB/DAE) rather than the original source upload — the
+        # canonical source file is frequently absent (snapshot-seeded models,
+        # S3-only deployments) yet the model still renders from its converted
+        # geometry in BIM storage. We surface that real on-disk size instead
+        # of a misleading 0, but flag the basis so the UI can label the
+        # share-of-storage bar honestly (artifact vs source).
+        size_is_converted_artifact = False
         if not size:
             try:
                 size = await bim_file_storage.compute_artifact_size_bytes(
@@ -383,6 +390,8 @@ async def _collect_bim_models(
                 )
             except Exception:  # noqa: BLE001 - best-effort sizing
                 size = 0
+            else:
+                size_is_converted_artifact = bool(size)
         out.append(
             FileRow(
                 id=str(r.id),
@@ -404,6 +413,9 @@ async def _collect_bim_models(
                     "status": r.status,
                     "element_count": r.element_count,
                     "storey_count": r.storey_count,
+                    # When True, ``size_bytes`` is the converted geometry
+                    # artifact size, not the original source upload size.
+                    "size_is_converted_artifact": size_is_converted_artifact,
                 },
             ),
         )

@@ -97,6 +97,7 @@ class SubmittalResponse(BaseModel):
     submittal_type: str
     status: str = "draft"
     ball_in_court: str | None = None
+    ball_in_court_name: str | None = None
     current_revision: int = 1
     submitted_by_org: str | None = None
     reviewer_id: str | None = None

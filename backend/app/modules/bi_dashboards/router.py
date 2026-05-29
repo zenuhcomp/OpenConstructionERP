@@ -626,11 +626,40 @@ async def run_schedule_now(
     dependencies=[Depends(RequirePermission("bi.alert.read"))],
 )
 async def list_alerts(
-    user_id: CurrentUserId,  # noqa: ARG001
+    user_id: CurrentUserId,
+    session: SessionDep,
     service: BIDashboardsService = Depends(_service),
 ) -> list[AlertRuleRead]:
+    # Tenant-wide alerts (scope_project_id IS NULL) are visible to any
+    # caller with bi.alert.read. Project-scoped alerts are data about one
+    # project, so only return those whose project the caller can access —
+    # mirrors ``_ensure_alert_access`` used on toggle and the per-caller
+    # filtering dashboards/reports already do. Without this, every tenant's
+    # project-scoped rule names / thresholds leak cross-tenant.
     rows = await service.repo.list_alerts()
-    return [AlertRuleRead.model_validate(r) for r in rows]
+    admin = await _is_admin(user_id, session)
+    if admin:
+        return [AlertRuleRead.model_validate(r) for r in rows]
+
+    # Resolve project access once per distinct scope_project_id.
+    access_cache: dict[uuid.UUID, bool] = {}
+    visible: list[AlertRule] = []
+    for row in rows:
+        scope_pid = row.scope_project_id
+        if scope_pid is None:
+            visible.append(row)
+            continue
+        allowed = access_cache.get(scope_pid)
+        if allowed is None:
+            try:
+                await verify_project_access(scope_pid, user_id, session)
+                allowed = True
+            except HTTPException:
+                allowed = False
+            access_cache[scope_pid] = allowed
+        if allowed:
+            visible.append(row)
+    return [AlertRuleRead.model_validate(r) for r in visible]
 
 
 @router.post(
