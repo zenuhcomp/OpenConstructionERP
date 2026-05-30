@@ -23,6 +23,19 @@ class _Widget(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class CurrencySubtotal(BaseModel):
+    """Per-currency money subtotal in a cross-project rollup.
+
+    Used wherever a headline scalar would otherwise blend ISO currencies
+    (which is financially meaningless without an FX table). Consumers
+    should render these per-currency chips instead of the legacy blended
+    scalar whenever ``multi_currency`` is true.
+    """
+
+    currency: str
+    total_value: str  # Decimal-as-string
+
+
 class BOQByProject(BaseModel):
     project_id: str
     project_name: str
@@ -58,7 +71,28 @@ class BOQSummaryPayload(_Widget):
         default=0,
         description=("BOQs whose status is NOT in archived/closed/cancelled/rejected."),
     )
-    total_value_eur: str = Field(description="Sum across all projects, **EUR equivalent** as Decimal string.")
+    # NOTE: ``total_value_eur`` is a legacy field name. It is NOT an
+    # FX-converted EUR equivalent — there is no cross-project rate table.
+    # It is a RAW arithmetic sum of every project's BOQ total across
+    # whatever currencies they use. When ``multi_currency`` is true it
+    # mixes ISO currencies and must NOT be shown as a single headline
+    # figure — use ``by_currency`` instead. The name is retained only for
+    # backward compatibility with existing consumers.
+    total_value_eur: str = Field(
+        description=(
+            "Legacy raw cross-currency sum (NOT FX-converted). When "
+            "multi_currency is true this blends ISO currencies and must "
+            "not be rendered as a single headline — use by_currency."
+        ),
+    )
+    by_currency: list[CurrencySubtotal] = Field(
+        default_factory=list,
+        description="FX-correct per-currency subtotals of BOQ value.",
+    )
+    multi_currency: bool = Field(
+        default=False,
+        description="True when projects span more than one ISO currency.",
+    )
     position_count: int
     positions_missing_quantity: int
     positions_zero_price: int
@@ -189,10 +223,29 @@ class ChangeOrderItem(BaseModel):
     currency: str
 
 
+class ChangeOrderCurrencySubtotal(BaseModel):
+    """Per-currency open change-order impact subtotal."""
+
+    currency: str
+    total_impact: str  # Decimal-as-string
+
+
 class ChangeOrdersPayload(_Widget):
     open_count: int
+    # Legacy flat scalar kept for backward compatibility. When
+    # ``multi_currency`` is true it blends ISO currencies (there is no
+    # cross-project FX table) and must not be rendered as a single
+    # headline figure — use ``by_currency`` instead.
     total_impact: str  # Decimal-as-string
     currency: str
+    by_currency: list[ChangeOrderCurrencySubtotal] = Field(
+        default_factory=list,
+        description="FX-correct per-currency subtotals of open change-order impact.",
+    )
+    multi_currency: bool = Field(
+        default=False,
+        description="True when open change orders span more than one ISO currency.",
+    )
     top_pending: list[ChangeOrderItem]
 
 
@@ -482,11 +535,13 @@ __all__ = [
     "BOQSummaryPayload",
     "BudgetByProject",
     "BudgetVariancePayload",
+    "ChangeOrderCurrencySubtotal",
     "ChangeOrderItem",
     "ChangeOrdersPayload",
     "ClashByProject",
     "ClashHealthPayload",
     "CriticalTaskItem",
+    "CurrencySubtotal",
     "HSEByProject",
     "HSEScorecardPayload",
     "LastBOQRef",

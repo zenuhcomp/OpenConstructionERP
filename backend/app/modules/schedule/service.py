@@ -2114,11 +2114,21 @@ class ScheduleService:
         from sqlalchemy import select as _select
 
         from app.modules.boq.models import Position
+        from app.modules.projects.models import Project
         from app.modules.schedule.models import Activity, Schedule
         from app.modules.schedule.schemas import (
             LaborCostByPhaseResponse,
             LaborCostByPhaseRow,
         )
+
+        # Currency bug fix: the rolled-up labour/total costs are all scoped to
+        # this one project, so they share a single ISO currency. Read the
+        # project's real currency instead of hardcoding "EUR". Fall back to
+        # blank ("unknown") — NEVER to "EUR" — when the project has no currency.
+        cur_result = await self.session.execute(
+            _select(Project.currency).where(Project.id == project_id)
+        )
+        currency = cur_result.scalar_one_or_none() or ""
 
         stmt = (
             _select(Activity)
@@ -2129,7 +2139,8 @@ class ScheduleService:
         activities: list[Activity] = list(result.scalars().all())
 
         if not activities:
-            return LaborCostByPhaseResponse()
+            # Still report the project's real currency on the empty result.
+            return LaborCostByPhaseResponse(currency=currency)
 
         # Gather linked BOQ position ids for aggregate lookup
         all_boq_ids: list[uuid.UUID] = []
@@ -2212,4 +2223,6 @@ class ScheduleService:
             )
         ]
 
-        return LaborCostByPhaseResponse(phases=rows)
+        # Currency bug fix: label the response with the project's real
+        # currency (loaded above) instead of the previous hardcoded "EUR".
+        return LaborCostByPhaseResponse(phases=rows, currency=currency)

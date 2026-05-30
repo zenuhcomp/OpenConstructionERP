@@ -770,4 +770,9 @@ class LaborCostByPhaseResponse(BaseModel):
     """Container for the labour-cost-by-phase stacked area chart."""
 
     phases: list[LaborCostByPhaseRow] = Field(default_factory=list)
-    currency: str = "EUR"
+    # Currency bug fix: default to blank ("unknown"), NOT a hardcoded "EUR".
+    # All labour/total costs here are project-scoped so they share one ISO
+    # currency; the service populates this with the project's real currency
+    # (Project.currency). A blank fallback signals "unknown" rather than
+    # silently mislabelling BRL/GBP/USD amounts as EUR.
+    currency: str = ""

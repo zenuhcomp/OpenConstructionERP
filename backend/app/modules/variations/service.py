@@ -11,7 +11,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from datetime import date as dt_date
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Iterable
 
 from fastapi import HTTPException
@@ -195,6 +195,149 @@ def _to_decimal(value: Any) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return Decimal("0")
+
+
+def _project_fx_map(project: Any) -> dict[str, Decimal]:
+    """Project ``Project.fx_rates`` into ``{CODE: rate}`` as exact Decimals.
+
+    Mirrors ``changeorders/repository.py::_project_fx_map`` and
+    ``boq/service.py::_project_fx_map`` (shape
+    ``[{"code": "USD", "rate": "1.08", "label": "US Dollar"}]`` where
+    ``rate`` is BASE units per 1 unit of the foreign currency). Defensive
+    against missing attribute / malformed entries -- a bad row is skipped.
+    """
+    if project is None:
+        return {}
+    raw = getattr(project, "fx_rates", None)
+    if not isinstance(raw, list):
+        return {}
+    out: dict[str, Decimal] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        code = str(entry.get("code") or "").strip().upper()
+        rate = _to_decimal(entry.get("rate"))
+        if code and rate > 0:
+            out[code] = rate
+    return out
+
+
+def _convert_money_buckets(
+    by_currency: dict[str, Decimal],
+    base_code: str,
+    fx_map: dict[str, Decimal],
+) -> tuple[Decimal, dict[str, Decimal]]:
+    """Fold per-currency money buckets into a single base-currency total.
+
+    Currency bug fix: blending raw amounts of different ISO currencies is
+    meaningless, so each bucket is converted to the project BASE currency
+    via ``fx_map`` before summing. A bucket that is already in the base
+    currency (or carries a blank currency -- treated as "already base")
+    passes through unchanged. A FOREIGN bucket with NO FX rate is NEVER
+    folded into the base total; it is returned separately under
+    ``unconverted`` so the figure stays honest rather than silently wrong.
+
+    Returns ``(base_total, unconverted_by_currency)``.
+    """
+    base = (base_code or "").strip().upper()
+    total = Decimal("0")
+    unconverted: dict[str, Decimal] = {}
+    for raw_code, amount in by_currency.items():
+        code = (raw_code or "").strip().upper()
+        if not code or code == base:
+            # Already in the project base currency (or no currency stamp).
+            total += amount
+            continue
+        fx = fx_map.get(code)
+        if fx is not None:
+            total += amount * fx
+        else:
+            # Foreign currency with no FX rate -- keep it visible per
+            # currency instead of mis-stamping it as base currency.
+            unconverted[code] = unconverted.get(code, Decimal("0")) + amount
+    return total, unconverted
+
+
+def _money_str_map(by_currency: dict[str, Decimal]) -> dict[str, str]:
+    """Render a ``{code: Decimal}`` money map as ``{code: decimal-string}``.
+
+    Quantises to 2dp and uses the same plain-decimal string wire format
+    as the scalar money fields so the per-currency breakdown is exact and
+    JS-safe. Blank-currency keys are normalised to ``""``.
+    """
+    out: dict[str, str] = {}
+    for raw_code, amount in sorted(by_currency.items()):
+        code = (raw_code or "").strip().upper()
+        out[code] = format(_to_decimal(amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+    return out
+
+
+async def _load_project_currency_meta(session: AsyncSession, project_id: uuid.UUID) -> Any:
+    """Load the owning ``Project`` (currency + fx_rates) for FX conversion.
+
+    Currency bug fix support: the dashboard money roll-ups must be
+    labelled and FX-converted to the PROJECT currency, never a row
+    currency. Imported lazily to avoid a hard import cycle and so the
+    variations module stays decoupled from projects at import time.
+    Returns ``None`` defensively if the project can't be loaded.
+    """
+    try:
+        from sqlalchemy import select
+
+        from app.modules.projects.models import Project
+
+        result = await session.execute(select(Project).where(Project.id == project_id))
+        return result.scalar_one_or_none()
+    except Exception:  # noqa: BLE001 -- dashboard must never 500 on FX metadata
+        return None
+
+
+async def _safe_by_currency(repo: Any, method_name: str, project_id: uuid.UUID) -> dict[str, Decimal]:
+    """Call a repo's ``*_by_currency`` helper if present, else return ``{}``.
+
+    Mirrors the ``hasattr(... "pending_count")`` guard already used in
+    ``get_dashboard`` so in-memory test stubs (which don't implement the
+    new per-currency aggregations) keep working without a hard failure.
+    """
+    method = getattr(repo, method_name, None)
+    if method is None:
+        return {}
+    result = await method(project_id)
+    return result if isinstance(result, dict) else {}
+
+
+async def _load_project_currency_meta(session: AsyncSession, project_id: uuid.UUID) -> Any:
+    """Load the owning ``Project`` (currency + fx_rates) for FX conversion.
+
+    Currency bug fix support: the dashboard money roll-ups must be
+    labelled and FX-converted to the PROJECT currency, never a row
+    currency. Imported lazily to avoid a hard import cycle and so the
+    variations module stays decoupled from projects at import time.
+    Returns ``None`` defensively if the project can't be loaded.
+    """
+    try:
+        from sqlalchemy import select
+
+        from app.modules.projects.models import Project
+
+        result = await session.execute(select(Project).where(Project.id == project_id))
+        return result.scalar_one_or_none()
+    except Exception:  # noqa: BLE001 -- dashboard must never 500 on FX metadata
+        return None
+
+
+async def _safe_by_currency(repo: Any, method_name: str, project_id: uuid.UUID) -> dict[str, Decimal]:
+    """Call a repo's ``*_by_currency`` helper if present, else return ``{}``.
+
+    Mirrors the ``hasattr(... "pending_count")`` guard already used in
+    ``get_dashboard`` so in-memory test stubs (which don't implement the
+    new per-currency aggregations) keep working without a hard failure.
+    """
+    method = getattr(repo, method_name, None)
+    if method is None:
+        return {}
+    result = await method(project_id)
+    return result if isinstance(result, dict) else {}
 
 
 def compute_cost_impact_total(impacts: Iterable[Any]) -> Decimal:
@@ -2246,6 +2389,33 @@ class VariationsService:
         dw_signed = sum(c for s, c in dw_counts.items() if s in {"signed", "billed"})
         dw_value = await self.daywork_repo.signed_value(project_id)
 
+        # Currency bug fix: ``cost_total`` / ``dw_value`` above are scalar
+        # SUMs that blend VOs / daywork sheets of different ISO currencies
+        # into one number. Re-derive them per-currency and FX-convert to
+        # the project BASE currency so the scalar totals are honest rather
+        # than a meaningless mix. Falls back gracefully when the repos
+        # don't expose the by-currency helpers (e.g. in-memory test stubs).
+        project = await _load_project_currency_meta(self.session, project_id)
+        base_code = ((getattr(project, "currency", "") if project is not None else "") or "").strip().upper()
+        fx_map = _project_fx_map(project)
+        cost_by_cur = await _safe_by_currency(self.vo_repo, "cost_impact_by_currency", project_id)
+        dw_by_cur = await _safe_by_currency(self.daywork_repo, "signed_value_by_currency", project_id)  # noqa: E501
+        # Only override the legacy scalar totals when the by-currency
+        # breakdown is actually available (production repos). If a repo
+        # doesn't expose the helper (in-memory test stubs return ``{}``),
+        # keep the original ``cost_impact_sum`` / ``signed_value`` scalar
+        # so we never replace a real figure with a spurious 0.
+        cost_unconverted: dict[str, Decimal] = {}
+        dw_unconverted: dict[str, Decimal] = {}
+        if cost_by_cur:
+            cost_total, cost_unconverted = _convert_money_buckets(cost_by_cur, base_code, fx_map)
+        if dw_by_cur:
+            dw_value, dw_unconverted = _convert_money_buckets(dw_by_cur, base_code, fx_map)
+        # ``multi_currency`` = more than one DISTINCT non-blank currency
+        # seen across either money stream.
+        distinct_codes = {c for c in (*cost_by_cur.keys(), *dw_by_cur.keys()) if c}
+        multi_currency = len(distinct_codes) > 1
+
         # R5 audit: COUNT-only — previous code materialised the full claim
         # rows just to read ``len(...)``. Fallback to ``len(pending_claims)``
         # so the unit-test in-memory stubs (which don't define
@@ -2261,7 +2431,13 @@ class VariationsService:
 
         fa = await self.final_account_repo.for_project(project_id)
         fa_status = fa.status if fa is not None else "none"
-        currency = (
+        # Currency bug fix: the dashboard currency is now the project BASE
+        # currency (the one the FX-converted scalar totals are expressed
+        # in), NOT ``first_currency`` (the earliest-created row's currency,
+        # which silently mis-labelled a blended sum). Fall back to the
+        # earliest VO / daywork / final-account currency only when the
+        # project carries no currency of its own.
+        currency = base_code or (
             await self.vo_repo.first_currency(project_id)
             or await self.daywork_repo.first_currency(project_id)
             or (fa.currency if fa else "")
@@ -2287,4 +2463,10 @@ class VariationsService:
             "eot_claims_open": eot_open,
             "final_account_status": fa_status,
             "currency": currency,
+            # Additive multi-currency disclosure (optional response fields).
+            "cost_impact_by_currency": _money_str_map(cost_by_cur),
+            "cost_impact_unconverted_by_currency": _money_str_map(cost_unconverted),
+            "daywork_value_by_currency": _money_str_map(dw_by_cur),
+            "daywork_value_unconverted_by_currency": _money_str_map(dw_unconverted),
+            "multi_currency": multi_currency,
         }

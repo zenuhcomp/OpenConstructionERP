@@ -767,6 +767,29 @@ class VariationDashboardResponse(BaseModel):
     final_account_status: str = "none"
     currency: str = ""
 
+    # ── Multi-currency disclosure (additive, optional) ────────────────
+    #
+    # Currency bug fix: ``cost_impact_total`` / ``daywork_value_signed``
+    # are scalar SUMs that historically blended VOs / daywork sheets of
+    # different ISO currencies into one number labelled with whichever
+    # currency was created first. These optional fields make the dashboard
+    # honest WITHOUT changing the existing scalar fields (the frontend
+    # still reads them). ``currency`` is now the project BASE currency
+    # (not the earliest row's), and the scalar totals are FX-converted to
+    # it via the project's ``fx_rates`` when a rate exists.
+    #
+    # ``*_by_currency`` maps hold the raw per-currency breakdown (ISO code
+    # -> money string). ``*_unconverted_by_currency`` maps hold foreign
+    # amounts that have NO FX rate, so the UI can show "+ 5,000.00 USD (no
+    # rate)" alongside -- never inside -- the base total. ``multi_currency``
+    # flags that more than one currency is present so the UI can warn the
+    # scalar total is a converted figure.
+    cost_impact_by_currency: dict[str, str] = Field(default_factory=dict)
+    cost_impact_unconverted_by_currency: dict[str, str] = Field(default_factory=dict)
+    daywork_value_by_currency: dict[str, str] = Field(default_factory=dict)
+    daywork_value_unconverted_by_currency: dict[str, str] = Field(default_factory=dict)
+    multi_currency: bool = False
+
     @field_serializer("cost_impact_total", "daywork_value_signed", when_used="json")
     @classmethod
     def _ser_money(cls, v: Decimal) -> str:

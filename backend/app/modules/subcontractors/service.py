@@ -56,6 +56,7 @@ from app.modules.subcontractors.schemas import (
     AgreementUpdate,
     CertificateCreate,
     CertificateUpdate,
+    CurrencyAmount,
     ExpiryAlert,
     PaymentApplicationCreate,
     PaymentApplicationUpdate,
@@ -1352,16 +1353,42 @@ class SubcontractorService:
                         "finance_approved",
                     )
                 )
+        # Money correctness: each SubcontractAgreement carries its OWN
+        # currency, so retention balances must be grouped by currency rather
+        # than blended into one scalar. ``pending_retention`` is kept for
+        # back-compat (only meaningful when all agreements share a currency),
+        # and ``retention_by_currency`` carries the per-currency breakdown.
+        # A blank/unknown currency is bucketed under "" — never silently
+        # treated as a hardcoded "EUR" default.
+        agreement_currency: dict[uuid.UUID, str] = {a.id: (a.currency or "") for a in agreements}
+        retention_by_currency: dict[str, Decimal] = {}
+
+        def _add_retention(currency: str, value: Decimal) -> None:
+            retention_by_currency[currency] = retention_by_currency.get(currency, Decimal("0")) + value
+
         balance_batched = getattr(self.retention, "balance_for_agreements", None)
         if balance_batched is not None:
             balances = await balance_batched(agreement_ids)
             pending_retention = Decimal("0")
-            for accrued, released in balances.values():
-                pending_retention += Decimal(accrued) - Decimal(released)
+            for ag_id, (accrued, released) in balances.items():
+                bal = Decimal(accrued) - Decimal(released)
+                pending_retention += bal
+                _add_retention(agreement_currency.get(ag_id, ""), bal)
         else:
             pending_retention = Decimal("0")
             for ag in agreements:
-                pending_retention += await self.retention_balance(ag.id)
+                bal = await self.retention_balance(ag.id)
+                pending_retention += bal
+                _add_retention(ag.currency or "", bal)
+
+        # Sort the breakdown deterministically (by currency code) so the
+        # response is stable across calls. ``mixed_currency`` flags that the
+        # scalar ``pending_retention`` blends >1 distinct currency and so
+        # must not be presented as a meaningful total.
+        retention_breakdown = [
+            CurrencyAmount(currency=cur, amount=amt) for cur, amt in sorted(retention_by_currency.items())
+        ]
+        mixed_currency = len(retention_by_currency) > 1
 
         ref = today or date.today()
         certs = await self.certs.list_by_subcontractor(sub_id)
@@ -1381,6 +1408,8 @@ class SubcontractorService:
             active_agreements=active_agreements,
             open_payment_applications=open_payments,
             pending_retention=pending_retention,
+            pending_retention_by_currency=retention_breakdown,
+            mixed_currency=mixed_currency,
             expired_certificates=expired,
             expiring_soon_certificates=expiring_soon,
             blocked=block.blocked,

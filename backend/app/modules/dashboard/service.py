@@ -860,8 +860,15 @@ async def compute_change_orders(
             "open_count": 0,
             "total_impact": "0.00",
             "currency": fallback_currency,
+            "by_currency": [],
+            "multi_currency": False,
             "top_pending": [],
         }
+
+    # Each change-order row may carry its own currency; fall back to the
+    # owning project's real currency (never a hardcoded "EUR") when the row
+    # didn't stamp one.
+    project_currency_by_id = {p.id: getattr(p, "currency", "") or "" for p in projects}
 
     stmt = select(
         ChangeOrder.id,
@@ -877,15 +884,39 @@ async def compute_change_orders(
     closed_statuses = {"approved", "rejected", "closed"}
     open_rows = [r for r in rows if r[4] not in closed_statuses]
 
+    # Money bug fix: ChangeOrder.cost_impact rows can be in different ISO
+    # currencies (BRL, EUR, USD ...). There is no cross-project FX table
+    # here, so blending them into one ``total_impact`` scalar and stamping
+    # it with projects[0].currency is financially meaningless. We keep the
+    # legacy ``total_impact`` scalar for back-compat (flagged by
+    # ``multi_currency`` so the UI knows not to render it as a headline)
+    # and add an FX-correct per-currency breakdown — same shape as
+    # ``compute_boq_summary``.
     total_impact = Decimal("0")
+    impact_by_currency: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
     for r in open_rows:
-        total_impact += _to_decimal(r[5])
+        impact = _to_decimal(r[5])
+        total_impact += impact
+        # Use the row's own currency, else the project's real currency.
+        row_currency = r[6] or project_currency_by_id.get(r[1], "") or fallback_currency
+        impact_by_currency[row_currency] += impact
+
+    by_currency = [
+        {"currency": cur, "total_impact": _money(total)}
+        for cur, total in sorted(impact_by_currency.items())
+    ]
+    multi_currency = len(impact_by_currency) > 1
 
     top_pending = open_rows[:3]
     return {
         "open_count": len(open_rows),
+        # Legacy flat scalar kept for backward compatibility. When
+        # ``multi_currency`` is true it mixes ISO currencies and must NOT
+        # be rendered as a single headline figure — use ``by_currency``.
         "total_impact": _money(total_impact),
         "currency": fallback_currency,
+        "by_currency": by_currency,
+        "multi_currency": multi_currency,
         "top_pending": [
             {
                 "id": str(r[0]),
@@ -895,7 +926,9 @@ async def compute_change_orders(
                 "title": r[3],
                 "status": r[4],
                 "cost_impact": _money(_to_decimal(r[5])),
-                "currency": r[6] or fallback_currency,
+                # Per-row currency, real project currency, or last-resort
+                # fallback — never a hardcoded "EUR".
+                "currency": r[6] or project_currency_by_id.get(r[1], "") or fallback_currency,
             }
             for r in top_pending
         ],

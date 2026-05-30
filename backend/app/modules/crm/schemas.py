@@ -382,6 +382,21 @@ class ActivityResponse(BaseModel):
 # ── Forecast ──────────────────────────────────────────────────────────────
 
 
+class CurrencyTotal(BaseModel):
+    """A money subtotal for one ISO currency.
+
+    Currency bug fix: pipeline / forecast / dashboard scalars used to blend
+    ``estimated_value`` across deals of different ISO currencies into a single
+    meaningless number. This breakdown groups money by each deal's own
+    currency so the UI never reads a blended total as if it were one currency.
+    An empty ``currency`` means the deal carries no ISO code yet (never
+    hardcoded to "EUR").
+    """
+
+    currency: str = ""
+    total: Decimal = Decimal("0")
+
+
 class ForecastResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -395,6 +410,13 @@ class ForecastResponse(BaseModel):
     computed_at: str | None
     created_at: datetime
     updated_at: datetime
+    # Additive, non-breaking. Currency bug fix: pipeline_value / weighted_value
+    # blend ISO currencies across the period's deals. by_currency carries the
+    # per-currency pipeline truth; mixed_currency warns the scalars are blended.
+    # Defaults keep model_validate() over the Forecast ORM row working unchanged
+    # (the persisted snapshot has no per-currency column yet).
+    by_currency: list[CurrencyTotal] = Field(default_factory=list)
+    mixed_currency: bool = False
 
 
 # ── Aggregates / dashboard ───────────────────────────────────────────────
@@ -406,6 +428,13 @@ class PipelineMetricsResponse(BaseModel):
     total_value: Decimal = Decimal("0")
     by_stage: dict[str, dict[str, Any]] = Field(default_factory=dict)
     win_rate_30d: Decimal = Decimal("0")
+    # Additive, non-breaking. Currency bug fix: total_value / weighted_value
+    # blend ISO currencies across open deals. by_currency / weighted_by_currency
+    # carry the per-currency truth; mixed_currency warns the UI the scalars
+    # above are not a single currency.
+    by_currency: list[CurrencyTotal] = Field(default_factory=list)
+    weighted_by_currency: list[CurrencyTotal] = Field(default_factory=list)
+    mixed_currency: bool = False
 
 
 class KanbanColumnResponse(BaseModel):
@@ -432,6 +461,12 @@ class WinLossAnalyticsResponse(BaseModel):
     lost_reasons_breakdown: dict[str, int] = Field(default_factory=dict)
     won_value: Decimal = Decimal("0")
     lost_value: Decimal = Decimal("0")
+    # Additive, non-breaking. Currency bug fix: won_value / lost_value blend
+    # ISO currencies across closed deals. These breakdowns carry the
+    # per-currency truth; mixed_currency warns the scalars above are blended.
+    won_value_by_currency: list[CurrencyTotal] = Field(default_factory=list)
+    lost_value_by_currency: list[CurrencyTotal] = Field(default_factory=list)
+    mixed_currency: bool = False
 
 
 class CrmDashboardResponse(BaseModel):
@@ -442,6 +477,12 @@ class CrmDashboardResponse(BaseModel):
     activities_due_soon: int = 0
     win_rate_30d: Decimal = Decimal("0")
     by_stage: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # Additive, non-breaking. Currency bug fix: weighted_value / pipeline_value
+    # blend ISO currencies. by_currency / weighted_by_currency carry the
+    # per-currency truth; mixed_currency warns the scalars above are blended.
+    by_currency: list[CurrencyTotal] = Field(default_factory=list)
+    weighted_by_currency: list[CurrencyTotal] = Field(default_factory=list)
+    mixed_currency: bool = False
 
 
 class StageHistoryResponse(BaseModel):

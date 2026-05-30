@@ -836,11 +836,25 @@ class TenderingService:
         # reference BOQ quantities and emits raw_total / leveled_total numbers
         # with no per-cell currency tag — so blending bids quoted in different
         # currencies would silently sum euros with dollars. Scope leveling to
-        # the package currency (mirrors compare_bids' ``_same_currency`` and
-        # bid_management.leveling_matrix). Bids quoted in another currency are
-        # excluded and their count is surfaced so the user can re-quote / FX
-        # convert before trusting the leveled totals.
-        package_currency = (package.currency or "").strip().upper()
+        # the package's reporting currency (mirrors compare_bids'
+        # ``_same_currency`` and bid_management.leveling_matrix). Bids quoted in
+        # another currency are excluded and their count is surfaced so the user
+        # can re-quote / FX convert before trusting the leveled totals.
+        #
+        # Currency bug fix: ``TenderPackage`` has NO ``currency`` column (only
+        # each ``TenderBid`` carries one), so the previous
+        # ``package.currency`` read raised AttributeError -> HTTP 500 on both
+        # leveling endpoints. The package's reporting currency is the project
+        # currency, so derive it from the project exactly as ``apply_winner``
+        # already does. Fall back to "" (unknown) — NEVER hardcode "EUR" — so
+        # that when the project currency is unknown we degrade safely (the
+        # ``_same_currency`` guard then keeps every bid rather than blending a
+        # provably-foreign one). ``getattr`` is used defensively in case the
+        # project row is missing or lacks the attribute.
+        from app.modules.projects.repository import ProjectRepository
+
+        project = await ProjectRepository(self.session).get_by_id(package.project_id)
+        package_currency = (getattr(project, "currency", "") or "").strip().upper() if project is not None else ""
 
         def _same_currency(bid: TenderBid) -> bool:
             bc = (bid.currency or "").strip().upper()

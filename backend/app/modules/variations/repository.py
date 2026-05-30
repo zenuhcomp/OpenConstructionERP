@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, TypeVar
 
 from sqlalchemy import func, select, update
@@ -24,6 +24,51 @@ from app.modules.variations.models import (
 )
 
 T = TypeVar("T")
+
+
+def _to_decimal(value: object) -> Decimal:
+    """Coerce a stored money value (Decimal / str / None) to exact Decimal.
+
+    Routes via ``str()`` so a stray legacy float doesn't poison the
+    rollup with 0.1 -> 0.10000000000000000555... imprecision. Bad input
+    silently degrades to ``Decimal('0')`` so a single malformed row
+    doesn't blow up a project-wide dashboard endpoint. Mirrors
+    ``changeorders/repository.py::_to_decimal``.
+    """
+    if value is None:
+        return Decimal("0")
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal("0")
+
+
+def _project_fx_map(project: object | None) -> dict[str, Decimal]:
+    """Project ``Project.fx_rates`` into ``{CODE: rate}`` as exact Decimals.
+
+    Mirrors ``changeorders/repository.py::_project_fx_map`` and
+    ``boq/service.py::_project_fx_map`` (shape
+    ``[{"code": "USD", "rate": "1.08", "label": "US Dollar"}]`` where
+    ``rate`` is BASE units per 1 unit of the foreign currency). Defensive
+    against missing attribute / malformed entries -- a bad row is skipped
+    rather than blowing up the dashboard endpoint.
+    """
+    if project is None:
+        return {}
+    raw = getattr(project, "fx_rates", None)
+    if not isinstance(raw, list):
+        return {}
+    out: dict[str, Decimal] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        code = str(entry.get("code") or "").strip().upper()
+        rate = _to_decimal(entry.get("rate"))
+        if code and rate > 0:
+            out[code] = rate
+    return out
 
 
 class _BaseRepo:
@@ -184,6 +229,31 @@ class VariationOrderRepository(_BaseRepo):
         val = (await self.session.execute(stmt)).scalar_one()
         return Decimal(str(val or 0))
 
+    async def cost_impact_by_currency(self, project_id: uuid.UUID) -> dict[str, Decimal]:
+        """``{currency_code: SUM(final_cost_impact)}`` over non-voided VOs.
+
+        Currency bug fix: the scalar ``cost_impact_sum`` blends VOs of
+        different ISO currencies into one number, which is meaningless
+        across currencies. Grouping by the per-row ``currency`` keeps each
+        currency's total separate so the dashboard can FX-convert to the
+        project base currency (when a rate exists) or surface the buckets
+        honestly. Rows with a blank currency are keyed under ``""`` (the
+        caller treats blank as "already in the project base currency").
+        """
+        stmt = (
+            select(
+                VariationOrder.currency,
+                func.coalesce(func.sum(VariationOrder.final_cost_impact), 0),
+            )
+            .where(
+                VariationOrder.project_id == project_id,
+                VariationOrder.status != "voided",
+            )
+            .group_by(VariationOrder.currency)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {str(code or ""): _to_decimal(total) for code, total in rows}
+
     async def schedule_days_sum(self, project_id: uuid.UUID) -> int:
         """SQL ``SUM(final_schedule_days)`` over non-voided VOs (no N+1)."""
         stmt = select(func.coalesce(func.sum(VariationOrder.final_schedule_days), 0)).where(
@@ -241,6 +311,30 @@ class DayworkSheetRepository(_BaseRepo):
         )
         val = (await self.session.execute(stmt)).scalar_one()
         return Decimal(str(val or 0))
+
+    async def signed_value_by_currency(self, project_id: uuid.UUID) -> dict[str, Decimal]:
+        """``{currency_code: SUM(total_amount)}`` over signed/billed sheets.
+
+        Currency bug fix: the scalar ``signed_value`` blends daywork
+        sheets of different ISO currencies into one number. Grouping by
+        the per-row ``currency`` keeps each currency separate so the
+        dashboard can FX-convert to the project base currency (when a rate
+        exists) or surface the buckets honestly. Blank currency keys under
+        ``""``.
+        """
+        stmt = (
+            select(
+                DayworkSheet.currency,
+                func.coalesce(func.sum(DayworkSheet.total_amount), 0),
+            )
+            .where(
+                DayworkSheet.project_id == project_id,
+                DayworkSheet.status.in_(["signed", "billed"]),
+            )
+            .group_by(DayworkSheet.currency)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {str(code or ""): _to_decimal(total) for code, total in rows}
 
     async def first_currency(self, project_id: uuid.UUID) -> str:
         """First non-empty daywork currency for the project."""

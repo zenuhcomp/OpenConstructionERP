@@ -692,6 +692,17 @@ class PaymentBlockResult(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class CurrencyAmount(BaseModel):
+    """One ISO-currency bucket of a money rollup.
+
+    Used to expose per-currency breakdowns of amounts that would otherwise
+    be blended into a single, meaningless cross-currency scalar.
+    """
+
+    currency: str = ""
+    amount: Decimal = Decimal("0")
+
+
 class SubcontractorDashboard(BaseModel):
     """Summary statistics for a subcontractor."""
 
@@ -701,7 +712,18 @@ class SubcontractorDashboard(BaseModel):
     rating_score: Decimal = Decimal("0")
     active_agreements: int = 0
     open_payment_applications: int = 0
+    # ── Money-correctness (additive, non-breaking) ──────────────────────
+    # ``pending_retention`` is retained for back-compat but is only a
+    # meaningful total when every agreement shares one currency. A
+    # subcontractor may hold agreements in different currencies (each
+    # SubcontractAgreement carries its own ``currency``), so summing their
+    # retention balances into one scalar blends ISO currencies. Consumers
+    # should read ``pending_retention_by_currency`` (one bucket per
+    # currency) and treat ``pending_retention`` as a blended figure only
+    # when ``mixed_currency`` is False.
     pending_retention: Decimal = Decimal("0")
+    pending_retention_by_currency: list[CurrencyAmount] = Field(default_factory=list)
+    mixed_currency: bool = False
     expired_certificates: int = 0
     expiring_soon_certificates: int = 0
     blocked: bool = False

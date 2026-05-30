@@ -228,6 +228,54 @@ def _opp_weighted(opp: Any) -> Decimal:
     return Decimal(raw)
 
 
+def _opp_currency(opp: Any) -> str:
+    """Return an opportunity's own ISO currency, or "" when unset.
+
+    Currency bug fix: every Opportunity carries its own ``currency`` column
+    (it is copied from the deal/project at create time). We use that ISO code
+    verbatim and NEVER fall back to a hardcoded "EUR" — a blank currency means
+    "unknown" and is grouped under the empty-string key so the UI can flag it
+    rather than silently treating it as euros.
+    """
+    return (getattr(opp, "currency", "") or "").strip()
+
+
+def _group_money_by_currency(
+    opportunities: Iterable[Any],
+    *,
+    weighted: bool = False,
+) -> list[dict[str, Any]]:
+    """Group opportunity money per ISO currency (no FX, plain collections).
+
+    Currency bug fix: the scalar ``total_value`` / ``weighted_value`` /
+    forecast totals sum ``estimated_value`` across deals regardless of each
+    deal's currency, blending e.g. BRL + RUB + EUR into one meaningless
+    number. This helper keeps a per-currency subtotal instead — there is no
+    cross-currency rate table here, so summing into a single base currency
+    would be financially wrong. Mirrors the group-by-currency shape used in
+    ``dashboard/service.py`` and ``bi_dashboards/kpis.py``.
+
+    Returns a list of ``{"currency": <ISO>, "total": Decimal}`` sorted by
+    currency code; the empty-string currency (unknown) sorts first.
+    """
+    buckets: dict[str, Decimal] = {}
+    for o in opportunities:
+        ccy = _opp_currency(o)
+        amount = _opp_weighted(o) if weighted else _opp_value(o)
+        buckets[ccy] = buckets.get(ccy, Decimal(0)) + amount
+    return [{"currency": ccy, "total": _q2(total)} for ccy, total in sorted(buckets.items())]
+
+
+def _is_mixed_currency(by_currency: list[dict[str, Any]]) -> bool:
+    """True when more than one distinct *known* (non-blank) currency is present.
+
+    Currency bug fix: when this is True the scalar money fields blend
+    currencies and must NOT be shown as a single headline figure — the UI
+    should read ``by_currency`` and warn the user.
+    """
+    return len({row["currency"] for row in by_currency if row["currency"]}) > 1
+
+
 def compute_pipeline_metrics(opportunities: Iterable[Any]) -> dict[str, Any]:
     """Pure aggregation over opportunities — pipeline counts + weighted value.
 
@@ -238,13 +286,26 @@ def compute_pipeline_metrics(opportunities: Iterable[Any]) -> dict[str, Any]:
           "total_value": Decimal,
           "by_stage": { stage_id_str: {"count": int, "weighted": Decimal, "total": Decimal} },
           "win_rate_30d": Decimal,
+          "by_currency": [ {"currency": str, "total": Decimal}, ... ],
+          "weighted_by_currency": [ {"currency": str, "total": Decimal}, ... ],
+          "mixed_currency": bool,
         }
+
+    ``total_value`` / ``weighted_value`` remain unchanged for back-compat, but
+    are only meaningful when ``mixed_currency`` is False. When True they blend
+    ISO currencies and callers must use the ``by_currency`` breakdowns instead.
     """
     opps = list(opportunities)
     open_opps = [o for o in opps if getattr(o, "status", None) == "open"]
 
     total_value = sum((_opp_value(o) for o in open_opps), Decimal(0))
     weighted_value = sum((_opp_weighted(o) for o in open_opps), Decimal(0))
+
+    # Currency bug fix: per-currency subtotals over the same open deals so the
+    # blended scalars above are never the only available figure.
+    by_currency = _group_money_by_currency(open_opps)
+    weighted_by_currency = _group_money_by_currency(open_opps, weighted=True)
+    mixed_currency = _is_mixed_currency(by_currency)
 
     by_stage: dict[str, dict[str, Any]] = {}
     for o in open_opps:
@@ -293,6 +354,11 @@ def compute_pipeline_metrics(opportunities: Iterable[Any]) -> dict[str, Any]:
             for k, v in by_stage.items()
         },
         "win_rate_30d": win_rate_30d,
+        # Currency bug fix: per-currency truth so dashboards/metrics never
+        # render the blended scalar as one currency. See _group_money_by_currency.
+        "by_currency": by_currency,
+        "weighted_by_currency": weighted_by_currency,
+        "mixed_currency": mixed_currency,
         "_now": now,
     }
 
@@ -337,6 +403,11 @@ def compute_forecast(opportunities: Iterable[Any], period: str) -> dict[str, Any
     weighted_value = Decimal(0)
     won_value = Decimal(0)
     committed_value = Decimal(0)
+    # Currency bug fix: accumulate the forecast pipeline value per ISO
+    # currency (no FX, no blending) so the scalar totals below are never the
+    # only figure available to the caller. Keyed by the deal's own currency;
+    # blank currency groups under "" (never assumed to be EUR).
+    pipeline_by_currency: dict[str, Decimal] = {}
 
     for o in opportunities:
         close_date = getattr(o, "expected_close_date", None)
@@ -356,6 +427,16 @@ def compute_forecast(opportunities: Iterable[Any], period: str) -> dict[str, Any
             weighted_value += weighted
             if prob >= 80:
                 committed_value += value
+        else:
+            # abandoned / lost deals do not contribute to pipeline value.
+            continue
+        ccy = _opp_currency(o)
+        pipeline_by_currency[ccy] = pipeline_by_currency.get(ccy, Decimal(0)) + value
+
+    by_currency = [
+        {"currency": ccy, "total": _q2(total)} for ccy, total in sorted(pipeline_by_currency.items())
+    ]
+    mixed_currency = _is_mixed_currency(by_currency)
 
     return {
         "period": period,
@@ -364,6 +445,10 @@ def compute_forecast(opportunities: Iterable[Any], period: str) -> dict[str, Any
         "won_value": _q2(won_value),
         "committed_value": _q2(committed_value),
         "computed_at": datetime.now(UTC).isoformat(),
+        # Currency bug fix: per-currency pipeline subtotals + a flag warning
+        # the scalar totals above blend ISO currencies when True.
+        "by_currency": by_currency,
+        "mixed_currency": mixed_currency,
     }
 
 
