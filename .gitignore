@@ -217,3 +217,12 @@ backend/*.err
 
 # Deep-QA sweep working artifacts (progress + per-module findings; durable on disk, not committed)
 qa-sweep/
+
+# Scratch/debug artifacts (never commit)
+__diag.txt
+_ddltest.py
+_verify_out.txt
+/zzqacopy.txt
+/ddl_echo.txt
+/qa_verify_out.txt
+/__qa_snippet.txt
