@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 50" width="280" height="50" role="img" aria-label="New Zealand Construction">
-  <title>New Zealand Construction</title>
-  <desc>New Zealand Construction wordmark in black with silver-fern red accent.</desc>
-  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="22" letter-spacing="-0.3">
-    <text x="6" y="32" fill="#000000">New Zealand Construction</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 56" width="300" height="56" role="img" aria-label="New Zealand Construction Pack">
+  <title>New Zealand Construction Pack</title>
+  <desc>New Zealand Construction Pack — all-black roundel with the red-and-white Southern Cross, beside the wordmark.</desc>
+  <defs>
+    <polygon id="nz-w" points="0,-3.2 0.718,-0.989 3.043,-0.989 1.162,0.378 1.881,2.589 0,1.222 -1.881,2.589 -1.162,0.378 -3.043,-0.989 -0.718,-0.989" fill="#FFFFFF"/>
+    <polygon id="nz-r" points="0,-2.2 0.494,-0.68 2.092,-0.68 0.799,0.26 1.293,1.78 0,0.84 -1.293,1.78 -0.799,0.26 -2.092,-0.68 -0.494,-0.68" fill="#C8102E"/>
+  </defs>
+  <!-- Southern Cross roundel -->
+  <rect x="2" y="8" width="44" height="44" rx="9" fill="#000000"/>
+  <use href="#nz-w" x="26" y="16"/><use href="#nz-r" x="26" y="16"/>
+  <use href="#nz-w" x="35" y="29"/><use href="#nz-r" x="35" y="29"/>
+  <use href="#nz-w" x="19" y="31"/><use href="#nz-r" x="19" y="31"/>
+  <use href="#nz-w" x="29" y="43"/><use href="#nz-r" x="29" y="43"/>
+  <!-- Wordmark -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" letter-spacing="-0.3">
+    <text x="58" y="30" font-size="18" font-weight="700" fill="#000000">New Zealand Construction</text>
+    <text x="58" y="46" font-size="10.5" font-weight="600" fill="#5B6573" letter-spacing="1">NZS · CCNZ · GST</text>
   </g>
-  <rect x="252" y="10" width="14" height="14" rx="2" fill="#000000"/>
-  <rect x="256" y="14" width="6" height="6" fill="#C8102E"/>
 </svg>

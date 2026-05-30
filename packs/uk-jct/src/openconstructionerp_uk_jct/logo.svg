@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 50" width="240" height="50" role="img" aria-label="UK Construction Pack">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 236 56" width="236" height="56" role="img" aria-label="UK Construction Pack">
   <title>UK Construction Pack</title>
-  <desc>UK Construction Pack wordmark in Union flag blue with a red accent.</desc>
-  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="22" letter-spacing="-0.3">
-    <text x="6" y="32" fill="#012169">UK Construction</text>
-    <text x="178" y="32" fill="#C8102E">Pack</text>
+  <desc>UK Construction Pack — Union-flag roundel beside the wordmark, with the UK standards line.</desc>
+  <!-- Union-flag roundel -->
+  <clipPath id="ukc"><rect x="2" y="8" width="44" height="44" rx="9"/></clipPath>
+  <g clip-path="url(#ukc)">
+    <rect x="2" y="8" width="44" height="44" fill="#012169"/>
+    <path d="M2,8 L46,52 M46,8 L2,52" stroke="#FFFFFF" stroke-width="7"/>
+    <path d="M2,8 L46,52 M46,8 L2,52" stroke="#C8102E" stroke-width="3.5"/>
+    <path d="M24,8 V52 M2,30 H46" stroke="#FFFFFF" stroke-width="10"/>
+    <path d="M24,8 V52 M2,30 H46" stroke="#C8102E" stroke-width="5.5"/>
   </g>
-  <rect x="220" y="10" width="14" height="14" rx="2" fill="#012169"/>
-  <rect x="224" y="14" width="6" height="6" fill="#C8102E"/>
+  <!-- Wordmark -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" letter-spacing="-0.3">
+    <text x="58" y="30" font-size="18" font-weight="700" fill="#012169">UK Construction</text>
+    <text x="58" y="46" font-size="10.5" font-weight="600" fill="#C8102E" letter-spacing="1">JCT · NRM · SMM7 · CITB</text>
+  </g>
 </svg>
