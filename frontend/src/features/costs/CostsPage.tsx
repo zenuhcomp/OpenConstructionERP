@@ -1861,10 +1861,47 @@ function CreateAssemblyFromCostsModal({
   const fmt = (n: number) =>
     new Intl.NumberFormat(getIntlLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
-  const totalRate = items.reduce((s, i) => s + (i.rate || 0), 0);
+  // MONEY BUG FIX: the old `items.reduce((s,i)=>s+(i.rate||0),0)` blended rates
+  // across distinct ISO currencies (e.g. AED + EUR) into one figure and stored
+  // it under a single assembly currency. Per the "never sum across currencies"
+  // money rule, an assembly must be single-currency. Compute the set of distinct
+  // currencies of the selected items; only when they all agree may we sum and
+  // stamp the assembly with THAT currency (never a hardcoded EUR fallback).
+  // Rates may arrive as Decimal-serialized strings, so coerce with Number().
+  const distinctCurrencies = useMemo(
+    () => Array.from(new Set(items.map((i) => (i.currency || '').trim()).filter(Boolean))),
+    [items],
+  );
+  const hasMixedCurrencies = distinctCurrencies.length > 1;
+  // The single shared item currency (when unambiguous) — preferred over the
+  // project currency so the assembly is stamped with the currency its rates are
+  // actually denominated in. Falls back to projectCurrency only when items carry
+  // no currency at all (still never a hardcoded code).
+  const itemsCurrency = distinctCurrencies.length === 1 ? distinctCurrencies[0] : '';
+  const assemblyCurrency = itemsCurrency || projectCurrency;
+  // Sum only within a single currency. Number() guards against Decimal strings.
+  const totalRate = hasMixedCurrencies
+    ? 0
+    : items.reduce((s, i) => s + (Number(i.rate) || 0), 0);
 
   const handleCreate = useCallback(async () => {
     if (!name.trim()) return;
+    // Guard: refuse to create a blended multi-currency assembly. The button is
+    // also disabled below, but enforce here too so a programmatic call can't
+    // bypass the single-currency invariant.
+    if (hasMixedCurrencies) {
+      addToast({
+        type: 'error',
+        title: t('costs.assembly_mixed_currency_title', { defaultValue: 'Mixed currencies' }),
+        message: t('costs.assembly_mixed_currency_msg', {
+          defaultValue:
+            'Assemblies must be single-currency. The selected cost items span {{count}} currencies ({{list}}). Select items that share one currency.',
+          count: distinctCurrencies.length,
+          list: distinctCurrencies.join(', '),
+        }),
+      });
+      return;
+    }
     setIsCreating(true);
     try {
       const code = `ASM-${Date.now().toString(36).toUpperCase()}`;
@@ -1873,16 +1910,22 @@ function CreateAssemblyFromCostsModal({
         name: name.trim(),
         unit,
         category: 'General',
-        currency: projectCurrency,
+        // MONEY BUG FIX: stamp the assembly with the currency the component
+        // rates are actually denominated in (the items' shared currency), not a
+        // hardcoded EUR — and not blindly projectCurrency, which could differ
+        // from the rates being stored.
+        currency: assemblyCurrency,
       });
 
-      // Add each cost item as a component
+      // Add each cost item as a component. All items share one currency here
+      // (guarded above), so unit_cost is consistent with the assembly currency.
+      // Coerce rate with Number() in case it arrives as a Decimal string.
       for (const item of items) {
         await apiPost(`/v1/assemblies/${assembly.id}/components/`, {
           cost_item_id: item.id,
           description: item.description,
           unit: item.unit,
-          unit_cost: item.rate,
+          unit_cost: Number(item.rate) || 0,
           quantity: 1,
           factor: 1.0,
         });
@@ -1904,7 +1947,7 @@ function CreateAssemblyFromCostsModal({
     } finally {
       setIsCreating(false);
     }
-  }, [name, unit, items, projectCurrency, addToast, t, onSuccess, navigate]);
+  }, [name, unit, items, assemblyCurrency, hasMixedCurrencies, distinctCurrencies, addToast, t, onSuccess, navigate]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in" onClick={onClose}>
@@ -1968,14 +2011,37 @@ function CreateAssemblyFromCostsModal({
               {items.map((item) => (
                 <div key={item.id} className="flex items-center justify-between px-3 py-2 text-xs border-b border-border-light/50 last:border-0">
                   <span className="text-content-primary truncate flex-1 mr-2">{item.description || item.code}</span>
-                  <span className="text-content-secondary shrink-0 tabular-nums">{fmt(item.rate)} / {item.unit}</span>
+                  {/* MONEY BUG FIX: render each rate with its OWN currency code
+                      and coerce the (possibly Decimal-string) rate via Number()
+                      so mixed-currency selections are obvious instead of being
+                      silently presented under one label. */}
+                  <span className="text-content-secondary shrink-0 tabular-nums">
+                    {fmt(Number(item.rate) || 0)}{item.currency ? ` ${item.currency}` : ''} / {item.unit}
+                  </span>
                 </div>
               ))}
             </div>
-            <div className="flex items-center justify-between mt-2 text-xs">
-              <span className="text-content-tertiary">{t('assemblies.total_rate_sum', { defaultValue: 'Total rate (sum of components)' })}</span>
-              <span className="font-semibold text-content-primary tabular-nums">{projectCurrency ? `${fmt(totalRate)} ${projectCurrency}` : fmt(totalRate)}</span>
-            </div>
+            {/* MONEY BUG FIX: when the selection spans more than one currency we
+                cannot show a meaningful blended sum — surface an inline warning
+                and suppress the total instead of mislabeling it. */}
+            {hasMixedCurrencies ? (
+              <div className="mt-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-900/20 dark:text-amber-200">
+                {t('costs.assembly_mixed_currency_warning', {
+                  defaultValue:
+                    'Assemblies must be single-currency. The selected items span {{count}} currencies ({{list}}) — pick items that share one currency to continue.',
+                  count: distinctCurrencies.length,
+                  list: distinctCurrencies.join(', '),
+                })}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between mt-2 text-xs">
+                <span className="text-content-tertiary">{t('assemblies.total_rate_sum', { defaultValue: 'Total rate (sum of components)' })}</span>
+                {/* MONEY BUG FIX: label the sum with the currency the rates are
+                    actually in (assemblyCurrency), not a possibly-mismatched
+                    projectCurrency. */}
+                <span className="font-semibold text-content-primary tabular-nums">{assemblyCurrency ? `${fmt(totalRate)} ${assemblyCurrency}` : fmt(totalRate)}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1986,7 +2052,10 @@ function CreateAssemblyFromCostsModal({
             size="sm"
             onClick={handleCreate}
             loading={isCreating}
-            disabled={!name.trim() || isCreating}
+            // MONEY BUG FIX: block creation while the selection spans multiple
+            // currencies — an assembly cannot be stored under one currency when
+            // its component rates are denominated in several.
+            disabled={!name.trim() || isCreating || hasMixedCurrencies}
           >
             {t('assemblies.create_assembly', { defaultValue: 'Create Assembly' })}
           </Button>

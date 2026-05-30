@@ -49,8 +49,13 @@ interface PurchaseOrder {
   vendor_name: string;
   issue_date: string;
   delivery_date: string | null;
-  total_amount: number;
-  currency: string;
+  // Money bug fix: the list endpoint (POResponse in backend/.../schemas.py)
+  // returns `amount_total` + `currency_code` (amount is a Decimal-serialized
+  // STRING), NOT `total_amount`/`currency`. The old field names were always
+  // undefined, so MoneyDisplay rendered an em-dash for every PO. Match the
+  // real wire contract here.
+  amount_total: string | number;
+  currency_code: string;
   status: string;
   description: string;
   line_items_count: number;
@@ -1017,7 +1022,13 @@ function PurchaseOrdersTab({ projectId }: { projectId: string }) {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <MoneyDisplay amount={po.total_amount} currency={po.currency} />
+                  {/* Money bug fix: feed MoneyDisplay the REAL wire fields
+                      `amount_total` (Decimal string) + `currency_code`. The
+                      old `po.total_amount`/`po.currency` did not exist on the
+                      list response, so every row showed an em-dash. MoneyDisplay
+                      accepts string amounts and parses them internally, so no
+                      Number() wrapping is needed here. */}
+                  <MoneyDisplay amount={po.amount_total} currency={po.currency_code} />
                 </td>
                 <td className="px-4 py-3 text-center">
                   <div className="flex flex-col items-center gap-1">

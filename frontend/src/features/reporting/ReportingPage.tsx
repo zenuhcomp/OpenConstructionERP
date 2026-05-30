@@ -72,18 +72,32 @@ interface KPISnapshot {
   risk_score_avg: string | null;
 }
 
+// Wire contract for GET /api/v1/finance/dashboard/. The previous shape
+// (total_budget / budget_warning / overdue_payable / overdue_receivable /
+// invoices_due_this_week / invoices_due_this_month) did NOT exist on the
+// finance endpoint, so every card bound to those keys rendered N/A /
+// undefined% and the budget traffic-light was permanently green. The real
+// response is FinanceDashboardResponse in backend/app/modules/finance/
+// schemas.py: total_budget_revised / total_budget_original / total_committed /
+// total_overdue / budget_warning_level. Money fields are Decimal-serialized
+// and arrive as STRINGS on the wire (the @field_serializer emits plain
+// decimal strings), so they are typed `number | string` and MUST be wrapped
+// in Number() before any arithmetic / .toFixed() (platform money rule).
+// `currency` carries the ISO code these amounts are denominated in — never
+// hardcode EUR.
 interface FinanceDashboard {
-  total_payable: number;
-  total_receivable: number;
-  overdue_payable: number;
-  overdue_receivable: number;
-  total_budget: number;
-  total_actual: number;
-  budget_consumed_pct: number;
-  budget_warning: string;
-  cash_flow_net: number;
-  invoices_due_this_week: number;
-  invoices_due_this_month: number;
+  total_payable: number | string;
+  total_receivable: number | string;
+  total_budget_original: number | string;
+  total_budget_revised: number | string;
+  total_committed: number | string;
+  total_actual: number | string;
+  total_overdue: number | string;
+  // Percentage ratio — backend keeps this a float (not in the deferred
+  // money list), but it is null-safe to treat the wire value defensively.
+  budget_consumed_pct: number | string | null;
+  budget_warning_level: string; // "normal" | "caution" | "critical"
+  cash_flow_net: number | string;
   currency: string;
 }
 
@@ -152,6 +166,18 @@ function fmtNum(v: number | null | undefined, decimals = 0): string {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+}
+
+// Money-bug guard: finance amounts arrive as Decimal-serialized STRINGS
+// (e.g. "517103508.65"). Passing a string to fmtNum (which calls
+// .toLocaleString) or doing `value > 0` would format/compare a string —
+// yielding "NaN" or a lexicographic comparison. Coerce through Number()
+// first; non-numeric/empty values become null so the card shows N/A rather
+// than a misleading 0. Returns number | null, which fmtNum already accepts.
+function toMoneyNum(v: number | string | null | undefined): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 /* ── KPI Card component ────────────────────────────────────────────────────── */
@@ -1035,8 +1061,40 @@ function FinanceDashboardView({
   // The procurement stats endpoint does not expose its own currency, so
   // committed money is shown against the project's finance currency
   // (purchase orders inherit the project currency). Money must always
-  // carry its ISO code — a bare number is ambiguous.
+  // carry its ISO code — a bare number is ambiguous. Derived from the
+  // finance payload's own currency first, then the project, never EUR.
   const procurementCurrency = financeDash?.currency || project.currency || '';
+
+  // Coerce the Decimal-string money fields once so arithmetic and
+  // formatting below operate on real numbers (money-bug fix). null means
+  // the figure was absent — render N/A instead of a misleading 0.
+  const currency = financeDash?.currency ?? '';
+  const totalPayable = toMoneyNum(financeDash?.total_payable);
+  const totalReceivable = toMoneyNum(financeDash?.total_receivable);
+  // Was overdue_payable (a key the endpoint never returns) — real wire field
+  // is total_overdue.
+  const totalOverdue = toMoneyNum(financeDash?.total_overdue);
+  const cashFlowNet = toMoneyNum(financeDash?.cash_flow_net);
+  // Real wire field is total_budget_revised; the old `total_budget` key never
+  // existed so this card always read N/A.
+  const totalBudgetRevised = toMoneyNum(financeDash?.total_budget_revised);
+  const totalCommitted = toMoneyNum(financeDash?.total_committed);
+  const totalActual = toMoneyNum(financeDash?.total_actual);
+  // budget_consumed_pct is a percentage (may be string/float/null on the wire).
+  const budgetConsumedPct = toMoneyNum(financeDash?.budget_consumed_pct);
+  // Primary budget signal is the numeric consumed-% (unambiguous); the
+  // backend's budget_warning_level string ("normal"|"caution"|"critical") is
+  // a secondary escalator. The old code compared the nonexistent
+  // `budget_warning` key, so the light was permanently green even at 100%.
+  const warningLevel = (financeDash?.budget_warning_level ?? '').toLowerCase();
+  const budgetColor: TrafficLight =
+    warningLevel === 'critical' || (budgetConsumedPct !== null && budgetConsumedPct >= 100)
+      ? 'red'
+      : warningLevel === 'caution' || (budgetConsumedPct !== null && budgetConsumedPct >= 90)
+        ? 'yellow'
+        : budgetConsumedPct === null
+          ? 'gray'
+          : 'green';
 
   return (
     <div className="space-y-6">
@@ -1046,60 +1104,55 @@ function FinanceDashboardView({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <KPICard
               label={t('reporting.payable', { defaultValue: 'Total Payable' })}
-              value={`${fmtNum(financeDash.total_payable, 2)} ${financeDash.currency}`}
+              value={`${fmtNum(totalPayable, 2)} ${currency}`.trim()}
               color="gray"
               icon={Wallet}
             />
             <KPICard
               label={t('reporting.receivable', { defaultValue: 'Total Receivable' })}
-              value={`${fmtNum(financeDash.total_receivable, 2)} ${financeDash.currency}`}
+              value={`${fmtNum(totalReceivable, 2)} ${currency}`.trim()}
               color="gray"
               icon={TrendingUp}
             />
             <KPICard
-              label={t('reporting.overdue_payable', { defaultValue: 'Overdue Payable' })}
-              value={`${fmtNum(financeDash.overdue_payable, 2)} ${financeDash.currency}`}
-              color={financeDash.overdue_payable > 0 ? 'red' : 'green'}
+              label={t('reporting.overdue_total', { defaultValue: 'Total Overdue' })}
+              value={`${fmtNum(totalOverdue, 2)} ${currency}`.trim()}
+              color={totalOverdue !== null && totalOverdue > 0 ? 'red' : 'green'}
               icon={AlertTriangle}
             />
             <KPICard
               label={t('reporting.cash_flow_net', { defaultValue: 'Net Cash Flow' })}
-              value={`${fmtNum(financeDash.cash_flow_net, 2)} ${financeDash.currency}`}
-              color={financeDash.cash_flow_net >= 0 ? 'green' : 'red'}
-              icon={financeDash.cash_flow_net >= 0 ? TrendingUp : TrendingDown}
+              value={`${fmtNum(cashFlowNet, 2)} ${currency}`.trim()}
+              color={cashFlowNet === null ? 'gray' : cashFlowNet >= 0 ? 'green' : 'red'}
+              icon={cashFlowNet !== null && cashFlowNet < 0 ? TrendingDown : TrendingUp}
             />
           </div>
 
-          {/* Invoices and budget */}
+          {/* Budget and committed — replaces the invoices_due_* cards, which
+              had no source on the finance dashboard endpoint. */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <KPICard
-              label={t('reporting.invoices_week', { defaultValue: 'Invoices Due (Week)' })}
-              value={String(financeDash.invoices_due_this_week)}
-              color={financeDash.invoices_due_this_week > 0 ? 'yellow' : 'green'}
-              icon={Clock}
-            />
-            <KPICard
-              label={t('reporting.invoices_month', { defaultValue: 'Invoices Due (Month)' })}
-              value={String(financeDash.invoices_due_this_month)}
-              color="gray"
-              icon={Clock}
-            />
-            <KPICard
               label={t('reporting.budget_total', { defaultValue: 'Total Budget' })}
-              value={`${fmtNum(financeDash.total_budget, 2)} ${financeDash.currency}`}
+              value={`${fmtNum(totalBudgetRevised, 2)} ${currency}`.trim()}
+              color="gray"
+              icon={Wallet}
+            />
+            <KPICard
+              label={t('reporting.committed', { defaultValue: 'Committed' })}
+              value={`${fmtNum(totalCommitted, 2)} ${currency}`.trim()}
+              color="gray"
+              icon={ClipboardList}
+            />
+            <KPICard
+              label={t('reporting.actual_spend', { defaultValue: 'Actual Spend' })}
+              value={`${fmtNum(totalActual, 2)} ${currency}`.trim()}
               color="gray"
               icon={Wallet}
             />
             <KPICard
               label={t('reporting.budget_consumed', { defaultValue: 'Budget Consumed' })}
-              value={`${financeDash.budget_consumed_pct?.toFixed(1) ?? 'N/A'}%`}
-              color={
-                financeDash.budget_warning === 'critical'
-                  ? 'red'
-                  : financeDash.budget_warning === 'caution'
-                    ? 'yellow'
-                    : 'green'
-              }
+              value={budgetConsumedPct !== null ? `${budgetConsumedPct.toFixed(1)}%` : 'N/A'}
+              color={budgetColor}
               icon={BarChart3}
             />
           </div>
