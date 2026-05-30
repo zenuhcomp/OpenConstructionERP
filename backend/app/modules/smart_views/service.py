@@ -566,10 +566,16 @@ class SmartViewService:
         view.share_token = token
         await self.session.flush()
         await self._emit_visibility_changed(view, reason="shared")
+        # dead_button fix: the previous value "/share/smart-views/{token}" was a
+        # THIRD, non-existent path (the frontend never consumed it; it builds the
+        # link from buildSmartViewShareUrl). Align it to the single canonical
+        # share-landing path "/smart-views/shared/{token}" so that backend,
+        # frontend api.ts, and the unauthenticated resolver endpoint
+        # GET /api/v1/smart-views/shared/{token} all agree on one route.
         return SmartViewShareInfo(
             view_id=view.id,
             share_token=token,
-            url=f"/share/smart-views/{token}",
+            url=f"/smart-views/shared/{token}",
         )
 
     async def revoke_share_token(
