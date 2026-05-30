@@ -175,6 +175,12 @@ class Settings(BaseSettings):
     database_pool_size: int = 24
     database_max_overflow: int = 10
     database_echo: bool = False
+    # PostgreSQL only: seconds before a pooled connection is recycled. Kept
+    # below common infra idle timeouts (pgbouncer / cloud LB ~5-10 min) so the
+    # pool never serves a connection the server already dropped. Paired with
+    # pool_pre_ping in ``app.database``. Ignored on SQLite. Env:
+    # ``OE_DATABASE_POOL_RECYCLE`` / ``DATABASE_POOL_RECYCLE``.
+    database_pool_recycle: int = 1800
     max_batch_size: int = 443
     # Slow-query threshold (milliseconds). Statements exceeding this elapsed
     # wall time are logged at WARNING level via SQLAlchemy ``before_cursor_execute``

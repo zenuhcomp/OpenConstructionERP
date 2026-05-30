@@ -214,6 +214,17 @@ def create_engine_from_settings():
     kwargs["pool_size"] = settings.database_pool_size
     kwargs["max_overflow"] = settings.database_max_overflow
 
+    if not _is_sqlite(url):
+        # PostgreSQL: validate each pooled connection with a lightweight
+        # round-trip before handing it to a request, and recycle connections
+        # periodically. Without this, a server-side idle timeout, a Postgres
+        # restart, or a failover leaves dead sockets in the pool that surface
+        # as ``OperationalError: server closed the connection unexpectedly`` on
+        # the next query. pool_pre_ping costs one cheap round-trip on checkout;
+        # pool_recycle caps connection age below typical infra idle timeouts.
+        kwargs["pool_pre_ping"] = True
+        kwargs["pool_recycle"] = settings.database_pool_recycle
+
     return create_async_engine(url, **kwargs)
 
 
