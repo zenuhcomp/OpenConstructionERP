@@ -243,7 +243,7 @@ they cost you minutes instead.
 
 | Trap | Symptom | Mitigation |
 |------|---------|------------|
-| Demo email typo `openestimate.io` (no "r") | 401 on every login | The seed loader uses `openestimator.io` (with "r"). Hard-code in fixtures. |
+| Demo email typo `openestimate.io` (no "r") | 401 on every login | The seed loader uses `openconstructionerp.com` (with "r"). Hard-code in fixtures. |
 | Worktree pinned to stale base | Schema mismatch on first request | First step in every batch agent: `git checkout $(git rev-parse origin/main) -- .` |
 | Prod browser probes parallelised | Demo VPS event-loop stalls | Phase 3 personas run SEQUENTIALLY on prod; only Phase 2 parallelises. |
 | `/api/v1/health` returns 404 | Health check reports red | Use `/api/health` (no `/v1`). |
@@ -261,7 +261,7 @@ they cost you minutes instead.
 
 | Question | Answer |
 |----------|--------|
-| Demo credentials? | `demo@openestimator.io` / `demo123` (note the "r") |
+| Demo credentials? | `demo@openconstructionerp.com` / `demo123` (note the "r") |
 | Alembic head expected? | `v3123_boq_fk_indexes` |
 | Module count? | 112 |
 | Smoke tests? | 12 (`S-01` through `S-12`) |

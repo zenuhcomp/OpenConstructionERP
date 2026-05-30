@@ -61,7 +61,7 @@ class TestDemoLoginEndpoint:
         for _ in range(5):
             resp = await demo_client.post(
                 "/api/v1/users/auth/demo-login/",
-                json={"email": "demo@openestimator.io"},
+                json={"email": "demo@openconstructionerp.com"},
             )
             last_resp = resp
             if resp.status_code == 200:
@@ -98,7 +98,7 @@ class TestDemoLoginEndpoint:
         try:
             resp = await demo_client.post(
                 "/api/v1/users/auth/demo-login/",
-                json={"email": "demo@openestimator.io"},
+                json={"email": "demo@openconstructionerp.com"},
             )
             assert resp.status_code == 404, resp.text
             assert "disabled" in (resp.json().get("detail") or "").lower()
@@ -131,7 +131,7 @@ class TestDemoLoginEndpoint:
         seeded_emails = {
             line.split('"email":')[1].split('"')[1]
             for line in src.splitlines()
-            if '"email":' in line and "@openestimator.io" in line
+            if '"email":' in line and "@openconstructionerp.com" in line
         }
         assert seeded_emails, "Could not parse seeder spec list — has _seed_demo_account changed?"
         assert seeded_emails == set(ROUTER_WHITELIST), (
@@ -158,7 +158,7 @@ class TestDemoLoginEndpoint:
         # The documented password — must still work.
         resp = await demo_client.post(
             "/api/v1/users/auth/login/",
-            json={"email": "demo@openestimator.io", "password": "DemoPass1234!"},
+            json={"email": "demo@openconstructionerp.com", "password": "DemoPass1234!"},
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["access_token"]
@@ -167,7 +167,7 @@ class TestDemoLoginEndpoint:
         # is intentionally ignored on the demo path.
         resp = await demo_client.post(
             "/api/v1/users/auth/login/",
-            json={"email": "demo@openestimator.io", "password": "wrong-on-purpose"},
+            json={"email": "demo@openconstructionerp.com", "password": "wrong-on-purpose"},
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["access_token"]
@@ -198,7 +198,7 @@ class TestDemoLoginEndpoint:
             resp = await demo_client.post(
                 "/api/v1/users/auth/login/",
                 json={
-                    "email": "demo@openestimator.io",
+                    "email": "demo@openconstructionerp.com",
                     "password": "wrong-on-purpose",
                 },
             )

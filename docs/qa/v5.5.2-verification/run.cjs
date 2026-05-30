@@ -21,7 +21,7 @@ function logResult(slug, status, note) {
 
 async function login(page) {
   const resp = await page.request.post(`${FE}/api/v1/users/auth/demo-login/`, {
-    data: { email: 'demo@openestimator.io' },
+    data: { email: 'demo@openconstructionerp.com' },
     headers: { 'Content-Type': 'application/json' },
   });
   if (!resp.ok()) throw new Error(`demo-login HTTP ${resp.status()}`);
@@ -33,7 +33,7 @@ async function login(page) {
     localStorage.setItem('oe_access_token', acc);
     localStorage.setItem('oe_refresh_token', refr);
     localStorage.setItem('oe_remember', '1');
-    localStorage.setItem('oe_user_email', 'demo@openestimator.io');
+    localStorage.setItem('oe_user_email', 'demo@openconstructionerp.com');
     // Mark onboarding/tour done so it doesn't auto-open
     localStorage.setItem('oe_tour_dismissed', '1');
     localStorage.setItem('oe_onboarding_complete', '1');

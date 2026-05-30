@@ -837,7 +837,7 @@ password is **generated per installation** (via `secrets.token_urlsafe`)
 and printed to the backend startup log so you see it immediately, e.g.:
 
 ```
-[seed] Demo user created: demo@openestimator.io / xK7p_Q2nR8sT4uV6wX9yZ
+[seed] Demo user created: demo@openconstructionerp.com / xK7p_Q2nR8sT4uV6wX9yZ
 [seed] Pre-set DEMO_USER_PASSWORD env to skip random generation
 ```
 
@@ -846,15 +846,15 @@ The same passwords are also persisted to
 them later. To pin known passwords (e.g. for a team demo or CI), set the
 env vars **before the first boot**:
 
-- `DEMO_USER_PASSWORD` — admin (`demo@openestimator.io`)
-- `DEMO_ESTIMATOR_PASSWORD` — estimator (`estimator@openestimator.io`)
-- `DEMO_MANAGER_PASSWORD` — manager (`manager@openestimator.io`)
+- `DEMO_USER_PASSWORD` — admin (`demo@openconstructionerp.com`)
+- `DEMO_ESTIMATOR_PASSWORD` — estimator (`estimator@openconstructionerp.com`)
+- `DEMO_MANAGER_PASSWORD` — manager (`manager@openconstructionerp.com`)
 
 | Account | Email | Password | Role |
 |---------|-------|----------|------|
-| Admin | `demo@openestimator.io` | _see startup log or `.demo_credentials.json`_ | Full access |
-| Estimator | `estimator@openestimator.io` | _see startup log or `.demo_credentials.json`_ | Estimator |
-| Manager | `manager@openestimator.io` | _see startup log or `.demo_credentials.json`_ | Manager |
+| Admin | `demo@openconstructionerp.com` | _see startup log or `.demo_credentials.json`_ | Full access |
+| Estimator | `estimator@openconstructionerp.com` | _see startup log or `.demo_credentials.json`_ | Estimator |
+| Manager | `manager@openconstructionerp.com` | _see startup log or `.demo_credentials.json`_ | Manager |
 
 > Demo accounts include 5 pre-loaded projects from Berlin, London, New York, Paris, and Dubai with complete BOQs, schedules, and cost models.
 >

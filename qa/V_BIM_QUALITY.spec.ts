@@ -17,7 +17,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 
-const DEMO_EMAIL = process.env.E2E_USER_EMAIL ?? 'demo@openestimator.io';
+const DEMO_EMAIL = process.env.E2E_USER_EMAIL ?? 'demo@openconstructionerp.com';
 const MODES = ['fast', 'default', 'visual', 'walk'] as const;
 
 async function login(page: Page): Promise<void> {

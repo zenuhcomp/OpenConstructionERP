@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 
 
 DEMO_EMAILS: tuple[str, ...] = (
-    "demo@openestimator.io",
-    "estimator@openestimator.io",
-    "manager@openestimator.io",
+    "demo@openconstructionerp.com",
+    "estimator@openconstructionerp.com",
+    "manager@openconstructionerp.com",
 )
 
 # Hostnames that look like dev/staging/qa. A hostname not in this list is
@@ -155,7 +155,7 @@ async def reset_demo_data(session: AsyncSession) -> dict:
         deleted_projects = result.rowcount or 0
         await session.flush()
 
-    # Re-seed the canonical 5 demo projects under demo@openestimator.io.
+    # Re-seed the canonical 5 demo projects under demo@openconstructionerp.com.
     seeded = 0
     seeded_demo_ids: list[str] = []
     try:

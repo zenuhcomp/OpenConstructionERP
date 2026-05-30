@@ -75,7 +75,7 @@ def test_resolve_treats_empty_string_as_unset():
 
 def test_persist_writes_json_in_data_dir(tmp_path: Path):
     """Honours OE_CLI_DATA_DIR and writes pretty-printed JSON."""
-    creds = {"demo@openestimator.io": "secret-A", "estimator@openestimator.io": "secret-B"}
+    creds = {"demo@openconstructionerp.com": "secret-A", "estimator@openconstructionerp.com": "secret-B"}
 
     with patch.dict(os.environ, {"OE_CLI_DATA_DIR": str(tmp_path)}, clear=False):
         path = _persist_demo_credentials(creds)
@@ -88,7 +88,7 @@ def test_persist_writes_json_in_data_dir(tmp_path: Path):
 
 def test_persist_falls_back_to_home_when_no_cli_dir(tmp_path: Path):
     """Without OE_CLI_DATA_DIR we fall back to ~/.openestimator/."""
-    creds = {"demo@openestimator.io": "fallback-secret"}
+    creds = {"demo@openconstructionerp.com": "fallback-secret"}
 
     env = os.environ.copy()
     env.pop("OE_CLI_DATA_DIR", None)
@@ -108,28 +108,28 @@ def test_persist_merges_with_existing_file(tmp_path: Path):
     not. The credentials file should accumulate, not lose entries.
     """
     path = tmp_path / ".demo_credentials.json"
-    path.write_text(json.dumps({"demo@openestimator.io": "first"}), encoding="utf-8")
+    path.write_text(json.dumps({"demo@openconstructionerp.com": "first"}), encoding="utf-8")
 
     with patch.dict(os.environ, {"OE_CLI_DATA_DIR": str(tmp_path)}, clear=False):
-        _persist_demo_credentials({"estimator@openestimator.io": "second"})
+        _persist_demo_credentials({"estimator@openconstructionerp.com": "second"})
 
     merged = json.loads(path.read_text(encoding="utf-8"))
     assert merged == {
-        "demo@openestimator.io": "first",
-        "estimator@openestimator.io": "second",
+        "demo@openconstructionerp.com": "first",
+        "estimator@openconstructionerp.com": "second",
     }
 
 
 def test_persist_overwrites_same_key_in_merge(tmp_path: Path):
     """Merge semantics: same email re-persisted wins (last-writer-wins)."""
     path = tmp_path / ".demo_credentials.json"
-    path.write_text(json.dumps({"demo@openestimator.io": "old"}), encoding="utf-8")
+    path.write_text(json.dumps({"demo@openconstructionerp.com": "old"}), encoding="utf-8")
 
     with patch.dict(os.environ, {"OE_CLI_DATA_DIR": str(tmp_path)}, clear=False):
-        _persist_demo_credentials({"demo@openestimator.io": "new"})
+        _persist_demo_credentials({"demo@openconstructionerp.com": "new"})
 
     final = json.loads(path.read_text(encoding="utf-8"))
-    assert final == {"demo@openestimator.io": "new"}
+    assert final == {"demo@openconstructionerp.com": "new"}
 
 
 def test_persist_returns_none_on_unwritable_dir(monkeypatch):
@@ -141,7 +141,7 @@ def test_persist_returns_none_on_unwritable_dir(monkeypatch):
 
     monkeypatch.setattr(_main.Path, "mkdir", _explode)
 
-    result = _persist_demo_credentials({"demo@openestimator.io": "x"})
+    result = _persist_demo_credentials({"demo@openconstructionerp.com": "x"})
     assert result is None
 
 
@@ -155,11 +155,11 @@ def test_persist_no_corruption_on_existing_unparseable_file(tmp_path: Path):
     path.write_text("{ not valid json", encoding="utf-8")
 
     with patch.dict(os.environ, {"OE_CLI_DATA_DIR": str(tmp_path)}, clear=False):
-        result = _persist_demo_credentials({"demo@openestimator.io": "after-corruption"})
+        result = _persist_demo_credentials({"demo@openconstructionerp.com": "after-corruption"})
 
     assert result is not None
     final = json.loads(path.read_text(encoding="utf-8"))
-    assert final == {"demo@openestimator.io": "after-corruption"}
+    assert final == {"demo@openconstructionerp.com": "after-corruption"}
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,18 @@
+PG:
+
+CREATE TABLE demo (
+	id SERIAL NOT NULL, 
+	is_active BOOLEAN DEFAULT '1' NOT NULL, 
+	PRIMARY KEY (id)
+)
+
+
+SQLITE:
+
+CREATE TABLE demo (
+	id INTEGER NOT NULL, 
+	is_active BOOLEAN DEFAULT '1' NOT NULL, 
+	PRIMARY KEY (id)
+)
+
+

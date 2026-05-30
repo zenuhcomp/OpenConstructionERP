@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 const BASE = process.env.QA_BASE_URL || 'http://localhost:5173';
-const EMAIL = process.env.QA_DEMO_EMAIL || 'demo@openestimator.io';
+const EMAIL = process.env.QA_DEMO_EMAIL || 'demo@openconstructionerp.com';
 const PASSWORD = process.env.QA_DEMO_PASSWORD || 'DemoPass1234!';
 
 test.setTimeout(120_000);

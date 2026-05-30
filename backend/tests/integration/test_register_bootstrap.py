@@ -135,7 +135,7 @@ async def test_non_admin_seed_does_not_block_bootstrap(session):
 
 @pytest.mark.asyncio
 async def test_demo_admin_seed_does_not_block_bootstrap(session):
-    """The seeded demo admin (demo@openestimator.io) must not block the
+    """The seeded demo admin (demo@openconstructionerp.com) must not block the
     first real registrant from claiming admin.
 
     Without this carve-out, every fresh ``pip install openconstructionerp``
@@ -152,7 +152,7 @@ async def test_demo_admin_seed_does_not_block_bootstrap(session):
 
     demo = User(
         id=_uuid.uuid4(),
-        email="demo@openestimator.io",
+        email="demo@openconstructionerp.com",
         hashed_password=hash_password("DemoPass1234!"),
         full_name="Demo User",
         role="admin",
@@ -164,7 +164,7 @@ async def test_demo_admin_seed_does_not_block_bootstrap(session):
     await session.commit()
 
     repo = UserRepository(session)
-    assert await repo.has_admin() is False, "has_admin must ignore the seeded demo@openestimator.io admin"
+    assert await repo.has_admin() is False, "has_admin must ignore the seeded demo@openconstructionerp.com admin"
 
     first = await _service(session).register(_payload(f"first-{_uuid.uuid4().hex[:6]}@bootstrap.io"))
     await session.commit()

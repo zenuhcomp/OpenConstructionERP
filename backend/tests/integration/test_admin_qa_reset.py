@@ -110,7 +110,7 @@ async def test_gate_production_hostname_rejects(gate_env):
     async with lifespan_ctx():
         transport = ASGITransport(app=app)
         # Use a hostname without any safe substring (no localhost/staging/test/qa/dev).
-        async with AsyncClient(transport=transport, base_url="http://app.openestimator.io") as ac:
+        async with AsyncClient(transport=transport, base_url="http://app.openconstructionerp.com") as ac:
             res = await ac.post(
                 "/api/v1/admin/qa-reset",
                 json={"tenant": "demo", "confirm_token": "test-token-xyz"},
@@ -132,7 +132,7 @@ async def test_happy_path_resets_and_reseeds(client, gate_env):
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["reset"] is True
-    assert "demo@openestimator.io" in body["demo_users"]
+    assert "demo@openconstructionerp.com" in body["demo_users"]
     assert body["seeded_projects"] >= 1  # at least one demo project re-installed
     assert body["took_ms"] >= 0
 
@@ -173,4 +173,4 @@ async def test_audit_log_entry_written(client, gate_env):
     latest = rows[-1]
     assert latest.entity_type == "tenant"
     assert latest.entity_id == "demo"
-    assert "demo@openestimator.io" in (latest.details or {}).get("demo_users", [])
+    assert "demo@openconstructionerp.com" in (latest.details or {}).get("demo_users", [])

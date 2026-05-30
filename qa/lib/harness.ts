@@ -9,7 +9,7 @@
  * Env vars (with safe defaults):
  *   QA_API_URL       — backend API (default 'http://127.0.0.1:8000')
  *   QA_BASE_URL      — frontend SPA  (default 'http://127.0.0.1:5173')
- *   QA_DEMO_EMAIL    — default 'demo@openestimator.io' (with 'r' — see feedback_demo_creds)
+ *   QA_DEMO_EMAIL    — default 'demo@openconstructionerp.com' (with 'r' — see feedback_demo_creds)
  *   QA_DEMO_PASSWORD — default 'DemoPass1234!'
  *   QA_SCREENSHOTS_ROOT — where to dump PNGs (default './qa-screenshots')
  *
@@ -33,7 +33,7 @@ export const QA_API_URL =
 export const QA_BASE_URL =
   process.env.QA_BASE_URL ?? process.env.OE_BASE_URL ?? 'http://127.0.0.1:5173';
 export const QA_DEMO_EMAIL =
-  process.env.QA_DEMO_EMAIL ?? process.env.OE_DEMO_EMAIL ?? 'demo@openestimator.io';
+  process.env.QA_DEMO_EMAIL ?? process.env.OE_DEMO_EMAIL ?? 'demo@openconstructionerp.com';
 export const QA_DEMO_PASSWORD =
   process.env.QA_DEMO_PASSWORD ?? process.env.OE_DEMO_PASSWORD ?? 'DemoPass1234!';
 export const QA_SCREENSHOTS_ROOT =

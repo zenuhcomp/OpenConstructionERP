@@ -54,7 +54,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 # ── Configuration ────────────────────────────────────────────────────────
 
 BASE = "http://localhost:8000"
-ADMIN_EMAIL = "demo@openestimator.io"
+ADMIN_EMAIL = "demo@openconstructionerp.com"
 ADMIN_PASSWORD = "DemoPass1234!"
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]

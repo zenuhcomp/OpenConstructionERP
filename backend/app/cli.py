@@ -162,7 +162,7 @@ def print_startup_banner(
         print(f"  {_dim('API only (frontend not bundled). Docs:')} {url}/api/docs")
     print()
     print(f"  {_bold('Demo login')} {_dim('(auto-created on first run)')}")
-    print(f"    {_dim('Email:')}    demo@openestimator.io")
+    print(f"    {_dim('Email:')}    demo@openconstructionerp.com")
     print(f"    {_dim('Password:')} DemoPass1234!")
     print()
     print(f"  {_dim('Data directory:')} {data_dir}")
@@ -912,7 +912,7 @@ def print_welcome(*, next_command_hint: bool = True) -> None:
     print(f"    {_amber('openestimate doctor')}    {_dim('# health check if something looks wrong')}")
     print()
     print(f"  {_bold('After serve, open:')} {_amber('http://127.0.0.1:8080')}")
-    print(f"  {_dim('Demo login:')} demo@openestimator.io / DemoPass1234!")
+    print(f"  {_dim('Demo login:')} demo@openconstructionerp.com / DemoPass1234!")
     print()
     print(f"  {_bold('Get help or ask questions')}")
     print(f"    {_dim('Docs:')}      {DOCS_URL}")
@@ -1016,7 +1016,7 @@ def main() -> None:
             "    openestimate init-db\n"
             "    openestimate serve\n"
             "\n"
-            "Then open http://localhost:8080 — log in with demo@openestimator.io / DemoPass1234!"
+            "Then open http://localhost:8080 — log in with demo@openconstructionerp.com / DemoPass1234!"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

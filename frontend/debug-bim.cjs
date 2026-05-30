@@ -17,7 +17,7 @@ const fs = require('fs');
 
 const FRONTEND = 'http://localhost:5173';
 const BACKEND = 'http://localhost:8000';
-const EMAIL = 'demo@openestimator.io';
+const EMAIL = 'demo@openconstructionerp.com';
 const PASSWORD = 'DemoPass1234!';
 const PROJECT_ID = '8f49f039-a69e-43a2-97d3-4bba0f99759b';
 

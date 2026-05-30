@@ -21,7 +21,7 @@ const { chromium } = require('playwright');
 
 const SHOTS = __dirname;
 const BASE = process.env.QA_BASE_URL ?? 'http://127.0.0.1:8001';
-const DEMO_EMAIL = 'demo@openestimator.io';
+const DEMO_EMAIL = 'demo@openconstructionerp.com';
 
 const PDF_FIXTURE = path.join(REPO, 'qa-tests', '_v3.12.0-stream-F', 'downloads', 'takeoff-multipage_test-2026-05-20.pdf');
 const RVT_FIXTURE = path.join(REPO, 'data', 'bim', '000be1c4-75e2-4be6-a0da-950ae8e2a801', '59acbcf0-b923-4b72-92d0-e5ef91889a0b', 'original.rvt');
@@ -73,7 +73,7 @@ async function demoLogin(page) {
   await page.evaluate((d) => {
     localStorage.setItem('oe_access_token', d.access_token);
     localStorage.setItem('oe_refresh_token', d.refresh_token);
-    localStorage.setItem('oe_user_email', 'demo@openestimator.io');
+    localStorage.setItem('oe_user_email', 'demo@openconstructionerp.com');
   }, data.body);
   return data.body;
 }

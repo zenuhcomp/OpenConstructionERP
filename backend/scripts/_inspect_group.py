@@ -40,7 +40,7 @@ def main() -> int:
     session_id = sys.argv[1]
     auth = _post(
         "/api/v1/users/auth/login/",
-        {"email": "demo@openestimator.io", "password": "DemoPass1234!"},
+        {"email": "demo@openconstructionerp.com", "password": "DemoPass1234!"},
     )
     token = auth["access_token"]
     if len(sys.argv) >= 3:

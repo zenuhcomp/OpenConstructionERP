@@ -2234,7 +2234,7 @@ async def _get_or_create_owner(session: AsyncSession) -> uuid.UUID:
     if user is None:
         user = User(
             id=_id(),
-            email="demo@openestimator.io",
+            email="demo@openconstructionerp.com",
             hashed_password="$2b$12$DEMO_HASH_NOT_FOR_PRODUCTION_USE_ONLY",
             full_name="Demo User",
             role="admin",

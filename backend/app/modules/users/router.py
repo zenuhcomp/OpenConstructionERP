@@ -197,9 +197,9 @@ class DemoLoginRequest(BaseModel):
 # ``backend/tests/integration/test_demo_login_endpoint.py`` asserts this.
 _DEMO_EMAIL_WHITELIST: frozenset[str] = frozenset(
     {
-        "demo@openestimator.io",
-        "estimator@openestimator.io",
-        "manager@openestimator.io",
+        "demo@openconstructionerp.com",
+        "estimator@openconstructionerp.com",
+        "manager@openconstructionerp.com",
     }
 )
 

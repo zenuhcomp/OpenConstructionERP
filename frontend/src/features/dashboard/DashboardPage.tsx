@@ -74,7 +74,7 @@ import {
  * Examples:
  *   "artem.boiko@acme.io" → "Artem"
  *   "j_smith42@x.com"     → "J"
- *   "demo@openestimator.io" → "Demo"
+ *   "demo@openconstructionerp.com" → "Demo"
  *   "@x.com" / "" / null  → undefined
  */
 function deriveGreetingName(email: string | null | undefined): string | undefined {

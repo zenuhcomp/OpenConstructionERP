@@ -526,9 +526,9 @@ async def _seed_demo_account() -> None:
 
     Idempotent — safe to call on every startup. Creates:
 
-    * demo@openestimator.io        (role=admin — full walkthrough)
-    * estimator@openestimator.io   (role=estimator)
-    * manager@openestimator.io     (role=manager)
+    * demo@openconstructionerp.com        (role=admin — full walkthrough)
+    * estimator@openconstructionerp.com   (role=estimator)
+    * manager@openconstructionerp.com     (role=manager)
 
     Each password is read from the environment if set
     (``DEMO_USER_PASSWORD``, ``DEMO_ESTIMATOR_PASSWORD``,
@@ -554,19 +554,19 @@ async def _seed_demo_account() -> None:
     # Email → env-var-name mapping. Order matters for stable banner output.
     demo_account_specs: list[dict[str, str]] = [
         {
-            "email": "demo@openestimator.io",
+            "email": "demo@openconstructionerp.com",
             "env_var": "DEMO_USER_PASSWORD",
             "full_name": "Demo User",
             "role": "admin",
         },
         {
-            "email": "estimator@openestimator.io",
+            "email": "estimator@openconstructionerp.com",
             "env_var": "DEMO_ESTIMATOR_PASSWORD",
             "full_name": "Anna Musterfrau",
             "role": "editor",
         },
         {
-            "email": "manager@openestimator.io",
+            "email": "manager@openconstructionerp.com",
             "env_var": "DEMO_MANAGER_PASSWORD",
             "full_name": "Thomas Müller",
             "role": "manager",
@@ -584,7 +584,7 @@ async def _seed_demo_account() -> None:
             for acct in demo_account_specs:
                 exists = (await session.execute(select(User).where(User.email == acct["email"]))).scalar_one_or_none()
                 if exists is not None:
-                    if acct["email"] == "demo@openestimator.io":
+                    if acct["email"] == "demo@openconstructionerp.com":
                         demo = exists
                     # If operator set the env-var explicitly and the stored
                     # hash no longer matches that password, sync the hash so
@@ -611,7 +611,7 @@ async def _seed_demo_account() -> None:
                 )
                 session.add(user)
                 await session.flush()
-                if acct["email"] == "demo@openestimator.io":
+                if acct["email"] == "demo@openconstructionerp.com":
                     demo = user
                 logger.info(
                     "Demo user created: %s (password source: %s)",
@@ -647,10 +647,10 @@ async def _seed_demo_account() -> None:
 
             # 2. Capture the demo user ids while the session is open.
             estimator_user = (
-                await session.execute(select(User).where(User.email == "estimator@openestimator.io"))
+                await session.execute(select(User).where(User.email == "estimator@openconstructionerp.com"))
             ).scalar_one_or_none()
             manager_user = (
-                await session.execute(select(User).where(User.email == "manager@openestimator.io"))
+                await session.execute(select(User).where(User.email == "manager@openconstructionerp.com"))
             ).scalar_one_or_none()
             demo_user_id = str(demo.id)
             estimator_user_id = str(estimator_user.id) if estimator_user else ""
@@ -2572,7 +2572,7 @@ def create_app() -> FastAPI:
             # operator at that file beats baking a fixed password into
             # every running instance.
             logger.info(
-                "Demo login: demo@openestimator.io "
+                "Demo login: demo@openconstructionerp.com "
                 "(password from DEMO_USER_PASSWORD env var or "
                 "~/.openestimator/.demo_credentials.json)"
             )

@@ -183,9 +183,9 @@ async def _audit_last_login(settings: Settings, user_id: uuid.UUID, when: dateti
 # importing from router (which would create a circular import).
 _DEMO_EMAIL_WHITELIST: frozenset[str] = frozenset(
     {
-        "demo@openestimator.io",
-        "estimator@openestimator.io",
-        "manager@openestimator.io",
+        "demo@openconstructionerp.com",
+        "estimator@openconstructionerp.com",
+        "manager@openconstructionerp.com",
     }
 )
 
