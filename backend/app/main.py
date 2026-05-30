@@ -63,6 +63,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.sql_json import json_path_text
 
+
 def configure_logging(settings: Settings) -> None:
     """‌⁠‍Configure structured logging."""
     structlog.configure(
@@ -1127,8 +1128,8 @@ def create_app() -> FastAPI:
 
     # Partner-pack system — discovers pip-installed packs via entry_points
     # and exposes the active manifest + branded resources.
-    from app.core.partner_pack.router import router as partner_pack_router
     from app.core.partner_pack.discovery import get_active_pack
+    from app.core.partner_pack.router import router as partner_pack_router
 
     app.include_router(partner_pack_router)
     _active_pack = get_active_pack()
@@ -1900,10 +1901,24 @@ def create_app() -> FastAPI:
                 detail="'subject' must be ≥3 chars and 'description' ≥10 chars.",
             )
 
-        # Auto-create table if needed (SQLite dev mode)
+        # Auto-create table if needed — dialect-aware so it works on both
+        # SQLite (dev) and PostgreSQL (prod). The INSERT below is identical
+        # on both back-ends because it binds ``created_at`` explicitly.
         async with engine.begin() as conn:
-            await conn.execute(
-                text("""
+            if conn.dialect.name == "postgresql":
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS oe_feedback (
+                    id BIGSERIAL PRIMARY KEY,
+                    category TEXT NOT NULL DEFAULT 'general',
+                    subject TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    email TEXT,
+                    page_path TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """
+            else:
+                create_sql = """
                 CREATE TABLE IF NOT EXISTS oe_feedback (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     category TEXT NOT NULL DEFAULT 'general',
@@ -1911,10 +1926,10 @@ def create_app() -> FastAPI:
                     description TEXT NOT NULL,
                     email TEXT,
                     page_path TEXT,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
                 )
-            """)
-            )
+            """
+            await conn.execute(text(create_sql))
             await conn.execute(
                 text("""
                     INSERT INTO oe_feedback (category, subject, description, email, page_path, created_at)
@@ -2449,12 +2464,10 @@ def create_app() -> FastAPI:
                     # 3) Distinct top-level categories — drives the category
                     #    filter dropdown. Warm the all-regions list (the
                     #    page's default before any region tab is clicked).
-                    from sqlalchemy import func as __func
-
                     from app.database import engine as __engine
 
                     if "sqlite" in str(__engine.url):
-                        coll_expr = __json_path_text(CostItem.classification, "$.collection")
+                        coll_expr = json_path_text(CostItem.classification, "$.collection")
                     else:
                         coll_expr = CostItem.classification["collection"].as_string()
                     c = await cost_session.execute(
