@@ -576,8 +576,8 @@ async def list_cost_positions_using_resource(
     needle_alt = f'"code":"{code}"'  # compact JSON variant
 
     base_filter = or_(
-        func.cast(CostItem.components, String).like(f"%{needle}%"),
-        func.cast(CostItem.components, String).like(f"%{needle_alt}%"),
+        func.cast(CostItem.components, String).ilike(f"%{needle}%"),
+        func.cast(CostItem.components, String).ilike(f"%{needle_alt}%"),
     )
 
     total = (await session.execute(select(func.count()).select_from(CostItem).where(base_filter))).scalar_one()

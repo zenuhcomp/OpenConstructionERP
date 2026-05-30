@@ -344,7 +344,7 @@ def _clauses_to_sqla(clauses: list[_Clause]):
             # poisoning attempt against the LIKE pattern below.
             safe = str(c.value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace('"', "")
             quoted = f'"{safe}"'
-            sqla_clauses.append(cast(BCFTopic.labels, String).like(sl(f"%{quoted}%"), escape="\\"))
+            sqla_clauses.append(cast(BCFTopic.labels, String).ilike(sl(f"%{quoted}%"), escape="\\"))
             continue
         col = getattr(BCFTopic, c.field, None)
         if col is None:

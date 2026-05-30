@@ -101,7 +101,7 @@ class UserRepository:
         stmt = (
             select(User.id)
             .where(User.role == "admin", User.is_active.is_(True))
-            .where(~User.email.like("%@openestimator.io"))
+            .where(~User.email.ilike("%@openestimator.io"))
             .limit(1)
         )
         return (await self.session.execute(stmt)).scalar_one_or_none() is not None
