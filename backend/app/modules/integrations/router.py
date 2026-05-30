@@ -560,24 +560,38 @@ async def calendar_feed(
     Includes milestones, meetings, task due dates, and inspection dates.
     Subscribe in Google Calendar, Outlook, or Apple Calendar.
     """
+    import hashlib
+
     from sqlalchemy import select
 
+    from app.dependencies import verify_project_access
     from app.modules.users.models import APIKey
 
-    # Authenticate via API key token
-    # We match on key_prefix (first 8 chars) then verify full hash.
-    # For simplicity, we match the raw token against key_hash (bcrypt) or
-    # accept the prefix-based lookup.  In this implementation we accept
-    # the token if its first 8 chars match a key_prefix belonging to an
-    # active key.  This is intentionally lightweight for calendar apps.
+    # Authenticate via the FULL API-key token: compare its SHA-256 hash against
+    # APIKey.key_hash. A prefix match alone is NOT sufficient — key_prefix is
+    # the first 8 chars and is non-secret (shown in key listings), so matching
+    # on it would let anyone read the feed (auth bypass). The token is also
+    # bound to its owner, who must have access to this project.
     if len(token) < 8:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    prefix = token[:8]
-    key_result = await session.execute(select(APIKey).where(APIKey.key_prefix == prefix, APIKey.is_active.is_(True)))
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    key_result = await session.execute(
+        select(APIKey).where(APIKey.key_hash == token_hash, APIKey.is_active.is_(True)),
+    )
     api_key = key_result.scalars().first()
     if api_key is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    expires_at = api_key.expires_at
+    if expires_at is not None:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at < datetime.now(UTC):
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Cross-project IDOR guard: the key owner must be able to read this project.
+    await verify_project_access(project_id, str(api_key.user_id), session)
 
     # Build iCal content
     from app.config import get_settings

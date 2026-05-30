@@ -717,7 +717,18 @@ async def run_ruleset_endpoint(
     if payload.elements is not None:
         elements = payload.elements
     elif payload.model_id is not None:
-        from app.modules.bim_hub.models import BIMElement
+        from app.modules.bim_hub.models import BIMElement, BIMModel
+
+        # IDOR guard: a ruleset run can read every element of the model, so the
+        # caller must have access to the model's project — otherwise model_id
+        # is a cross-tenant read of another project's BIM data.
+        model = await session.get(BIMModel, payload.model_id)
+        if model is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"BIM model {payload.model_id} not found",
+            )
+        await verify_project_access(model.project_id, user_id, session)
 
         stmt = select(BIMElement).where(BIMElement.model_id == payload.model_id)
         rows = (await session.scalars(stmt)).all()

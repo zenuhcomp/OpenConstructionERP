@@ -1242,6 +1242,12 @@ class TakeoffService:
         A measurement with no usable value leaves the quantity untouched.
         """
         item = existing if existing is not None else await self.get_measurement(measurement_id)
+        # IDOR guard: the target BOQ position must live in the SAME project as
+        # the measurement. The router only verified access to the measurement's
+        # project, so without this a caller could link to — and, with
+        # push_quantity, overwrite the quantity of — a position in a project
+        # they cannot access.
+        await self._assert_position_in_project(boq_position_id, item.project_id)
         await self.measurement_repo.update_fields(measurement_id, linked_boq_position_id=boq_position_id)
         await self.session.refresh(item)
         logger.info(
@@ -1252,6 +1258,32 @@ class TakeoffService:
         if push_quantity:
             await self._push_quantity_to_position(boq_position_id, item)
         return item
+
+    async def _assert_position_in_project(self, boq_position_id: str, project_id: Any) -> None:
+        """Raise 404 unless the BOQ position belongs to ``project_id``.
+
+        IDOR defence for the takeoff→BOQ link: prevents linking/pushing a
+        measurement onto a BOQ position in a project the caller cannot access.
+        """
+        from app.modules.boq.service import BOQService  # noqa: PLC0415 — avoid import cycle
+
+        try:
+            position_uuid = uuid.UUID(str(boq_position_id))
+        except (ValueError, AttributeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="boq_position_id is not a valid UUID",
+            ) from exc
+        boq_service = BOQService(self.session)
+        position = await boq_service.position_repo.get_by_id(position_uuid)
+        if position is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BOQ position not found")
+        boq = await boq_service.get_boq(position.boq_id)
+        if str(boq.project_id) != str(project_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="BOQ position not found in this project",
+            )
 
     async def _push_quantity_to_position(self, boq_position_id: str, measurement: Any) -> None:
         """Copy a measurement's value into a BOQ position's quantity.

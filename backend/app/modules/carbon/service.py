@@ -1640,6 +1640,15 @@ class CarbonService:
         """Compose a SustainabilityReport with totals computed from inventory."""
         totals: dict[str, Any] = {}
         if payload.inventory_id is not None:
+            # Cross-project IDOR guard: the router only verified access to
+            # payload.project_id, so make sure the requested inventory actually
+            # belongs to that project before reading its totals into the report.
+            inv_project_id = await self.get_inventory_project_id(payload.inventory_id)
+            if str(inv_project_id) != str(payload.project_id):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Inventory not found in this project",
+                )
             totals = await self.compute_inventory_totals_fresh(payload.inventory_id)
         if payload.project_area_m2 and totals.get("total"):
             totals["intensity_per_m2"] = str(
@@ -1902,6 +1911,13 @@ class CarbonService:
         """Build and persist a TCFD-shaped sustainability report."""
         totals: dict[str, Any]
         if inventory_id is not None:
+            # Cross-project IDOR guard (router only verified `project_id`).
+            inv_project_id = await self.get_inventory_project_id(inventory_id)
+            if str(inv_project_id) != str(project_id):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Inventory not found in this project",
+                )
             totals = await self.compute_inventory_totals_fresh(inventory_id)
         else:
             inventories, _ = await self.inventory_repo.list_for_project(project_id)

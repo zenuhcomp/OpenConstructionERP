@@ -108,6 +108,22 @@ class RequirementsService:
             )
         return item
 
+    async def get_requirement_project_id(self, req_id: uuid.UUID) -> uuid.UUID:
+        """Return the project_id owning a requirement (via its set). 404 if missing.
+
+        Lets the router verify_project_access on the requirement's REAL project,
+        so a caller can't mutate a requirement in a project they cannot access
+        by pairing it with a set_id they do own (IDOR defence).
+        """
+        item = await self.req_repo.get_by_id(req_id)
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Requirement not found",
+            )
+        req_set = await self.get_set(item.requirement_set_id)
+        return req_set.project_id
+
     async def list_sets(
         self,
         project_id: uuid.UUID,

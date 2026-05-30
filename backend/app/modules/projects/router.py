@@ -2600,11 +2600,13 @@ async def post_import_validate(
 )
 async def post_import_bundle(
     user_id: CurrentUserId,
+    payload: CurrentUserPayload,
     session: SessionDep,
     file: UploadFile = File(..., description=".ocep bundle"),
     mode: ImportMode = Form(default="new_project"),
     target_project_id: str | None = Form(default=None),
     new_project_name: str | None = Form(default=None),
+    service: ProjectService = Depends(_get_service),
 ) -> ImportResult:
     """Unpack the bundle and write rows + attachments.
 
@@ -2618,6 +2620,25 @@ async def post_import_bundle(
       bundled table, then insert the bundle verbatim. Destructive — the
       UI must confirm.
     """
+    # merge_into_existing / replace_existing write into (and replace_existing
+    # WIPES) an existing project, so the caller must own it (or be admin).
+    # Without this any authenticated user could pass another user's project
+    # UUID and destroy or overwrite their data (IDOR).
+    if mode in ("merge_into_existing", "replace_existing"):
+        if not target_project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_project_id is required for this import mode",
+            )
+        try:
+            target_uuid = uuid.UUID(target_project_id)
+        except (ValueError, AttributeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="target_project_id is not a valid UUID",
+            ) from exc
+        await _verify_project_owner(service, target_uuid, user_id, payload)
+
     raw = await file.read()
     try:
         result = await fm_import_bundle(

@@ -153,6 +153,9 @@ async def create_variation_from_ncr(
     Pre-fills the change order with the NCR title, description, and cost impact.
     """
     ncr = await service.get_ncr(ncr_id)
+    # IDOR guard: ncr.update is a global role; without this any holder could
+    # escalate an NCR in a project they cannot access into a change order.
+    await verify_project_access(ncr.project_id, str(user_id), session)
 
     if not ncr.cost_impact:
         raise HTTPException(
@@ -228,10 +231,15 @@ async def create_variation_from_ncr(
 @router.post("/{ncr_id}/close/", response_model=NCRResponse)
 async def close_ncr(
     ncr_id: uuid.UUID,
+    session: SessionDep,
     user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("ncr.update")),
     service: NCRService = Depends(_get_service),
 ) -> NCRResponse:
     """Close an NCR after verification."""
+    # IDOR guard: verify the caller can access the NCR's project before
+    # mutating it (ncr.update is a global role, not project-scoped).
+    ncr = await service.get_ncr(ncr_id)
+    await verify_project_access(ncr.project_id, str(user_id), session)
     ncr = await service.close_ncr(ncr_id)
     return _to_response(ncr)

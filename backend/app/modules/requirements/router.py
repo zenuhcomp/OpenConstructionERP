@@ -677,11 +677,16 @@ async def update_requirement(
     set_id: uuid.UUID,
     req_id: uuid.UUID,
     data: RequirementUpdate,
+    session: SessionDep,
     user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("requirements.update")),
     service: RequirementsService = Depends(_get_service),
 ) -> RequirementResponse:
     """Update a requirement."""
+    # IDOR guard: gate on the requirement's REAL project (requirements.update
+    # is a global role, and the service ignores set_id when resolving req_id).
+    project_id = await service.get_requirement_project_id(req_id)
+    await verify_project_access(project_id, str(user_id), session)
     item = await service.update_requirement(req_id, data)
     return _req_to_response(item)
 
@@ -693,11 +698,16 @@ async def update_requirement(
 async def delete_requirement(
     set_id: uuid.UUID,
     req_id: uuid.UUID,
+    session: SessionDep,
     user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("requirements.delete")),
     service: RequirementsService = Depends(_get_service),
 ) -> None:
     """Delete a requirement from a set."""
+    # IDOR guard: gate on the set's project (the service additionally enforces
+    # that req_id belongs to set_id, so this covers the requirement too).
+    req_set = await service.get_set(set_id)
+    await verify_project_access(req_set.project_id, str(user_id), session)
     await service.delete_requirement(set_id, req_id)
 
 
@@ -755,11 +765,15 @@ async def link_to_position(
     set_id: uuid.UUID,
     req_id: uuid.UUID,
     position_id: uuid.UUID,
+    session: SessionDep,
     user_id: CurrentUserId = None,  # type: ignore[assignment]
     _perm: None = Depends(RequirePermission("requirements.update")),
     service: RequirementsService = Depends(_get_service),
 ) -> RequirementResponse:
     """Link a requirement to a BOQ position."""
+    # IDOR guard: gate on the requirement's real project.
+    project_id = await service.get_requirement_project_id(req_id)
+    await verify_project_access(project_id, str(user_id), session)
     item = await service.link_to_position(req_id, position_id)
     return _req_to_response(item)
 
