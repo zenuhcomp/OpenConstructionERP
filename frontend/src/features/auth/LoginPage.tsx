@@ -8,7 +8,7 @@ import {
   BarChart3, Upload, FileCheck,
   Box, Ruler, Layers,
   PenTool, FolderOpen, ClipboardList,
-  Sun, Moon, Monitor,
+  Sun, Moon, Monitor, MessageCircle,
 } from 'lucide-react';
 import { Button, Input, Logo, LogoWithText, CountryFlag } from '@/shared/ui';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -140,10 +140,16 @@ export function LoginPage() {
     }
   };
 
+  const appName = (window as any).VITE_APP_NAME || (import.meta.env.VITE_APP_NAME as string) || 'OpenConstructionERP';
+  const domain = appName.toLowerCase() === 'anii' ? 'zenu.co.ke' : 'openconstructionerp.com';
+
   const demoAccounts = [
-    { email: 'demo@openconstructionerp.com', name: 'Admin', role: t('auth.demo_role_admin', 'Administrator'), color: 'bg-blue-500', letter: 'A' },
-    { email: 'manager@openconstructionerp.com', name: 'Thomas Müller', role: t('auth.demo_role_manager', 'Manager'), color: 'bg-[#7cd0ff]', letter: 'M' },
+    { email: `demo@${domain}`, name: 'Admin', role: t('auth.demo_role_admin', 'Administrator'), color: 'bg-blue-500', letter: 'A' },
+    { email: `manager@${domain}`, name: 'Manager', role: t('auth.demo_role_manager', 'Manager'), color: 'bg-[#7cd0ff]', letter: 'M' },
   ];
+
+  const whatsappNumber = (import.meta.env.VITE_SUPPORT_WHATSAPP as string) || '254722000000';
+  const whatsappUrl = `https://wa.me/${whatsappNumber.replace(/[^0-9]/g, '')}`;
 
   const handleDemoLogin = async (demoEmail: string) => {
     setDemoLoading(demoEmail);
@@ -775,28 +781,26 @@ export function LoginPage() {
             </div>
           </div>
 
-          {/* GitHub + Community - two primary entry points for the
-              open-source project (replaces the old single "Learn more"
-              link). Premium two-line cards with a tinted icon badge:
-              graphite for the source repo, oe-blue gradient for the
-              community hub. Mirrors the page's login-glass-pro language. */}
+          {/* Docs + Support - two primary entry points for the
+              branded workspace. Premium two-line cards with a tinted icon badge:
+              docs-erp.zenu.co.ke for user documentation, MessageCircle WhatsApp link for support. */}
           <div className="mt-4 grid grid-cols-2 gap-3 animate-stagger-in" style={{ animationDelay: '520ms' }}>
             <a
-              href="https://github.com/datadrivenconstruction/OpenConstructionERP"
+              href="https://docs-erp.zenu.co.ke"
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`${t('login.github', { defaultValue: 'GitHub' })} - ${t('login.github_sub', { defaultValue: 'Source code' })}`}
+              aria-label={`${t('login.docs', { defaultValue: 'Docs' })} - ${t('login.docs_sub', { defaultValue: 'User documentation' })}`}
               className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border-light/70 dark:border-white/15 bg-white/75 dark:bg-white/[0.07] backdrop-blur-sm px-3.5 py-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/90 dark:hover:bg-white/[0.12] dark:hover:border-white/25 hover:border-content-primary/25 hover:shadow-lg"
             >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-content-primary/[0.06] dark:bg-white/10 text-content-primary transition-colors group-hover:bg-content-primary/10 dark:group-hover:bg-white/15">
-                <Github size={17} strokeWidth={1.9} />
+                <Globe size={17} strokeWidth={1.9} />
               </span>
               <span className="min-w-0 flex-1 leading-tight">
                 <span className="block text-[13px] font-semibold text-content-primary">
-                  {t('login.github', { defaultValue: 'GitHub' })}
+                  {t('login.docs', { defaultValue: 'Docs' })}
                 </span>
                 <span className="block truncate text-[11px] text-content-tertiary dark:text-content-secondary">
-                  {t('login.github_sub', { defaultValue: 'Source code' })}
+                  {t('login.docs_sub', { defaultValue: 'User documentation' })}
                 </span>
               </span>
               <ArrowUpRight
@@ -805,21 +809,21 @@ export function LoginPage() {
               />
             </a>
             <a
-              href="https://t.me/datadrivenconstruction"
+              href={whatsappUrl}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`${t('login.community', { defaultValue: 'Community' })} - ${t('login.community_sub', { defaultValue: 'Get help & discuss' })}`}
+              aria-label={`${t('login.support', { defaultValue: 'Support' })} - ${t('login.support_sub', { defaultValue: 'Get help & Support' })}`}
               className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border-light/70 dark:border-white/15 bg-white/75 dark:bg-white/[0.07] backdrop-blur-sm px-3.5 py-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/90 dark:hover:bg-white/[0.12] dark:hover:border-white/25 hover:border-content-primary/25 hover:shadow-lg"
             >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-content-primary/[0.06] dark:bg-white/10 text-content-primary transition-colors group-hover:bg-content-primary/10 dark:group-hover:bg-white/15">
-                <Users size={17} strokeWidth={1.9} />
+                <MessageCircle size={17} strokeWidth={1.9} />
               </span>
               <span className="min-w-0 flex-1 leading-tight">
                 <span className="block text-[13px] font-semibold text-content-primary">
-                  {t('login.community', { defaultValue: 'Community' })}
+                  {t('login.support', { defaultValue: 'Support' })}
                 </span>
                 <span className="block truncate text-[11px] text-content-tertiary dark:text-content-secondary">
-                  {t('login.community_sub', { defaultValue: 'Get help & discuss' })}
+                  {t('login.support_sub', { defaultValue: 'Get help & Support' })}
                 </span>
               </span>
               <ArrowUpRight
