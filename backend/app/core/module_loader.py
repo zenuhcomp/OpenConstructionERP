@@ -158,14 +158,28 @@ class ModuleLoader:
 
         logger.info("Loading %d modules in order: %s", len(order), order)
 
+        failed: list[tuple[str, str]] = []
         for module_name in order:
             try:
                 await self._load_module(module_name, app)
-            except Exception:
+            except Exception as exc:
                 logger.exception("Failed to load module: %s", module_name)
-                raise
+                failed.append((module_name, str(exc)))
 
-        logger.info("All modules loaded successfully")
+        if failed:
+            names = ", ".join(n for n, _ in failed)
+            logger.warning(
+                "%d module(s) failed to load and were skipped: %s",
+                len(failed),
+                names,
+            )
+            logger.info(
+                "%d modules loaded successfully (%d skipped)",
+                len(order) - len(failed),
+                len(failed),
+            )
+        else:
+            logger.info("All %d modules loaded successfully", len(order))
 
     async def _load_module(self, module_name: str, app: FastAPI) -> None:
         """Load a single module."""

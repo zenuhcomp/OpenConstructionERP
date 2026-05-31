@@ -43,7 +43,13 @@ import uuid
 from datetime import UTC, datetime
 from itertools import combinations
 
-import numpy as np
+try:
+    import numpy as np
+except (ImportError, RuntimeError) as _np_err:
+    np = None  # type: ignore[assignment]
+    logging.getLogger(__name__).warning(
+        "numpy unavailable — clash geometry engine disabled: %s", _np_err,
+    )
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
