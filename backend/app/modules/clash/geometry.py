@@ -76,13 +76,7 @@ import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-try:
-    import numpy as np
-except (ImportError, RuntimeError) as _np_err:
-    np = None  # type: ignore[assignment]
-    logging.getLogger(__name__).warning(
-        "numpy unavailable — clash geometry provider will be disabled: %s", _np_err
-    )
+import numpy as np
 
 if TYPE_CHECKING:
     import uuid
