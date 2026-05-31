@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenConstructionERP Daemon
+After=network.target
+
+[Service]
+User=app
+Group=www-data
+WorkingDirectory=/srv/projects/test/construction-erp
+EnvironmentFile=-/srv/projects/test/construction-erp/.env
+ExecStart=/srv/projects/test/construction-erp/deploy/manual/venv/bin/openconstructionerp serve \
+          --host 0.0.0.0 \
+          --port 8006 \
+          --data-dir /srv/projects/test/construction-erp/data
+
+[Install]
+WantedBy=multi-user.target
