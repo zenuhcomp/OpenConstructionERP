@@ -659,53 +659,16 @@ def cmd_init_db(args: argparse.Namespace) -> None:
     # instantly without table creation lag.
     import asyncio
 
-    # Mirrors the list in main.py's startup hook — keep the two lists in
-    # sync when adding a new module.
-    _module_names = [
-        "ai",
-        "assemblies",
-        "bim_hub",
-        "boq",
-        "catalog",
-        "cde",
-        "changeorders",
-        "collaboration",
-        "contacts",
-        "correspondence",
-        "costmodel",
-        "costs",
-        "documents",
-        "enterprise_workflows",
-        "erp_chat",
-        "fieldreports",
-        "finance",
-        "full_evm",
-        "i18n_foundation",
-        "inspections",
-        "integrations",
-        "markups",
-        "meetings",
-        "ncr",
-        "notifications",
-        "procurement",
-        "projects",
-        "punchlist",
-        "reporting",
-        "requirements",
-        "rfi",
-        "rfq_bidding",
-        "risk",
-        "safety",
-        "schedule",
-        "submittals",
-        "takeoff",
-        "tasks",
-        "teams",
-        "tendering",
-        "transmittals",
-        "users",
-        "validation",
-    ]
+    # Dynamically discover all modules under app/modules/ that contain models.
+    # This prevents the hardcoded list from drifting and causing database initialization
+    # failures (such as missing oe_file_version when importing markups) on fresh installations.
+    modules_dir = Path(__file__).parent / "modules"
+    _module_names = []
+    if modules_dir.is_dir():
+        for path in sorted(modules_dir.iterdir()):
+            if path.is_dir() and not path.name.startswith("_"):
+                if (path / "models.py").exists() or (path / "models").is_dir():
+                    _module_names.append(path.name)
 
     # Track import failures so we can report them loudly. Silently
     # swallowing these (as the pre-v1.3.14 code did) led to "no such
