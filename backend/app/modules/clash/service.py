@@ -46,7 +46,9 @@ from itertools import combinations
 try:
     import numpy as np
 except (ImportError, RuntimeError) as _np_err:
-    np = None  # type: ignore[assignment]
+    class _StubNP:
+        ndarray = object
+    np = _StubNP()  # type: ignore[assignment]
     logging.getLogger(__name__).warning(
         "numpy unavailable — clash geometry engine disabled: %s", _np_err,
     )
