@@ -133,12 +133,9 @@ export function LoginPageNext() {
     }
   };
 
-  const appName = (window as any).VITE_APP_NAME || (import.meta.env.VITE_APP_NAME as string) || 'OpenConstructionERP';
-  const domain = appName.toLowerCase() === 'anii' ? 'zenu.co.ke' : 'openconstructionerp.com';
-
   const demoAccounts = [
-    { email: `demo@${domain}`, name: 'Admin', role: t('auth.demo_role_admin', 'Administrator'), color: 'bg-blue-500', letter: 'A' },
-    { email: `manager@${domain}`, name: 'Manager', role: t('auth.demo_role_manager', 'Manager'), color: 'bg-amber-500', letter: 'M' },
+    { email: 'demo@openconstructionerp.com', name: 'Admin', role: t('auth.demo_role_admin', 'Administrator'), color: 'bg-blue-500', letter: 'A' },
+    { email: 'manager@openconstructionerp.com', name: 'Manager', role: t('auth.demo_role_manager', 'Manager'), color: 'bg-amber-500', letter: 'M' },
   ];
 
   const handleDemoLogin = async (demoEmail: string) => {
