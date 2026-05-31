@@ -47,12 +47,19 @@ interface Persisted {
 }
 
 function load(): Persisted {
+  const defaultName = (window as any).VITE_APP_NAME || (import.meta.env.VITE_APP_NAME as string) || '';
+  const isDefaultCustomized = defaultName && defaultName !== 'OpenConstructionERP' && defaultName !== 'OpenEstimate';
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { mode: 'default', logoDataUrl: null, companyName: '' };
+    if (!raw) {
+      return {
+        mode: isDefaultCustomized ? 'text' : 'default',
+        logoDataUrl: null,
+        companyName: defaultName,
+      };
+    }
     const parsed = JSON.parse(raw) as Partial<Persisted>;
-    const mode: BrandingMode =
-      parsed.mode === 'logo' || parsed.mode === 'text' ? parsed.mode : 'default';
     const logoDataUrl =
       typeof parsed.logoDataUrl === 'string' &&
       parsed.logoDataUrl.startsWith('data:image/') &&
@@ -60,10 +67,17 @@ function load(): Persisted {
         ? parsed.logoDataUrl
         : null;
     const companyName =
-      typeof parsed.companyName === 'string' ? parsed.companyName.slice(0, 60) : '';
-    return { mode, logoDataUrl, companyName };
+      typeof parsed.companyName === 'string' ? parsed.companyName.slice(0, 60) : defaultName;
+    const finalCompanyName = companyName || defaultName;
+    const mode: BrandingMode =
+      logoDataUrl ? 'logo' : (parsed.mode === 'text' || (parsed.mode === 'default' && isDefaultCustomized) || (!parsed.mode && isDefaultCustomized)) ? 'text' : 'default';
+    return { mode, logoDataUrl, companyName: finalCompanyName };
   } catch {
-    return { mode: 'default', logoDataUrl: null, companyName: '' };
+    return {
+      mode: isDefaultCustomized ? 'text' : 'default',
+      logoDataUrl: null,
+      companyName: defaultName,
+    };
   }
 }
 
@@ -137,7 +151,13 @@ export const useBrandingStore = create<BrandingState>((set, get) => {
       set(next);
     },
     reset: () => {
-      const next: Persisted = { mode: 'default', logoDataUrl: null, companyName: '' };
+      const defaultName = (window as any).VITE_APP_NAME || (import.meta.env.VITE_APP_NAME as string) || '';
+      const isDefaultCustomized = defaultName && defaultName !== 'OpenConstructionERP' && defaultName !== 'OpenEstimate';
+      const next: Persisted = {
+        mode: isDefaultCustomized ? 'text' : 'default',
+        logoDataUrl: null,
+        companyName: defaultName,
+      };
       save(next);
       set(next);
     },

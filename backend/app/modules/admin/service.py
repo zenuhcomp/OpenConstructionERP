@@ -28,11 +28,17 @@ from app.modules.users.models import User
 logger = logging.getLogger(__name__)
 
 
-DEMO_EMAILS: tuple[str, ...] = (
-    "demo@openconstructionerp.com",
-    "estimator@openconstructionerp.com",
-    "manager@openconstructionerp.com",
-)
+def _get_demo_emails() -> tuple[str, ...]:
+    from app.config import get_demo_email_domain
+    domain = get_demo_email_domain()
+    return (
+        f"demo@{domain}",
+        f"estimator@{domain}",
+        f"manager@{domain}",
+    )
+
+# Keeping the name DEMO_EMAILS for backwards compatibility but making it dynamic
+DEMO_EMAILS: tuple[str, ...] = _get_demo_emails()
 
 # Hostnames that look like dev/staging/qa. A hostname not in this list is
 # treated as production — the gate refuses to run.

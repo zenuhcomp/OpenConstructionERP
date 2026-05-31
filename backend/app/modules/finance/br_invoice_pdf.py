@@ -44,6 +44,8 @@ import io
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from app.config import get_app_name
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
@@ -487,7 +489,7 @@ def render_br_invoice_pdf(
     story.append(
         _safe_para(
             "Este documento é um Recibo Provisório de Serviços (RPS) gerado pelo "
-            "OpenConstructionERP. Não substitui Nota Fiscal Eletrônica (NF-e / NFS-e). "
+            f"{get_app_name()}. Não substitui Nota Fiscal Eletrônica (NF-e / NFS-e). "
             "A emissão fiscal definitiva deve ser realizada pelo sistema da prefeitura "
             "competente ou via integração SEFAZ.",
             styles["disclaimer"],

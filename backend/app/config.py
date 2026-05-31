@@ -161,6 +161,9 @@ class Settings(BaseSettings):
 
     # ── App ──────────────────────────────────────────────────────────────
     app_name: str = "OpenConstructionERP"
+    app_slogan: str = ""
+    demo_email_domain: str = "openconstructionerp.com"
+    vite_app_name: str = ""
     app_version: str = Field(default_factory=_detect_version)
     app_env: Literal["development", "staging", "production"] = "development"
     app_debug: bool = True
@@ -552,3 +555,48 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Cached settings singleton."""
     return Settings()
+
+
+def get_app_name() -> str:
+    """Return the branded application name.
+
+    Priority: VITE_APP_NAME env var > settings.vite_app_name > settings.app_name.
+    This is the single source of truth for the display name used in PDFs,
+    the frontend, and any other user-facing branding.
+    """
+    import os
+    env_name = os.environ.get("VITE_APP_NAME", "").strip()
+    if env_name:
+        return env_name
+    settings = get_settings()
+    if settings.vite_app_name:
+        return settings.vite_app_name
+    return settings.app_name
+
+
+def get_app_slogan() -> str:
+    """Return the branded application slogan.
+
+    Priority: APP_SLOGAN env var > settings.app_slogan.
+    """
+    import os
+    env_slogan = os.environ.get("APP_SLOGAN", "").strip()
+    if env_slogan:
+        return env_slogan
+    settings = get_settings()
+    return settings.app_slogan
+
+
+def get_demo_email_domain() -> str:
+    """Return the domain used for demo account emails.
+
+    Priority: DEMO_EMAIL_DOMAIN env var > settings.demo_email_domain.
+    Default: ``openconstructionerp.com``.
+    """
+    import os
+    env_domain = os.environ.get("DEMO_EMAIL_DOMAIN", "").strip()
+    if env_domain:
+        return env_domain
+    settings = get_settings()
+    return settings.demo_email_domain
+

@@ -81,6 +81,13 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    {
+      name: 'html-transform',
+      transformIndexHtml(html) {
+        const appName = process.env.VITE_APP_NAME || 'OpenConstructionERP';
+        return html.replace(/%VITE_APP_NAME%/g, appName);
+      }
+    },
     visualizer({
       filename: 'stats.html',
       gzipSize: true,

@@ -192,16 +192,14 @@ class DemoLoginRequest(BaseModel):
     email: str
 
 
-# Whitelist of seeded demo accounts. Mirrors the spec list in
-# ``app.main._seed_demo_account``; both must stay in sync — the test
-# ``backend/tests/integration/test_demo_login_endpoint.py`` asserts this.
-_DEMO_EMAIL_WHITELIST: frozenset[str] = frozenset(
-    {
-        "demo@openconstructionerp.com",
-        "estimator@openconstructionerp.com",
-        "manager@openconstructionerp.com",
-    }
-)
+def _get_demo_email_whitelist() -> frozenset[str]:
+    from app.config import get_demo_email_domain
+    domain = get_demo_email_domain()
+    return frozenset({
+        f"demo@{domain}",
+        f"estimator@{domain}",
+        f"manager@{domain}",
+    })
 
 
 @router.post("/auth/demo-login/", response_model=TokenResponse)
@@ -240,7 +238,7 @@ async def demo_login(
         )
 
     email = (data.email or "").strip().lower()
-    if email not in _DEMO_EMAIL_WHITELIST:
+    if email not in _get_demo_email_whitelist():
         # Same generic 401 as a wrong password — avoid leaking whether the
         # email is in the whitelist via an attacker-distinguishable response.
         raise HTTPException(

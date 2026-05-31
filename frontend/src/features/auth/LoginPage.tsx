@@ -610,15 +610,7 @@ export function LoginPage() {
                   </span>
                 </div>
               ) : (
-                <div className="flex items-center gap-2.5">
-                  <Logo size="md" animate />
-                  <span
-                    className="text-2xl font-extrabold text-content-primary whitespace-nowrap"
-                    style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif", letterSpacing: '-0.02em' }}
-                  >
-                    Open<span className="text-oe-blue">Construction</span><span className="text-content-quaternary font-semibold">ERP</span>
-                  </span>
-                </div>
+                <LogoWithText size="md" animate />
               )}
               {/* White-label trigger - same editor as the in-app sidebar
                   brand control, available pre-auth so a tenant can put

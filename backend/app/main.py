@@ -552,22 +552,28 @@ async def _seed_demo_account() -> None:
     from app.modules.users.models import User
     from app.modules.users.service import hash_password
 
+    from app.config import get_demo_email_domain
+    domain = get_demo_email_domain()
+    demo_email = f"demo@{domain}"
+    estimator_email = f"estimator@{domain}"
+    manager_email = f"manager@{domain}"
+
     # Email → env-var-name mapping. Order matters for stable banner output.
     demo_account_specs: list[dict[str, str]] = [
         {
-            "email": "demo@openconstructionerp.com",
+            "email": demo_email,
             "env_var": "DEMO_USER_PASSWORD",
             "full_name": "Demo User",
             "role": "admin",
         },
         {
-            "email": "estimator@openconstructionerp.com",
+            "email": estimator_email,
             "env_var": "DEMO_ESTIMATOR_PASSWORD",
             "full_name": "Anna Musterfrau",
             "role": "editor",
         },
         {
-            "email": "manager@openconstructionerp.com",
+            "email": manager_email,
             "env_var": "DEMO_MANAGER_PASSWORD",
             "full_name": "Thomas Müller",
             "role": "manager",
@@ -585,7 +591,7 @@ async def _seed_demo_account() -> None:
             for acct in demo_account_specs:
                 exists = (await session.execute(select(User).where(User.email == acct["email"]))).scalar_one_or_none()
                 if exists is not None:
-                    if acct["email"] == "demo@openconstructionerp.com":
+                    if acct["email"] == demo_email:
                         demo = exists
                     # If operator set the env-var explicitly and the stored
                     # hash no longer matches that password, sync the hash so
@@ -601,18 +607,18 @@ async def _seed_demo_account() -> None:
                     generated_creds[acct["email"]] = password
 
                 user = User(
-                    id=uuid.uuid4(),
-                    email=acct["email"],
-                    hashed_password=hash_password(password),
-                    full_name=acct["full_name"],
-                    role=acct["role"],
-                    locale="en",
-                    is_active=True,
-                    metadata_={},
+                     id=uuid.uuid4(),
+                     email=acct["email"],
+                     hashed_password=hash_password(password),
+                     full_name=acct["full_name"],
+                     role=acct["role"],
+                     locale="en",
+                     is_active=True,
+                     metadata_={},
                 )
                 session.add(user)
                 await session.flush()
-                if acct["email"] == "demo@openconstructionerp.com":
+                if acct["email"] == demo_email:
                     demo = user
                 logger.info(
                     "Demo user created: %s (password source: %s)",
@@ -648,10 +654,10 @@ async def _seed_demo_account() -> None:
 
             # 2. Capture the demo user ids while the session is open.
             estimator_user = (
-                await session.execute(select(User).where(User.email == "estimator@openconstructionerp.com"))
+                await session.execute(select(User).where(User.email == estimator_email))
             ).scalar_one_or_none()
             manager_user = (
-                await session.execute(select(User).where(User.email == "manager@openconstructionerp.com"))
+                await session.execute(select(User).where(User.email == manager_email))
             ).scalar_one_or_none()
             demo_user_id = str(demo.id)
             estimator_user_id = str(estimator_user.id) if estimator_user else ""
@@ -2584,8 +2590,10 @@ def create_app() -> FastAPI:
             # ``~/.openestimator/.demo_credentials.json``. Pointing the
             # operator at that file beats baking a fixed password into
             # every running instance.
+            from app.config import get_demo_email_domain
+            domain = get_demo_email_domain()
             logger.info(
-                "Demo login: demo@openconstructionerp.com "
+                f"Demo login: demo@{domain} "
                 "(password from DEMO_USER_PASSWORD env var or "
                 "~/.openestimator/.demo_credentials.json)"
             )

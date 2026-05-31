@@ -2232,9 +2232,11 @@ async def _get_or_create_owner(session: AsyncSession) -> uuid.UUID:
         user = (await session.execute(select(User).limit(1))).scalar_one_or_none()
 
     if user is None:
+        from app.config import get_demo_email_domain
+        domain = get_demo_email_domain()
         user = User(
             id=_id(),
-            email="demo@openconstructionerp.com",
+            email=f"demo@{domain}",
             hashed_password="$2b$12$DEMO_HASH_NOT_FOR_PRODUCTION_USE_ONLY",
             full_name="Demo User",
             role="admin",

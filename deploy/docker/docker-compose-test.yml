@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: pgduckdb/pgduckdb:16-main
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oe_db_pass_please_change}
+      POSTGRES_DB: ${POSTGRES_DB:-openestimate}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oe} -d ${POSTGRES_DB:-openestimate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8003}:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-oe}:${POSTGRES_PASSWORD:-oe_db_pass_please_change}@postgres:5432/${POSTGRES_DB:-openestimate}
+      DATABASE_SYNC_URL: postgresql://${POSTGRES_USER:-oe}:${POSTGRES_PASSWORD:-oe_db_pass_please_change}@postgres:5432/${POSTGRES_DB:-openestimate}
+      OE_CELERY_BROKER_URL: redis://redis:6379/1
+      OE_CELERY_RESULT_BACKEND: redis://redis:6379/1
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-please_change_this_jwt_secret_to_something_very_long}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+      APP_ENV: production
+      APP_DEBUG: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-openestimate}
+      QDRANT_URL: ${QDRANT_URL:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.backend
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      OE_CELERY_BROKER_URL: redis://redis:6379/1
+      OE_CELERY_RESULT_BACKEND: redis://redis:6379/1
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-oe}:${POSTGRES_PASSWORD:-oe_db_pass_please_change}@postgres:5432/${POSTGRES_DB:-openestimate}
+      DATABASE_SYNC_URL: postgresql://${POSTGRES_USER:-oe}:${POSTGRES_PASSWORD:-oe_db_pass_please_change}@postgres:5432/${POSTGRES_DB:-openestimate}
+    command: ["celery", "-A", "app.core.jobs", "worker", "--loglevel=info"]
+
+  frontend:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.frontend
+      args:
+        - VITE_APP_NAME=${VITE_APP_NAME:-Zenu Construction ERP}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8004}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pg_data:

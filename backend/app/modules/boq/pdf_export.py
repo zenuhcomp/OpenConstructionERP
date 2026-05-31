@@ -29,6 +29,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from app.config import get_app_name
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
@@ -289,7 +291,7 @@ def _make_header_footer(
         # Left side: brand
         canvas.setFont("Helvetica", 7)
         canvas.setFillColor(colors.HexColor("#999999"))
-        canvas.drawString(MARGIN_LEFT, 10 * mm, f"OpenConstructionERP  |  Generated: {generated_date}")
+        canvas.drawString(MARGIN_LEFT, 10 * mm, f"{get_app_name()}  |  Generated: {generated_date}")
         # Right side: page number
         if getattr(doc, "page_count", 0) > 0:
             page_text = f"Page {doc.page} of {doc.page_count}"
@@ -335,7 +337,7 @@ def _build_cover_page(
     elements.append(Spacer(1, 30 * mm))
 
     # Brand
-    elements.append(Paragraph("OpenConstructionERP", styles["brand"]))
+    elements.append(Paragraph(get_app_name(), styles["brand"]))
     elements.append(Spacer(1, 10 * mm))
 
     # Decorative line
@@ -843,11 +845,11 @@ def generate_boq_pdf(
         topMargin=MARGIN_TOP,
         bottomMargin=MARGIN_BOTTOM,
         title=f"Cost Estimate - {boq_data.name}",
-        author="OpenConstructionERP",
-        subject="Bill of Quantities · DDC-CWICR-OE",
-        creator="OpenConstructionERP · DataDrivenConstruction",
-        producer="OpenConstructionERP / reportlab · datadrivenconstruction.io",
-        keywords="DDC-CWICR-OE-2026,OpenConstructionERP,BOQ,DataDrivenConstruction",
+        author=get_app_name(),
+        subject="Bill of Quantities",
+        creator=get_app_name(),
+        producer=f"{get_app_name()} / reportlab",
+        keywords=f"{get_app_name()},BOQ",
     )
     doc.addPageTemplates([cover_template, table_template])
 
@@ -880,11 +882,11 @@ def generate_boq_pdf(
         topMargin=MARGIN_TOP,
         bottomMargin=MARGIN_BOTTOM,
         title=f"Cost Estimate - {boq_data.name}",
-        author="OpenConstructionERP",
-        subject="Bill of Quantities · DDC-CWICR-OE",
-        creator="OpenConstructionERP · DataDrivenConstruction",
-        producer="OpenConstructionERP / reportlab · datadrivenconstruction.io",
-        keywords="DDC-CWICR-OE-2026,OpenConstructionERP,BOQ,DataDrivenConstruction",
+        author=get_app_name(),
+        subject="Bill of Quantities",
+        creator=get_app_name(),
+        producer=f"{get_app_name()} / reportlab",
+        keywords=f"{get_app_name()},BOQ",
     )
     doc2.page_count = total_pages
     doc2.addPageTemplates([cover_template, table_template])
@@ -992,11 +994,11 @@ def generate_boq_pdf_simple(
         topMargin=MARGIN_TOP,
         bottomMargin=MARGIN_BOTTOM,
         title=f"Cost Estimate - {boq_data.name} (Summary)",
-        author="OpenConstructionERP",
-        subject="Bill of Quantities · DDC-CWICR-OE",
-        creator="OpenConstructionERP · DataDrivenConstruction",
-        producer="OpenConstructionERP / reportlab · datadrivenconstruction.io",
-        keywords="DDC-CWICR-OE-2026,OpenConstructionERP,BOQ,DataDrivenConstruction",
+        author=get_app_name(),
+        subject="Bill of Quantities",
+        creator=get_app_name(),
+        producer=f"{get_app_name()} / reportlab",
+        keywords=f"{get_app_name()},BOQ",
     )
     doc.addPageTemplates([cover_template, table_template])
 

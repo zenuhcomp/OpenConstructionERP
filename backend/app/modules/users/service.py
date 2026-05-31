@@ -181,13 +181,14 @@ async def _audit_last_login(settings: Settings, user_id: uuid.UUID, when: dateti
 # ``test_demo_login_endpoint.py`` asserts router and seeder stay in sync;
 # this duplicate exists so ``login()`` can route demo logins without
 # importing from router (which would create a circular import).
-_DEMO_EMAIL_WHITELIST: frozenset[str] = frozenset(
-    {
-        "demo@openconstructionerp.com",
-        "estimator@openconstructionerp.com",
-        "manager@openconstructionerp.com",
-    }
-)
+def _get_demo_email_whitelist() -> frozenset[str]:
+    from app.config import get_demo_email_domain
+    domain = get_demo_email_domain()
+    return frozenset({
+        f"demo@{domain}",
+        f"estimator@{domain}",
+        f"manager@{domain}",
+    })
 
 
 class UserService:
@@ -394,7 +395,7 @@ class UserService:
         set ``SEED_DEMO=false`` so this shortcut is dead code there.
         """
         email_norm = (data.email or "").strip().lower()
-        if email_norm in _DEMO_EMAIL_WHITELIST and os.environ.get("SEED_DEMO", "true").lower() not in (
+        if email_norm in _get_demo_email_whitelist() and os.environ.get("SEED_DEMO", "true").lower() not in (
             "false",
             "0",
             "no",

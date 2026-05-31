@@ -27,6 +27,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from app.config import get_app_name
+
 from app.core.validation.engine import (
     RuleResult,
     Severity,
@@ -40,7 +42,7 @@ logger = logging.getLogger(__name__)
 SARIF_VERSION = "2.1.0"
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 
-TOOL_NAME = "OpenConstructionERP"
+TOOL_NAME = get_app_name()
 TOOL_INFORMATION_URI = "https://datadrivenconstruction.io/openconstructionerp"
 TOOL_ORG = "DataDrivenConstruction"
 
@@ -320,7 +322,7 @@ def report_to_sarif(report: Any) -> dict[str, Any]:
         "originalUriBaseIds": {
             "%SRCROOT%": {
                 "uri": f"openestimate://{norm['target_type']}/{norm['target_id']}/",
-                "description": {"text": f"OpenConstructionERP {norm['target_type']} {norm['target_id']}"},
+                "description": {"text": f"{get_app_name()} {norm['target_type']} {norm['target_id']}"},
             }
         },
         "properties": {
